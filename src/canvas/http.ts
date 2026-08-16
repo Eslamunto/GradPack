@@ -3,6 +3,13 @@ import { fetchAllPages } from "./pagination";
 
 export class CanvasSessionError extends Error {}
 export class CanvasResponseError extends Error {}
+export class CanvasCourseIndexUnavailableError extends CanvasResponseError {
+  readonly name = "CanvasCourseIndexUnavailableError";
+
+  constructor(readonly status: 403 | 404) {
+    super("Canvas course index is unavailable");
+  }
+}
 
 type Sleep = (milliseconds: number) => Promise<void>;
 
@@ -26,6 +33,9 @@ const isJsonContentType = (value: string): boolean => {
     mediaType === "application/json" || mediaType?.endsWith("+json") === true
   );
 };
+
+const isCourseCollectionIndex = (url: URL): boolean =>
+  /^\/api\/v1\/courses\/[1-9]\d*\/(?:files|folders|pages)$/.test(url.pathname);
 
 export class CanvasHttp {
   constructor(
@@ -100,8 +110,6 @@ export class CanvasHttp {
 
       const contentType = response.headers.get("content-type") ?? "";
       if (
-        response.status === 401 ||
-        response.status === 403 ||
         finalUrl.origin !== CANVAS_ORIGIN ||
         finalUrl.username !== "" ||
         finalUrl.password !== "" ||
@@ -126,6 +134,21 @@ export class CanvasHttp {
         continue;
       }
       if (contentType.toLowerCase().includes("text/html")) {
+        throw new CanvasSessionError("Canvas session is unavailable");
+      }
+      if (response.status === 401) {
+        throw new CanvasSessionError("Canvas session is unavailable");
+      }
+      if (
+        (response.status === 403 || response.status === 404) &&
+        isJsonContentType(contentType) &&
+        isCourseCollectionIndex(url) &&
+        isCourseCollectionIndex(finalUrl) &&
+        url.pathname === finalUrl.pathname
+      ) {
+        throw new CanvasCourseIndexUnavailableError(response.status);
+      }
+      if (response.status === 403) {
         throw new CanvasSessionError("Canvas session is unavailable");
       }
       if (!response.ok) {

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CanvasCourseIndexUnavailableError,
   CanvasHttp,
   CanvasResponseError,
   CanvasSessionError,
@@ -159,6 +160,65 @@ describe("CanvasHttp", () => {
     );
     expect(fetcher).toHaveBeenCalledOnce();
   });
+
+  it.each([403, 404])(
+    "classifies only exact same-origin JSON course index status %i as unavailable",
+    async (status) => {
+      const courseIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse(status, {}, { url: courseIndexUrl }));
+
+      await expect(
+        new CanvasHttp(fetcher).json(new URL(courseIndexUrl)),
+      ).rejects.toMatchObject({
+        name: "CanvasCourseIndexUnavailableError",
+        status,
+      });
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    {
+      status: 403,
+      url: `${CANVAS_ORIGIN}/api/v1/courses/101/files`,
+      contentType: "text/html",
+      error: CanvasSessionError,
+    },
+    {
+      status: 403,
+      url: `${CANVAS_ORIGIN}/login/canvas`,
+      contentType: "application/json",
+      error: CanvasSessionError,
+    },
+    {
+      status: 404,
+      url: `${CANVAS_ORIGIN}/api/v1/courses/101/files/301`,
+      contentType: "application/json",
+      error: CanvasResponseError,
+    },
+    {
+      status: 404,
+      url: "https://evil.test/api/v1/courses/101/files",
+      contentType: "application/json",
+      error: CanvasSessionError,
+    },
+  ])(
+    "does not classify HTML, login, per-resource, or foreign failures as optional",
+    async ({ status, url, contentType, error }) => {
+      const requested = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse(status, {}, { url, contentType }));
+
+      const request = new CanvasHttp(fetcher).json(new URL(requested));
+      await expect(request).rejects.toBeInstanceOf(error);
+      await expect(request).rejects.not.toBeInstanceOf(
+        CanvasCourseIndexUnavailableError,
+      );
+    },
+  );
 
   it("does not retry an aborted request", async () => {
     const fetcher = vi
