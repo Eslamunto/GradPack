@@ -28,3 +28,12 @@ signed-in Frankfurt School Canvas tab open while GradPack is running.
 Contributors can use the development-only [live Canvas smoke-test
 workflow](docs/development/live-canvas-smoke-test.md) to verify an authorized
 local session. It is not an end-user feature.
+
+### Pilot memory limits
+
+The one-course pilot stops before retrieval when advertised file sizes are
+unknown or exceed 250 MiB. It also stops if successful files plus sanitized
+pages exceed that same aggregate limit during the run; resources are never
+silently omitted to make an archive fit. Individual Canvas page-detail JSON
+bodies are streamed under a conservative 5 MiB raw-body cap and receive a
+fixed, transparent unavailable outcome when that cap is exceeded.

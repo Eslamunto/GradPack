@@ -1,6 +1,21 @@
 import { EXTENSION_CHANNEL, RUNNER_CHANNEL } from "./constants";
 import type { CourseSummary } from "./model";
 
+export const RUNNER_TERMINAL_MESSAGES = Object.freeze({
+  active: "Another GradPack operation is already active in this tab.",
+  cancelled: "Packing was cancelled.",
+  complete: "Your course ZIP was downloaded.",
+  connection: "Open a signed-in Frankfurt School Canvas tab and try again.",
+  navigation: "The Canvas tab navigated or closed. Reopen it and try again.",
+  response: "Canvas returned an unavailable or invalid response.",
+  safety: "GradPack stopped because a safety check failed.",
+  session: "Your Canvas session ended. Sign in and try again.",
+  size: "This course does not fit the 250 MB pilot safety policy.",
+  tab: "The connected Canvas tab is no longer available. Reopen it and try again.",
+  unexpected: "GradPack stopped because of an unexpected local error.",
+  unlisted: "The selected course is no longer available.",
+});
+
 export type ExtensionCommand =
   | { channel: typeof EXTENSION_CHANNEL; type: "LIST_COURSES"; runId: string }
   | {
@@ -29,14 +44,37 @@ export type RunnerEvent =
     }
   | {
       channel: typeof RUNNER_CHANNEL;
-      type: "COMPLETE" | "CANCELLED" | "FAILED";
+      type: "COMPLETE";
+      runId: string;
+      message: string;
+      success: number;
+      failed: number;
+      unavailable: number;
+      unsupported: number;
+      external: number;
+    }
+  | {
+      channel: typeof RUNNER_CHANNEL;
+      type: "CANCELLED" | "FAILED";
       runId: string;
       message: string;
     };
 
 const record = (value: unknown): Record<string, unknown> => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+  if (
+    typeof value !== "object" ||
+    value === null ||
+    Array.isArray(value) ||
+    (Object.getPrototypeOf(value) !== Object.prototype &&
+      Object.getPrototypeOf(value) !== null)
+  ) {
     throw new TypeError("Expected an object message");
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!descriptor || !("value" in descriptor)) {
+      throw new TypeError("Unexpected message fields");
+    }
   }
   return value as Record<string, unknown>;
 };
@@ -45,10 +83,10 @@ const exactKeys = (
   value: Record<string, unknown>,
   allowed: readonly string[],
 ): void => {
-  const keys = Object.keys(value);
+  const keys = Reflect.ownKeys(value);
   if (
     keys.length !== allowed.length ||
-    keys.some((key) => !allowed.includes(key))
+    keys.some((key) => typeof key !== "string" || !allowed.includes(key))
   ) {
     throw new TypeError("Unexpected message fields");
   }
@@ -91,6 +129,54 @@ const courseSummary = (value: unknown): CourseSummary => {
   };
 };
 
+const courseArray = (value: unknown): CourseSummary[] => {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype
+  ) {
+    throw new TypeError("Invalid course list");
+  }
+  const length = Object.getOwnPropertyDescriptor(value, "length")?.value as
+    number | undefined;
+  if (
+    !Number.isSafeInteger(length) ||
+    length === undefined ||
+    length < 0 ||
+    length > 10_000
+  ) {
+    throw new TypeError("Invalid course list");
+  }
+  const keys = Reflect.ownKeys(value);
+  if (
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        (key !== "length" && !/^(?:0|[1-9]\d*)$/u.test(key)),
+    )
+  ) {
+    throw new TypeError("Invalid course list");
+  }
+  const courses: CourseSummary[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor)) {
+      throw new TypeError("Invalid course list");
+    }
+    courses.push(courseSummary(descriptor.value));
+  }
+  return courses;
+};
+
+const terminalMessage = (
+  value: unknown,
+  allowed: readonly string[],
+): string => {
+  if (typeof value !== "string" || !allowed.includes(value)) {
+    throw new TypeError("Unsupported runner event");
+  }
+  return value;
+};
+
 export function parseExtensionCommand(value: unknown): ExtensionCommand {
   const input = record(value);
   if (input.channel !== EXTENSION_CHANNEL)
@@ -126,7 +212,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       channel: RUNNER_CHANNEL,
       type: "COURSES",
       runId: id,
-      courses: input.courses.map(courseSummary),
+      courses: courseArray(input.courses),
     };
   }
   if (input.type === "PROGRESS") {
@@ -157,21 +243,59 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       failed: nonNegativeInteger(input.failed),
     };
   }
-  if (
-    input.type === "COMPLETE" ||
-    input.type === "CANCELLED" ||
-    input.type === "FAILED"
-  ) {
+  if (input.type === "COMPLETE") {
+    exactKeys(input, [
+      "channel",
+      "type",
+      "runId",
+      "message",
+      "success",
+      "failed",
+      "unavailable",
+      "unsupported",
+      "external",
+    ]);
+    const id = runId(input.runId);
+    const message = terminalMessage(input.message, [
+      RUNNER_TERMINAL_MESSAGES.complete,
+    ]);
+    return {
+      channel: RUNNER_CHANNEL,
+      type: "COMPLETE",
+      runId: id,
+      message,
+      success: nonNegativeInteger(input.success),
+      failed: nonNegativeInteger(input.failed),
+      unavailable: nonNegativeInteger(input.unavailable),
+      unsupported: nonNegativeInteger(input.unsupported),
+      external: nonNegativeInteger(input.external),
+    };
+  }
+  if (input.type === "CANCELLED" || input.type === "FAILED") {
     exactKeys(input, ["channel", "type", "runId", "message"]);
     const id = runId(input.runId);
-    if (typeof input.message !== "string") {
-      throw new TypeError("Unsupported runner event");
-    }
+    const message = terminalMessage(
+      input.message,
+      input.type === "CANCELLED"
+        ? [
+            RUNNER_TERMINAL_MESSAGES.cancelled,
+            RUNNER_TERMINAL_MESSAGES.navigation,
+          ]
+        : [
+            RUNNER_TERMINAL_MESSAGES.active,
+            RUNNER_TERMINAL_MESSAGES.response,
+            RUNNER_TERMINAL_MESSAGES.safety,
+            RUNNER_TERMINAL_MESSAGES.session,
+            RUNNER_TERMINAL_MESSAGES.size,
+            RUNNER_TERMINAL_MESSAGES.unexpected,
+            RUNNER_TERMINAL_MESSAGES.unlisted,
+          ],
+    );
     return {
       channel: RUNNER_CHANNEL,
       type: input.type,
       runId: id,
-      message: input.message.slice(0, 500),
+      message,
     };
   }
   throw new TypeError("Unsupported runner event");

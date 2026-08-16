@@ -32,6 +32,7 @@ const INDEX_TAGS = new Set([
   "dd",
   "div",
   "dl",
+  "dt",
   "h1",
   "h2",
   "head",

@@ -1,6 +1,6 @@
 :root {
-  color: #1f2a44;
-  background: #f7f8fb;
+  color: #17213b;
+  background: #f5f6fb;
   font-family:
     system-ui,
     -apple-system,
@@ -17,16 +17,65 @@ body {
 main {
   display: grid;
   gap: 1rem;
+  padding: 1.25rem;
+}
+
+h1 {
+  margin: 0;
+  color: #172b82;
+  font-size: 1.55rem;
+  line-height: 1.2;
+}
+
+h2,
+legend {
+  color: #29365d;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+p,
+li {
+  line-height: 1.5;
+}
+
+fieldset,
+.notices,
+.selected-course,
+.progress,
+.outcome-summary {
+  border: 1px solid #d9dcec;
+  border-radius: 0.75rem;
+  background: #ffffff;
+}
+
+fieldset,
+.notices {
   padding: 1rem;
 }
 
-label,
-button {
-  display: block;
+.notices ul {
+  margin-bottom: 0;
+  padding-left: 1.25rem;
+}
+
+.selected-course,
+.progress,
+.outcome-summary {
+  padding: 0.85rem;
+}
+
+label {
+  display: flex;
+  gap: 0.55rem;
+  align-items: flex-start;
   margin-block: 0.5rem;
 }
 
 button {
+  display: inline-block;
+  min-height: 2.75rem;
+  margin-block: 0.5rem;
   border: 0;
   border-radius: 0.5rem;
   padding: 0.65rem 0.9rem;
@@ -34,6 +83,16 @@ button {
   background: #1f2a44;
   font: inherit;
   font-weight: 650;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: #172b82;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: 0.65;
 }
 
 :focus-visible {

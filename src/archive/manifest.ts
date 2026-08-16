@@ -20,8 +20,10 @@ const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const FAILURE_CATEGORIES = new Set([
+  "access-denied",
   "network-exhausted",
   "not-found",
+  "page-too-large",
   "transient-exhausted",
 ]);
 const RESOURCE_KINDS = new Set<ResourceKind>([

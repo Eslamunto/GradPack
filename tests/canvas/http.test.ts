@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CanvasBodySizeError,
   CanvasCourseIndexUnavailableError,
   CanvasHttp,
+  CanvasResourceUnavailableError,
   CanvasResponseError,
   CanvasSessionError,
+  CanvasTransientError,
 } from "../../src/canvas/http";
 import { CANVAS_ORIGIN } from "../../src/shared/constants";
 
@@ -393,4 +396,151 @@ describe("CanvasHttp", () => {
     ).rejects.toBeInstanceOf(CanvasResponseError);
     expect(fetcher).toHaveBeenCalledOnce();
   });
+
+  it("reads a resource JSON body through the bounded stream path", async () => {
+    const response = rawResponse(
+      200,
+      JSON.stringify({ title: "Synthetic", body: "<p>Safe</p>" }),
+    );
+    const json = vi.spyOn(response, "json");
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response);
+
+    await expect(
+      new CanvasHttp(fetcher).jsonBoundedResource(new URL(requestUrl), 1024),
+    ).resolves.toMatchObject({
+      value: { title: "Synthetic", body: "<p>Safe</p>" },
+    });
+    expect(json).not.toHaveBeenCalled();
+  });
+
+  it("rejects declared and streamed JSON bodies above the fixed cap with awaited cancellation", async () => {
+    const declared = rawResponse(200, "{}", {
+      contentType: "application/json",
+    });
+    declared.headers.set("content-length", "100");
+    const declaredCancel = vi.spyOn(declared.body!, "cancel");
+    await expect(
+      new CanvasHttp(
+        vi.fn<typeof fetch>().mockResolvedValue(declared),
+      ).jsonBoundedResource(new URL(requestUrl), 10),
+    ).rejects.toBeInstanceOf(CanvasBodySizeError);
+    expect(declaredCancel).toHaveBeenCalledOnce();
+
+    const streamed = rawResponse(200, "01234567890", {
+      contentType: "application/json",
+    });
+    const cancelled = vi.fn();
+    const original = streamed.body!;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        async pull(controller) {
+          const reader = original.getReader();
+          const value = await reader.read();
+          if (value.done) controller.close();
+          else controller.enqueue(value.value);
+        },
+        cancel: cancelled,
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+    Object.defineProperty(response, "url", { value: requestUrl });
+    await expect(
+      new CanvasHttp(
+        vi.fn<typeof fetch>().mockResolvedValue(response),
+      ).jsonBoundedResource(new URL(requestUrl), 10),
+    ).rejects.toBeInstanceOf(CanvasBodySizeError);
+    expect(cancelled).toHaveBeenCalledOnce();
+  });
+
+  it("treats malformed bounded Content-Length as a run-level response violation", async () => {
+    const response = rawResponse(200, "{}");
+    response.headers.set("content-length", "not-a-number");
+    const cancel = vi.spyOn(response.body!, "cancel");
+    const request = new CanvasHttp(
+      vi.fn<typeof fetch>().mockResolvedValue(response),
+    ).jsonBoundedResource(new URL(requestUrl), 1024);
+    await expect(request).rejects.toBeInstanceOf(CanvasResponseError);
+    await expect(request).rejects.not.toBeInstanceOf(CanvasBodySizeError);
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([403, 404] as const)(
+    "classifies bounded resource status %i without treating scoped 403 as logout",
+    async (status) => {
+      const response = jsonResponse(status, {
+        errors: [{ message: "Unavailable" }],
+      });
+      const cancel = vi.spyOn(response.body!, "cancel");
+      await expect(
+        new CanvasHttp(
+          vi.fn<typeof fetch>().mockResolvedValue(response),
+        ).jsonBoundedResource(new URL(requestUrl), 1024),
+      ).rejects.toMatchObject({
+        name: "CanvasResourceUnavailableError",
+        status,
+      });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(new CanvasResourceUnavailableError(status)).not.toBeInstanceOf(
+        CanvasSessionError,
+      );
+    },
+  );
+
+  it("cancels every transient bounded response and throws a typed exhausted outcome", async () => {
+    const responses = [408, 429, 503].map((status) => jsonResponse(status));
+    const cancels = responses.map((response) =>
+      vi.spyOn(response.body!, "cancel"),
+    );
+    const fetcher = vi.fn<typeof fetch>();
+    responses.forEach((response) => fetcher.mockResolvedValueOnce(response));
+    await expect(
+      new CanvasHttp(
+        fetcher,
+        undefined,
+        vi.fn().mockResolvedValue(undefined),
+      ).jsonBoundedResource(new URL(requestUrl), 1024),
+    ).rejects.toBeInstanceOf(CanvasTransientError);
+    cancels.forEach((cancel) => expect(cancel).toHaveBeenCalledOnce());
+  });
+
+  it("classifies an exhausted bounded network failure as an individual transient outcome", async () => {
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockRejectedValue(new TypeError("private network detail"));
+    await expect(
+      new CanvasHttp(
+        fetcher,
+        undefined,
+        vi.fn().mockResolvedValue(undefined),
+      ).jsonBoundedResource(new URL(requestUrl), 1024),
+    ).rejects.toBeInstanceOf(CanvasTransientError);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    { status: 401, url: requestUrl, contentType: "application/json" },
+    {
+      status: 200,
+      url: `${CANVAS_ORIGIN}/login/canvas`,
+      contentType: "text/html",
+    },
+    {
+      status: 200,
+      url: "https://evil.test/api/v1/test",
+      contentType: "application/json",
+    },
+    { status: 200, url: requestUrl, contentType: "text/plain" },
+  ])(
+    "cancels a bounded body before every terminal response rejection %#",
+    async ({ status, url, contentType }) => {
+      const response = rawResponse(status, "private", { url, contentType });
+      const cancel = vi.spyOn(response.body!, "cancel");
+      await expect(
+        new CanvasHttp(
+          vi.fn<typeof fetch>().mockResolvedValue(response),
+        ).jsonBoundedResource(new URL(requestUrl), 1024),
+      ).rejects.toThrow();
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
 });

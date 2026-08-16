@@ -90,9 +90,17 @@ describe("parseRunnerEvent", () => {
         channel: "gradpack/runner/v1",
         type: "COMPLETE",
         runId: "run-12345678",
-        message: "Finished",
+        message: "Your course ZIP was downloaded.",
+        success: 1,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
       }),
-    ).toMatchObject({ type: "COMPLETE", message: "Finished" });
+    ).toMatchObject({
+      type: "COMPLETE",
+      message: "Your course ZIP was downloaded.",
+    });
   });
 
   it("rejects an extra top-level event field", () => {
@@ -123,6 +131,59 @@ describe("parseRunnerEvent", () => {
             body: "unexpected",
           },
         ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects symbol, non-enumerable, accessor, and non-plain message fields", () => {
+    const valid = {
+      channel: "gradpack/runner/v1",
+      type: "FAILED",
+      runId: "run-12345678",
+      message: "GradPack stopped because a safety check failed.",
+    };
+    expect(() =>
+      parseRunnerEvent({ ...valid, [Symbol("hidden")]: true }),
+    ).toThrow();
+    const hidden = { ...valid };
+    Object.defineProperty(hidden, "secret", { value: true, enumerable: false });
+    expect(() => parseRunnerEvent(hidden)).toThrow();
+    const getter = { ...valid };
+    let invoked = false;
+    Object.defineProperty(getter, "message", {
+      enumerable: true,
+      get() {
+        invoked = true;
+        return valid.message;
+      },
+    });
+    expect(() => parseRunnerEvent(getter)).toThrow();
+    expect(invoked).toBe(false);
+    expect(() =>
+      parseRunnerEvent(Object.assign(Object.create({}), valid)),
+    ).toThrow();
+  });
+
+  it("accepts only fixed terminal messages", () => {
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "FAILED",
+        runId: "run-12345678",
+        message: "private response detail",
+      }),
+    ).toThrow();
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "COMPLETE",
+        runId: "run-12345678",
+        message: "Your Canvas session ended. Sign in and try again.",
+        success: 1,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
       }),
     ).toThrow();
   });
