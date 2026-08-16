@@ -75,8 +75,9 @@ describe("pilot release surface", () => {
       .join("\n");
 
     expect(fixtureText).toMatch(/Synthetic|synthetic|\[\]/u);
+    expect(fixtureText.match(/synthetic-boundary-marker/gu)).toHaveLength(1);
     expect(fixtureText).not.toMatch(
-      /cookie|authorization|student|@|bearer|verifier|session/iu,
+      /cookie|authorization|student|@|bearer|session/iu,
     );
   });
 });

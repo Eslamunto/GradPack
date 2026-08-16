@@ -1,4 +1,16 @@
-import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unzipSync } from "fflate";
@@ -81,8 +93,12 @@ describe("pilot package", () => {
     expect(first.artifactPath).toBe(join(firstArtifacts, PILOT_ARTIFACT_NAME));
     expect(firstBytes).toEqual(secondBytes);
     expect(first.digest).toBe(second.digest);
+    const independentDigest = createHash("sha256")
+      .update(firstBytes)
+      .digest("hex");
+    expect(first.digest).toBe(independentDigest);
     expect(await readFile(first.checksumPath, "utf8")).toBe(
-      `${first.digest}  ${PILOT_ARTIFACT_NAME}\n`,
+      `${independentDigest}  ${PILOT_ARTIFACT_NAME}\n`,
     );
     expect(Object.keys(unzipSync(firstBytes))).toEqual([...PILOT_FILES]);
     expect(centralHeaders(firstBytes).map(({ path }) => path)).toEqual([
@@ -117,6 +133,10 @@ describe("pilot package", () => {
     );
     expect(end.getUint32(0, true)).toBe(0x06054b50);
     expect(end.getUint16(20, true)).toBe(0);
+    expect((await readdir(firstArtifacts)).sort()).toEqual([
+      PILOT_ARTIFACT_NAME,
+      `${PILOT_ARTIFACT_NAME}.sha256`,
+    ]);
   });
 
   it("fails closed for missing, extra, symlinked, and forbidden build input", async () => {
@@ -155,5 +175,165 @@ describe("pilot package", () => {
         artifactRoot: join(development, "out"),
       }),
     ).rejects.toThrow(/forbidden/iu);
+  });
+
+  it("rejects build root, ancestor, and file identity substitution", async () => {
+    const rootSwap = await makeBuild();
+    const rootArtifacts = await mkdtemp(join(tmpdir(), "gradpack-root-swap-"));
+    await expect(
+      packagePilot({
+        buildRoot: rootSwap,
+        artifactRoot: rootArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "build-sealed") return;
+          await rename(rootSwap, `${rootSwap}-moved`);
+          await mkdir(rootSwap);
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+
+    const ancestor = await mkdtemp(join(tmpdir(), "gradpack-ancestor-"));
+    const ancestorBuild = join(ancestor, "dist");
+    await mkdir(ancestorBuild);
+    for (const path of PILOT_FILES) {
+      await writeFile(
+        join(ancestorBuild, path),
+        path === "manifest.json"
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.1"}\n'
+          : `synthetic:${path}\n`,
+      );
+    }
+    const ancestorArtifacts = await mkdtemp(
+      join(tmpdir(), "gradpack-ancestor-output-"),
+    );
+    await expect(
+      packagePilot({
+        buildRoot: ancestorBuild,
+        artifactRoot: ancestorArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "build-sealed") return;
+          await rename(ancestor, `${ancestor}-moved`);
+          await mkdir(ancestor);
+          await mkdir(ancestorBuild);
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+
+    const fileSwap = await makeBuild();
+    const fileArtifacts = await mkdtemp(join(tmpdir(), "gradpack-file-swap-"));
+    await expect(
+      packagePilot({
+        buildRoot: fileSwap,
+        artifactRoot: fileArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "build-file-opened:runner.js") return;
+          await rm(join(fileSwap, "runner.js"));
+          await writeFile(join(fileSwap, "runner.js"), "replacement");
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+
+    const inPlace = await makeBuild();
+    const inPlaceArtifacts = await mkdtemp(
+      join(tmpdir(), "gradpack-in-place-swap-"),
+    );
+    await expect(
+      packagePilot({
+        buildRoot: inPlace,
+        artifactRoot: inPlaceArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "build-file-opened:runner.js") return;
+          await writeFile(join(inPlace, "runner.js"), "replacement-in-place");
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+  });
+
+  it("rejects artifact-root substitution and existing hardlink targets", async () => {
+    const buildRoot = await makeBuild();
+    const artifactRoot = await mkdtemp(join(tmpdir(), "gradpack-output-swap-"));
+    await expect(
+      packagePilot({
+        buildRoot,
+        artifactRoot,
+        checkpoint: async (name) => {
+          if (name !== "artifact-root-sealed") return;
+          await rename(artifactRoot, `${artifactRoot}-moved`);
+          await mkdir(artifactRoot);
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+
+    const linkedBuild = await makeBuild();
+    const linkedArtifacts = await mkdtemp(
+      join(tmpdir(), "gradpack-hardlink-output-"),
+    );
+    const outside = join(linkedArtifacts, "outside-sentinel");
+    const target = join(linkedArtifacts, PILOT_ARTIFACT_NAME);
+    await writeFile(outside, "sentinel");
+    await link(outside, target);
+    await expect(
+      packagePilot({
+        buildRoot: linkedBuild,
+        artifactRoot: linkedArtifacts,
+      }),
+    ).rejects.toThrow(/hardlink|link count/iu);
+    expect(await readFile(outside, "utf8")).toBe("sentinel");
+    expect((await stat(outside)).nlink).toBe(2);
+
+    const lateBuild = await makeBuild();
+    const lateArtifacts = await mkdtemp(
+      join(tmpdir(), "gradpack-late-output-swap-"),
+    );
+    await expect(
+      packagePilot({
+        buildRoot: lateBuild,
+        artifactRoot: lateArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "artifact-temporaries-written") return;
+          await rename(lateArtifacts, `${lateArtifacts}-moved`);
+          await mkdir(lateArtifacts);
+        },
+      }),
+    ).rejects.toThrow(/identity|changed/iu);
+
+    const targetSwapBuild = await makeBuild();
+    const targetSwapArtifacts = await mkdtemp(
+      join(tmpdir(), "gradpack-target-swap-"),
+    );
+    const targetSwapOutside = join(targetSwapArtifacts, "outside");
+    await writeFile(targetSwapOutside, "sentinel");
+    await expect(
+      packagePilot({
+        buildRoot: targetSwapBuild,
+        artifactRoot: targetSwapArtifacts,
+        checkpoint: async (name) => {
+          if (name !== "artifact-temporaries-written") return;
+          await link(
+            targetSwapOutside,
+            join(targetSwapArtifacts, PILOT_ARTIFACT_NAME),
+          );
+        },
+      }),
+    ).rejects.toThrow(/hardlink|link count/iu);
+    expect(await readFile(targetSwapOutside, "utf8")).toBe("sentinel");
+  });
+
+  it("rejects hardlinked build members", async () => {
+    const buildRoot = await makeBuild();
+    const outside = join(
+      await mkdtemp(join(tmpdir(), "gradpack-hardlink-")),
+      "runner.js",
+    );
+    await writeFile(outside, "synthetic");
+    await rm(join(buildRoot, "runner.js"));
+    await link(outside, join(buildRoot, "runner.js"));
+
+    await expect(
+      packagePilot({
+        buildRoot,
+        artifactRoot: await mkdtemp(join(tmpdir(), "gradpack-hardlink-out-")),
+      }),
+    ).rejects.toThrow(/hardlink|link count/iu);
   });
 });

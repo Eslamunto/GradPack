@@ -299,10 +299,14 @@ type SyntheticPilotOptions = { unavailableFile?: boolean };
 type SyntheticPilotResult = {
   zipBytes: Uint8Array;
   requestedUrls: URL[];
+  requestHeaders: Array<Array<[string, string]>>;
   maximumConcurrency: number;
 };
 
-const exactRequest = (url: URL, init: RequestInit | undefined): void => {
+const exactRequest = (
+  url: URL,
+  init: RequestInit | undefined,
+): Array<[string, string]> => {
   if (
     url.origin !== CANVAS_ORIGIN ||
     url.username !== "" ||
@@ -316,10 +320,20 @@ const exactRequest = (url: URL, init: RequestInit | undefined): void => {
     throw new TypeError("Unexpected synthetic request boundary");
   }
   const api = url.pathname.startsWith("/api/v1/");
-  const accept = new Headers(init.headers).get("accept");
-  if ((api && accept !== "application/json") || (!api && accept !== null)) {
+  const headers = [...new Headers(init.headers).entries()];
+  const expected: Array<[string, string]> = api
+    ? [["accept", "application/json"]]
+    : [];
+  if (
+    headers.length !== expected.length ||
+    headers.some(
+      ([name, value], index) =>
+        name !== expected[index]?.[0] || value !== expected[index]?.[1],
+    )
+  ) {
     throw new TypeError("Unexpected synthetic request headers");
   }
+  return headers;
 };
 
 const responseAt = (
@@ -343,6 +357,7 @@ export async function runSyntheticPilot(
     "utf8",
   );
   const requestedUrls: URL[] = [];
+  const requestHeaders: Array<Array<[string, string]>> = [];
   let activeRequests = 0;
   let maximumConcurrency = 0;
 
@@ -354,7 +369,7 @@ export async function runSyntheticPilot(
           ? input.href
           : input.url,
     );
-    exactRequest(url, init);
+    requestHeaders.push(exactRequest(url, init));
     requestedUrls.push(new URL(url));
     activeRequests += 1;
     maximumConcurrency = Math.max(maximumConcurrency, activeRequests);
@@ -385,7 +400,7 @@ export async function runSyntheticPilot(
     if (route === "/api/v1/courses/101/pages/welcome") {
       return json({ title: "Welcome Page", body: pageBody });
     }
-    if (route === "/files/301/download") {
+    if (route === "/files/301/download?verifier=synthetic-boundary-marker") {
       if (options.unavailableFile) {
         return responseAt(url, null, { status: 404 });
       }
@@ -437,6 +452,7 @@ export async function runSyntheticPilot(
   return {
     zipBytes: result.zipBytes,
     requestedUrls,
+    requestHeaders,
     maximumConcurrency,
   };
 }

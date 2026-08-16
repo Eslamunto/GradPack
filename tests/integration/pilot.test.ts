@@ -29,11 +29,24 @@ describe("one-course classmate pilot Gate C", () => {
       "/api/v1/courses/101/files?per_page=100",
       "/api/v1/courses/101/folders?per_page=100",
       "/api/v1/courses/101/pages?per_page=100",
-      "/files/301/download",
+      "/files/301/download?verifier=synthetic-boundary-marker",
       "/api/v1/courses/101/pages/welcome",
     ]);
     expect(result.maximumConcurrency).toBeLessThanOrEqual(2);
     expect(result.maximumConcurrency).toBeGreaterThanOrEqual(2);
+    expect(result.requestHeaders).toEqual([
+      [["accept", "application/json"]],
+      [["accept", "application/json"]],
+      [["accept", "application/json"]],
+      [["accept", "application/json"]],
+      [],
+      [["accept", "application/json"]],
+    ]);
+    expect(
+      result.requestedUrls.filter(
+        ({ search }) => search === "?verifier=synthetic-boundary-marker",
+      ),
+    ).toHaveLength(1);
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
       "files/slides.pdf",
@@ -73,7 +86,7 @@ describe("one-course classmate pilot Gate C", () => {
       .map(([path, bytes]) => `${path}\n${strFromU8(bytes)}`)
       .join("\n");
     expect(serialized).not.toMatch(
-      /authorization|cookie|synthetic-secret|student identity/iu,
+      /authorization|cookie|synthetic-boundary-marker|student identity/iu,
     );
   });
 
