@@ -1,10 +1,20 @@
-import { vi, type Mock } from "vitest";
 import { strToU8 } from "fflate";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { vi, type Mock } from "vitest";
+import { ARCHIVE_CSS } from "../../src/archive/style";
+import { discoverCoursePlan } from "../../src/canvas/discovery";
 import type { ArchiveInput } from "../../src/archive/build-zip";
 import {
   CanvasCourseIndexUnavailableError,
-  type CanvasHttp,
+  CanvasHttp,
 } from "../../src/canvas/http";
+import {
+  fetchFileResource,
+  fetchPageResource,
+  runCourse,
+} from "../../src/page/run-course";
+import { CANVAS_ORIGIN } from "../../src/shared/constants";
 import type {
   CoursePlan,
   CourseSummary,
@@ -280,3 +290,153 @@ export const syntheticArchiveInput: ArchiveInput = {
     ["pages/welcome.html", strToU8("<!doctype html><p>Welcome</p>")],
   ]),
 };
+
+const fixture = <T>(name: string): T =>
+  JSON.parse(readFileSync(resolve("tests/fixtures/canvas", name), "utf8")) as T;
+
+type SyntheticPilotOptions = { unavailableFile?: boolean };
+
+type SyntheticPilotResult = {
+  zipBytes: Uint8Array;
+  requestedUrls: URL[];
+  maximumConcurrency: number;
+};
+
+const exactRequest = (url: URL, init: RequestInit | undefined): void => {
+  if (
+    url.origin !== CANVAS_ORIGIN ||
+    url.username !== "" ||
+    url.password !== "" ||
+    url.hash !== "" ||
+    init?.method !== "GET" ||
+    init.credentials !== "include" ||
+    init.redirect !== "follow" ||
+    init.body !== undefined
+  ) {
+    throw new TypeError("Unexpected synthetic request boundary");
+  }
+  const api = url.pathname.startsWith("/api/v1/");
+  const accept = new Headers(init.headers).get("accept");
+  if ((api && accept !== "application/json") || (!api && accept !== null)) {
+    throw new TypeError("Unexpected synthetic request headers");
+  }
+};
+
+const responseAt = (
+  url: URL,
+  body: BodyInit | null,
+  init: ResponseInit,
+): Response => {
+  const response = new Response(body, init);
+  Object.defineProperty(response, "url", { value: url.href });
+  return response;
+};
+
+export async function runSyntheticPilot(
+  options: SyntheticPilotOptions = {},
+): Promise<SyntheticPilotResult> {
+  const modules = fixture<unknown[]>("modules.json");
+  const files = fixture<unknown[]>("files.json");
+  const pages = fixture<unknown[]>("pages.json");
+  const pageBody = readFileSync(
+    resolve("tests/fixtures/canvas/page.html"),
+    "utf8",
+  );
+  const requestedUrls: URL[] = [];
+  let activeRequests = 0;
+  let maximumConcurrency = 0;
+
+  const fakeFetch: typeof fetch = async (input, init) => {
+    const url = new URL(
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url,
+    );
+    exactRequest(url, init);
+    requestedUrls.push(new URL(url));
+    activeRequests += 1;
+    maximumConcurrency = Math.max(maximumConcurrency, activeRequests);
+    await Promise.resolve();
+    activeRequests -= 1;
+
+    const json = (value: unknown): Response =>
+      responseAt(url, JSON.stringify(value), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    const route = `${url.pathname}${url.search}`;
+    if (
+      route ===
+      "/api/v1/courses/101/modules?include%5B%5D=items&include%5B%5D=content_details&per_page=100"
+    ) {
+      return json(modules);
+    }
+    if (route === "/api/v1/courses/101/files?per_page=100") {
+      return json(files);
+    }
+    if (route === "/api/v1/courses/101/folders?per_page=100") {
+      return json([{ id: 401, full_name: "course files" }]);
+    }
+    if (route === "/api/v1/courses/101/pages?per_page=100") {
+      return json(pages);
+    }
+    if (route === "/api/v1/courses/101/pages/welcome") {
+      return json({ title: "Welcome Page", body: pageBody });
+    }
+    if (route === "/files/301/download") {
+      if (options.unavailableFile) {
+        return responseAt(url, null, { status: 404 });
+      }
+      return responseAt(url, strToU8("synthetic PDF bytes"), {
+        status: 200,
+        headers: {
+          "content-type": "application/pdf",
+          "content-length": "19",
+        },
+      });
+    }
+    throw new TypeError("Unexpected synthetic route");
+  };
+
+  const controller = new AbortController();
+  let downloaded: Uint8Array | undefined;
+  const result = await runCourse({
+    course: syntheticCourse,
+    signal: controller.signal,
+    progress: () => {},
+    dependencies: {
+      discover: async (course, signal) =>
+        discoverCoursePlan(new CanvasHttp(fakeFetch, signal), course),
+      retrieve: async (resource, plan, signal) => {
+        if (resource.kind === "file") {
+          return fetchFileResource(resource, signal, { fetcher: fakeFetch });
+        }
+        if (resource.kind === "page") {
+          return fetchPageResource(
+            resource,
+            plan,
+            signal,
+            new CanvasHttp(fakeFetch, signal),
+          );
+        }
+        throw new TypeError("Unexpected synthetic retrieval kind");
+      },
+      archiveCss: ARCHIVE_CSS,
+      now: () => "2026-08-16T12:00:00.000Z",
+      fileName: () => "gradpack-synthetic-course.zip",
+      download: (_name, bytes) => {
+        downloaded = bytes;
+      },
+    },
+  });
+  if (downloaded !== result.zipBytes) {
+    throw new TypeError("Synthetic download did not use the produced ZIP");
+  }
+  return {
+    zipBytes: result.zipBytes,
+    requestedUrls,
+    maximumConcurrency,
+  };
+}

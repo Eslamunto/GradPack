@@ -5,11 +5,30 @@
 GradPack is an open-source Chrome extension for students who want to preserve
 their accessible Canvas course materials as a useful local archive.
 
-The project is currently in its product-definition and feasibility phase.
+The project is currently an **alpha classmate pilot** distributed manually as
+an unpacked extension. It is not yet published on the Chrome Web Store.
+
+The pilot saves one accessible Canvas course at a time into a transparent local
+ZIP with an offline index and per-resource outcomes. It uses the student's
+existing signed-in Frankfurt School Canvas tab and has no analytics, telemetry,
+backend, or cloud upload.
+
+## Pilot installation
+
+Pilot testers should use the versioned artifact and checksum supplied by the
+maintainer, then follow the [installation guide](docs/pilot/INSTALL.md) and
+return only the privacy-safe fields in the [test checklist](docs/pilot/TEST_CHECKLIST.md).
+
+The approved scope and safety boundaries are documented in the
+[classmate-pilot design](docs/design/2026-08-16-gradpack-classmate-pilot-design.md)
+and the [full MVP design](docs/design/2026-08-16-gradpack-mvp-design.md).
 
 ## License
 
 Licensed under the [Apache License 2.0](LICENSE).
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) before proposing a change and
+[SECURITY.md](SECURITY.md) before reporting a vulnerability.
 
 ## Development
 
@@ -19,6 +38,7 @@ Prerequisites: Node.js 22.22.2 and pnpm 11.17.0.
 pnpm install --frozen-lockfile
 pnpm verify
 pnpm build
+pnpm package:pilot
 ```
 
 To inspect the local build, open `chrome://extensions`, enable Developer mode,
