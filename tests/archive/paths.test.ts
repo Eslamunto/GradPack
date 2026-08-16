@@ -3,6 +3,21 @@ import { safeArchivePath } from "../../src/archive/paths";
 
 describe("safeArchivePath", () => {
   it.each([
+    [["files", "..", "secret.txt"], "files/_/secret.txt"],
+    [["files", "CON"], "files/_CON"],
+    [["files", "a/b\\c.txt"], "files/a_b_c.txt"],
+    [["pages", ""], "pages/untitled"],
+  ])("confines synthetic segments %#", (segments, expected) => {
+    expect(safeArchivePath(...segments)).toBe(expected);
+  });
+
+  it("rejects non-string segments without coercion", () => {
+    expect(() => safeArchivePath("files", 7 as unknown as string)).toThrowError(
+      "Invalid archive segment",
+    );
+  });
+
+  it.each([
     ["../secret", ".._secret"],
     ["CON", "_CON"],
     ["a/b\\c", "a_b_c"],
