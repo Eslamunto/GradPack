@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { safeArchivePath } from "../../src/archive/paths";
+import {
+  isCanonicalArchivePath,
+  safeArchivePath,
+} from "../../src/archive/paths";
 
 describe("safeArchivePath", () => {
   it.each([
@@ -65,4 +68,40 @@ describe("safeArchivePath", () => {
       expect(safeArchivePath(input)).toBe(expected);
     },
   );
+});
+
+describe("isCanonicalArchivePath", () => {
+  it.each([
+    "files/report.pdf",
+    "files/Week One/Résumé 100%.pdf",
+    "pages/topic one.html",
+    safeArchivePath("files", "x".repeat(100), "report.pdf"),
+  ])("accepts an exact Task 4 canonical path %#", (path) => {
+    expect(isCanonicalArchivePath(path)).toBe(true);
+  });
+
+  it.each([
+    "",
+    "/files/report.pdf",
+    "files//report.pdf",
+    "files/../report.pdf",
+    "files/CON",
+    "files/CON.txt",
+    "files/trailing.",
+    "files/trailing ",
+    "files/Re\u0301sume\u0301.pdf",
+    "files/bad<name>.pdf",
+    "files/bad\\name.pdf",
+    "files/report.pdf?download=1",
+    "files/report.pdf#section",
+    "files/http:remote.test",
+    `files/${"x".repeat(101)}`,
+    `files/${"x".repeat(100)}/${"y".repeat(100)}/${"z".repeat(50)}`,
+    "files/safe\u202Ename.pdf",
+    "files/bad\ud800name.pdf",
+    7,
+    new String("files/report.pdf"),
+  ])("rejects a non-canonical archive path %#", (path) => {
+    expect(isCanonicalArchivePath(path)).toBe(false);
+  });
 });

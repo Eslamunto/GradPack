@@ -1,5 +1,5 @@
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
-const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}<>:"/\\|?*]/gu;
+const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}<>:"/\\|?#*]/gu;
 const MAX_SEGMENT_LENGTH = 100;
 const MAX_PATH_LENGTH = 240;
 
@@ -74,4 +74,29 @@ export function canonicalArchivePath(path: string): string {
     .toLowerCase()
     .replace(/\u03c2/g, "\u03c3")
     .replace(/\u00df/g, "ss");
+}
+
+export function isCanonicalArchivePath(path: unknown): path is string {
+  if (
+    typeof path !== "string" ||
+    path.length === 0 ||
+    path.length > MAX_PATH_LENGTH ||
+    path !== path.normalize("NFC")
+  ) {
+    return false;
+  }
+  const segments = path.split("/");
+  if (
+    segments.some(
+      (segment) =>
+        segment.length === 0 || characters(segment).length > MAX_SEGMENT_LENGTH,
+    )
+  ) {
+    return false;
+  }
+  try {
+    return safeArchivePath(...segments) === path;
+  } catch {
+    return false;
+  }
 }

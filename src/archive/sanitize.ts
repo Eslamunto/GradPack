@@ -1,4 +1,5 @@
 import DOMPurify from "dompurify";
+import { isCanonicalArchivePath } from "./paths";
 import { CANVAS_ORIGIN } from "../shared/constants";
 
 export type SanitizePageInput = {
@@ -9,10 +10,12 @@ export type SanitizePageInput = {
 
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
 const ARCHIVE_BASE = "https://archive.invalid/pages/current.html";
+const CANVAS_HOSTNAME = new URL(CANVAS_ORIGIN).hostname;
 const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const SAFE_FRAGMENT = /^#[a-z0-9][a-z0-9_.:-]*$/iu;
 const LOCAL_PREFIX = /^\.\.\/(?:files|pages)\//u;
+const ENCODED_SEPARATOR = /%(?:2f|5c)/iu;
 const ARIA_ATTRIBUTE = /^aria-[a-z][a-z0-9-]*$/u;
 
 const ALLOWED_TAGS = [
@@ -213,26 +216,23 @@ const isSafeLocalHref = (value: string): boolean => {
   ) {
     return false;
   }
-  const pathSegments = value.split("/").slice(2);
-  if (pathSegments.length === 0 || pathSegments.some((segment) => !segment)) {
+  if (ENCODED_SEPARATOR.test(value)) {
     return false;
   }
-  for (const segment of pathSegments) {
-    let decoded: string;
-    try {
-      decoded = decodeURIComponent(segment);
-    } catch {
-      return false;
-    }
-    if (
-      decoded === "." ||
-      decoded === ".." ||
-      CONTROL.test(decoded) ||
-      decoded.includes("/") ||
-      decoded.includes("\\")
-    ) {
-      return false;
-    }
+  const encodedPath = value.slice(3);
+  let decodedPath: string;
+  try {
+    decodedPath = decodeURIComponent(
+      encodedPath.replace(/%(?![0-9a-f]{2})/giu, "%25"),
+    );
+  } catch {
+    return false;
+  }
+  if (
+    (!decodedPath.startsWith("files/") && !decodedPath.startsWith("pages/")) ||
+    !isCanonicalArchivePath(decodedPath)
+  ) {
+    return false;
   }
   let url: URL;
   try {
@@ -250,6 +250,9 @@ const isSafeLocalHref = (value: string): boolean => {
       /^\/(?:files|pages)\/.+\/[^/]/u.test(url.pathname))
   );
 };
+
+const canonicalDnsHostname = (hostname: string): string =>
+  hostname.toLowerCase().replace(/\.+$/u, "");
 
 const unresolvedHref = (raw: string): string | null => {
   let decoded: string;
@@ -286,7 +289,9 @@ const unresolvedHref = (raw: string): string | null => {
     (url.protocol !== "https:" && url.protocol !== "mailto:") ||
     url.username !== "" ||
     url.password !== "" ||
-    (url.protocol === "https:" && url.origin === CANVAS_ORIGIN)
+    (url.protocol === "https:" &&
+      canonicalDnsHostname(url.hostname) ===
+        canonicalDnsHostname(CANVAS_HOSTNAME))
   ) {
     return null;
   }

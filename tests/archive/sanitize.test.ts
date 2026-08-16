@@ -305,12 +305,88 @@ describe("sanitizePageHtml", () => {
     "https:///reference.test/resource",
     "https://frankfurtschool.instructure.com/logout",
     "https://frankfurtschool.instructure.com/api/v1/courses/101",
+    "https://FRANKFURTSCHOOL.INSTRUCTURE.COM/resource",
+    "https://frankfurtschool.instructure.com./resource",
+    "https://frankfurtschool.instructure.com%2e/resource",
+    "https://frankfurtschool.instructure.com:8443/resource",
   ])("removes unsafe unresolved reference %#", (href) => {
     const document = parse(
       sanitizePageHtml(input(`<a href="${href}">Reference</a>`)),
     );
 
     expect(document.body.querySelector("a")?.hasAttribute("href")).toBe(false);
+  });
+
+  it("keeps unrelated and subdomain HTTPS hosts distinct from the Canvas host", () => {
+    const document = parse(
+      sanitizePageHtml(
+        input(`
+          <a href="https://reference.test/resource">Unrelated</a>
+          <a href="https://safe.frankfurtschool.instructure.com/resource">Subdomain</a>
+        `),
+      ),
+    );
+    const anchors = [...document.body.querySelectorAll("a")];
+
+    expect(anchors.map((anchor) => anchor.getAttribute("href"))).toEqual([
+      "https://reference.test/resource",
+      "https://safe.frankfurtschool.instructure.com/resource",
+    ]);
+    expect(
+      anchors.every(
+        (anchor) => anchor.getAttribute("rel") === "noopener noreferrer",
+      ),
+    ).toBe(true);
+    expectSafeOutputTree(document);
+  });
+
+  it.each([
+    "../files/CON",
+    "../files/CON.txt",
+    "../files/trailing.",
+    "../files/trailing ",
+    "../files/Re\u0301sume\u0301.pdf",
+    "../files/bad<name>.pdf",
+    `../files/${"x".repeat(101)}.pdf`,
+    `../files/${"x".repeat(100)}/${"y".repeat(100)}/${"z".repeat(50)}`,
+    "../files/safe\u202Ename.pdf",
+    "../files/bad\ud800name.pdf",
+    "../files/%2e%2e/escape.pdf",
+    "../files/%2fescape.pdf",
+    "../files/%5cescape.pdf",
+    "../files/%00control.pdf",
+  ])("removes non-canonical resolver archive target %#", (resolved) => {
+    const document = parse(
+      sanitizePageHtml(input('<a href="/known">Known</a>', () => resolved)),
+    );
+
+    expect(document.body.querySelector("a")?.hasAttribute("href")).toBe(false);
+    expectSafeOutputTree(document);
+  });
+
+  it("accepts canonical encoded and literal-percent Task 4 archive targets exactly once", () => {
+    const targets = [
+      "../files/Week%20One/R%C3%A9sum%C3%A9%20100%25.pdf",
+      "../files/100%-complete.pdf",
+      "../pages/topic%20one.html",
+      "../files/%252e%252e/notes.txt",
+    ];
+    let index = 0;
+    const document = parse(
+      sanitizePageHtml(
+        input(
+          targets.map(() => '<a href="/known">Known</a>').join(""),
+          () => targets[index++] ?? null,
+        ),
+      ),
+    );
+
+    expect(
+      [...document.body.querySelectorAll("a")].map((anchor) =>
+        anchor.getAttribute("href"),
+      ),
+    ).toEqual(targets);
+    expectSafeOutputTree(document);
   });
 
   it("preserves benign semantic formatting without preserving unsafe state", () => {
@@ -340,5 +416,40 @@ describe("sanitizePageHtml", () => {
       document.body.querySelector("blockquote")?.hasAttribute("cite"),
     ).toBe(false);
     expectSafeOutputTree(document);
+  });
+
+  it("keeps a DOM-clobbering namespace and mutation corpus inert across repeated parses", () => {
+    const dangerousNames = new Set([
+      "__proto__",
+      "attributes",
+      "body",
+      "constructor",
+      "cookie",
+      "documentElement",
+      "forms",
+      "parentNode",
+    ]);
+    let output = sanitizePageHtml(
+      input(`
+        <form id="forms"><input name="parentNode"><button formaction="https://remote.test/post">Send</button></form>
+        <a id="__proto__" name="constructor" href="javascript:alert(1)">Clobber</a>
+        <img id="attributes" name="cookie" src="https://remote.test/a.png" onerror="alert(1)">
+        <svg><foreignObject><div id="body"><img src="https://remote.test/svg.png"></div></foreignObject></svg>
+        <math><annotation-xml encoding="text/html"><img src="https://remote.test/math.png"></annotation-xml></math>
+        <table><mglyph><style><!--</style><img title="--><img src=x onerror=alert(1)>"></table>
+        <noscript><p title="</noscript><img src=https://remote.test/noscript.png>">Text</p></noscript>
+      `),
+    );
+
+    for (let cycle = 0; cycle < 4; cycle += 1) {
+      const document = parse(output);
+      expectSafeOutputTree(document);
+      expect(document.forms).toHaveLength(0);
+      expect(document.body.querySelector("[name]")).toBeNull();
+      for (const element of document.querySelectorAll("[id]")) {
+        expect(dangerousNames.has(element.id)).toBe(false);
+      }
+      output = document.documentElement.outerHTML;
+    }
   });
 });
