@@ -1,5 +1,5 @@
 const RESERVED = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$/i;
-const UNSAFE_CHARACTERS = /[\p{Cc}<>:"/\\|?*]/gu;
+const UNSAFE_CHARACTERS = /[\p{Cc}\p{Cf}\p{Cs}<>:"/\\|?*]/gu;
 const MAX_SEGMENT_LENGTH = 100;
 const MAX_PATH_LENGTH = 240;
 
@@ -65,4 +65,13 @@ export function safeArchivePath(...segments: string[]): string {
     throw new TypeError("Unsafe archive path");
   }
   return path;
+}
+
+export function canonicalArchivePath(path: string): string {
+  if (typeof path !== "string") throw new TypeError("Invalid archive path");
+  return path
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/\u03c2/g, "\u03c3")
+    .replace(/\u00df/g, "ss");
 }

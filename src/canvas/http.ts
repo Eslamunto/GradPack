@@ -25,7 +25,8 @@ const isCanvasApiUrl = (url: URL): boolean =>
   url.origin === CANVAS_ORIGIN &&
   url.pathname.startsWith("/api/v1/") &&
   url.username === "" &&
-  url.password === "";
+  url.password === "" &&
+  url.hash === "";
 
 const isJsonContentType = (value: string): boolean => {
   const mediaType = value.split(";", 1)[0]?.trim().toLowerCase();
@@ -36,6 +37,52 @@ const isJsonContentType = (value: string): boolean => {
 
 const isCourseCollectionIndex = (url: URL): boolean =>
   /^\/api\/v1\/courses\/[1-9]\d*\/(?:files|folders|pages)$/.test(url.pathname);
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const hasConservativeCanvasErrorShape = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.length !== 1 || keys[0] !== "errors") return false;
+  const errors = value.errors;
+  if (!Array.isArray(errors) || errors.length === 0 || errors.length > 20) {
+    return false;
+  }
+  return errors.every((entry) => {
+    if (!isRecord(entry)) return false;
+    const entryKeys = Reflect.ownKeys(entry);
+    if (entryKeys.some((key) => key !== "message" && key !== "error_code")) {
+      return false;
+    }
+    return (
+      Object.hasOwn(entry, "message") &&
+      typeof entry.message === "string" &&
+      entry.message.trim().length > 0 &&
+      entry.message.length <= 1_000 &&
+      (!Object.hasOwn(entry, "error_code") ||
+        (typeof entry.error_code === "string" &&
+          entry.error_code.length <= 200))
+    );
+  });
+};
+
+const sameSearch = (left: URL, right: URL): boolean => {
+  const leftEntries = [...left.searchParams.entries()].sort();
+  const rightEntries = [...right.searchParams.entries()].sort();
+  return (
+    leftEntries.length === rightEntries.length &&
+    leftEntries.every(
+      ([key, value], index) =>
+        key === rightEntries[index]?.[0] && value === rightEntries[index]?.[1],
+    )
+  );
+};
+
+type RequestContext = {
+  optionalCourseIndexInitial: boolean;
+  continuation: boolean;
+};
 
 export class CanvasHttp {
   constructor(
@@ -71,7 +118,10 @@ export class CanvasHttp {
     this.throwIfAborted();
   }
 
-  async json<T>(url: URL): Promise<{ value: T; response: Response }> {
+  private async requestJson<T>(
+    url: URL,
+    context: RequestContext,
+  ): Promise<{ value: T; response: Response }> {
     if (!isCanvasApiUrl(url)) {
       throw new CanvasResponseError("Rejected Canvas URL");
     }
@@ -120,6 +170,12 @@ export class CanvasHttp {
       if (!isCanvasApiUrl(finalUrl)) {
         throw new CanvasResponseError("Rejected final Canvas URL");
       }
+      if (finalUrl.pathname !== url.pathname) {
+        throw new CanvasResponseError("Rejected Canvas response path");
+      }
+      if (!sameSearch(finalUrl, url)) {
+        throw new CanvasResponseError("Rejected Canvas response query");
+      }
       if (
         response.status === 408 ||
         response.status === 429 ||
@@ -142,13 +198,31 @@ export class CanvasHttp {
       if (
         (response.status === 403 || response.status === 404) &&
         isJsonContentType(contentType) &&
+        context.optionalCourseIndexInitial &&
         isCourseCollectionIndex(url) &&
         isCourseCollectionIndex(finalUrl) &&
         url.pathname === finalUrl.pathname
       ) {
+        let errorValue: unknown;
+        try {
+          errorValue = await response.json();
+        } catch (error) {
+          if (isAbortError(error)) throw error;
+          throw new CanvasResponseError("Canvas returned invalid JSON");
+        }
+        if (!hasConservativeCanvasErrorShape(errorValue)) {
+          throw new CanvasResponseError(
+            "Canvas returned an invalid error response",
+          );
+        }
         throw new CanvasCourseIndexUnavailableError(response.status);
       }
       if (response.status === 403) {
+        if (context.continuation) {
+          throw new CanvasResponseError(
+            "Unexpected Canvas continuation response",
+          );
+        }
         throw new CanvasSessionError("Canvas session is unavailable");
       }
       if (!response.ok) {
@@ -173,7 +247,22 @@ export class CanvasHttp {
     );
   }
 
+  json<T>(url: URL): Promise<{ value: T; response: Response }> {
+    return this.requestJson<T>(url, {
+      optionalCourseIndexInitial: false,
+      continuation: false,
+    });
+  }
+
   fetchAll<T>(url: URL): Promise<T[]> {
-    return fetchAllPages<T>((next) => this.json<T[]>(next), url);
+    let initial = true;
+    return fetchAllPages<T>((next) => {
+      const isInitial = initial;
+      initial = false;
+      return this.requestJson<T[]>(next, {
+        optionalCourseIndexInitial: isInitial && isCourseCollectionIndex(url),
+        continuation: !isInitial,
+      });
+    }, url);
   }
 }

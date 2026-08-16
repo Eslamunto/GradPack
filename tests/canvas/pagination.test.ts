@@ -94,4 +94,48 @@ describe("fetchAllPages", () => {
     ).rejects.toThrow("Rejected pagination URL");
     expect(request).toHaveBeenCalledOnce();
   });
+
+  it.each([
+    `${CANVAS_ORIGIN}/api/v1/courses/102/files?page=2`,
+    `${CANVAS_ORIGIN}/api/v1/courses/101/pages?page=2`,
+  ])("rejects a same-origin continuation pathname pivot: %s", async (next) => {
+    const first = `${CANVAS_ORIGIN}/api/v1/courses/101/files?page=1`;
+    const request = vi.fn().mockResolvedValue({
+      value: [],
+      response: pageResponse(`<${next}>; rel="next"`),
+    });
+
+    await expect(fetchAllPages(request, new URL(first))).rejects.toThrow(
+      "pagination path",
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("rejects continuation changes to non-pagination query parameters", async () => {
+    const first = `${CANVAS_ORIGIN}/api/v1/courses/101/files?include%5B%5D=user&per_page=100`;
+    const next = `${CANVAS_ORIGIN}/api/v1/courses/101/files?include%5B%5D=usage_rights&per_page=100&page=2`;
+    const request = vi.fn().mockResolvedValue({
+      value: [],
+      response: pageResponse(`<${next}>; rel="next"`),
+    });
+
+    await expect(fetchAllPages(request, new URL(first))).rejects.toThrow(
+      "pagination query",
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a pagination page number outside the safe-integer boundary", async () => {
+    const first = `${CANVAS_ORIGIN}/api/v1/courses/101/files?page=1`;
+    const next = `${CANVAS_ORIGIN}/api/v1/courses/101/files?page=999999999999999999999`;
+    const request = vi.fn().mockResolvedValue({
+      value: [],
+      response: pageResponse(`<${next}>; rel="next"`),
+    });
+
+    await expect(fetchAllPages(request, new URL(first))).rejects.toThrow(
+      "pagination query",
+    );
+    expect(request).toHaveBeenCalledOnce();
+  });
 });

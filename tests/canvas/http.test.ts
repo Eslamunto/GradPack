@@ -24,6 +24,21 @@ function jsonResponse(
   return response;
 }
 
+function rawResponse(
+  status: number,
+  body: BodyInit | null,
+  options: { contentType?: string; url?: string } = {},
+): Response {
+  const response = new Response(body, {
+    status,
+    headers: { "content-type": options.contentType ?? "application/json" },
+  });
+  Object.defineProperty(response, "url", {
+    value: options.url ?? requestUrl,
+  });
+  return response;
+}
+
 describe("CanvasHttp", () => {
   it("uses an authenticated GET only for the exact Canvas API origin", async () => {
     const fetcher = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse());
@@ -167,15 +182,86 @@ describe("CanvasHttp", () => {
       const courseIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
       const fetcher = vi
         .fn<typeof fetch>()
-        .mockResolvedValue(jsonResponse(status, {}, { url: courseIndexUrl }));
+        .mockResolvedValue(
+          jsonResponse(
+            status,
+            { errors: [{ message: "Unavailable" }] },
+            { url: courseIndexUrl },
+          ),
+        );
 
       await expect(
-        new CanvasHttp(fetcher).json(new URL(courseIndexUrl)),
+        new CanvasHttp(fetcher).fetchAll(new URL(courseIndexUrl)),
       ).rejects.toMatchObject({
         name: "CanvasCourseIndexUnavailableError",
         status,
       });
       expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { status: 403, body: "{" },
+    { status: 403, body: JSON.stringify([]) },
+    { status: 404, body: "" },
+    { status: 404, body: JSON.stringify({ error: "Unavailable" }) },
+  ])(
+    "hard-fails malformed or wrong-shape optional index JSON for status $status",
+    async ({ status, body }) => {
+      const courseIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(rawResponse(status, body, { url: courseIndexUrl }));
+
+      const request = new CanvasHttp(fetcher).fetchAll(new URL(courseIndexUrl));
+      await expect(request).rejects.toBeInstanceOf(CanvasResponseError);
+      await expect(request).rejects.not.toBeInstanceOf(
+        CanvasCourseIndexUnavailableError,
+      );
+    },
+  );
+
+  it.each([403, 404])(
+    "hard-fails a continuation status %i instead of discarding the first page",
+    async (status) => {
+      const first = `${CANVAS_ORIGIN}/api/v1/courses/101/files?per_page=100`;
+      const second = `${CANVAS_ORIGIN}/api/v1/courses/101/files?per_page=100&page=2`;
+      const firstResponse = jsonResponse(200, [{ id: 1 }], { url: first });
+      firstResponse.headers.set("link", `<${second}>; rel="next"`);
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(firstResponse)
+        .mockResolvedValueOnce(
+          jsonResponse(
+            status,
+            { errors: [{ message: "Unavailable" }] },
+            { url: second },
+          ),
+        );
+
+      const request = new CanvasHttp(fetcher).fetchAll(new URL(first));
+      await expect(request).rejects.toBeInstanceOf(CanvasResponseError);
+      await expect(request).rejects.not.toBeInstanceOf(
+        CanvasCourseIndexUnavailableError,
+      );
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it.each([
+    `${CANVAS_ORIGIN}/api/v1/courses/102/files`,
+    `${CANVAS_ORIGIN}/api/v1/courses/101/pages`,
+  ])(
+    "rejects a successful same-origin response pathname pivot: %s",
+    async (url) => {
+      const requested = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse(200, [], { url }));
+
+      await expect(
+        new CanvasHttp(fetcher).json(new URL(requested)),
+      ).rejects.toThrow("response path");
     },
   );
 

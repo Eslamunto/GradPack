@@ -1,4 +1,4 @@
-import { safeArchivePath } from "../archive/paths";
+import { canonicalArchivePath, safeArchivePath } from "../archive/paths";
 import {
   MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
@@ -173,12 +173,11 @@ const normalizeFolderMap = (
   for (const value of values) {
     if (!isRecord(value)) throw new TypeError("Invalid folder record");
     const id = positiveId(own(value, "id"), "folder ID");
-    const fullName = optionalText(
-      own(value, "full_name"),
-      optionalText(own(value, "name"), "", "folder name"),
-      "folder path",
-    );
-    if (!fullName) throw new TypeError("Invalid folder path");
+    const rawFullName = own(value, "full_name");
+    if (typeof rawFullName !== "string" || !rawFullName.trim()) {
+      throw new TypeError("Invalid folder path");
+    }
+    const fullName = rawFullName.trim();
     const segments = fullName.split("/");
     if (segments.some((segment) => !segment.trim())) {
       throw new TypeError("Invalid folder path");
@@ -193,30 +192,97 @@ const normalizeFolderMap = (
   return folders;
 };
 
-class RequestLimiter {
-  private active = 0;
-  private readonly queue: Array<() => void> = [];
+type DiscoveryFailure = Error | DOMException;
+type RunOwner = { failure?: { error: DiscoveryFailure } };
 
-  async run<T>(operation: () => Promise<T>): Promise<T> {
-    if (this.active >= MAX_CONCURRENCY) {
-      await new Promise<void>((resolve) => this.queue.push(resolve));
+type ScheduledJob = {
+  owner: RunOwner;
+  operation: () => Promise<unknown>;
+  resolve: (value: unknown) => void;
+  reject: (error: unknown) => void;
+};
+
+class SharedRequestScheduler {
+  private active = 0;
+  private queue: ScheduledJob[] = [];
+
+  schedule<T>(owner: RunOwner, operation: () => Promise<T>): Promise<T> {
+    if (owner.failure) return Promise.reject(owner.failure.error);
+    return new Promise<T>((resolve, reject) => {
+      this.queue.push({
+        owner,
+        operation,
+        resolve: (value) => resolve(value as T),
+        reject,
+      });
+      this.drain();
+    });
+  }
+
+  private latch(owner: RunOwner, error: unknown): DiscoveryFailure {
+    owner.failure ??= {
+      error:
+        error instanceof Error || error instanceof DOMException
+          ? error
+          : new TypeError("Canvas discovery failed"),
+    };
+    const failure = owner.failure.error;
+    const pending: ScheduledJob[] = [];
+    for (const job of this.queue) {
+      if (job.owner === owner) job.reject(failure);
+      else pending.push(job);
     }
-    this.active += 1;
-    try {
-      return await operation();
-    } finally {
-      this.active -= 1;
-      this.queue.shift()?.();
+    this.queue = pending;
+    return failure;
+  }
+
+  private drain(): void {
+    while (this.active < MAX_CONCURRENCY && this.queue.length > 0) {
+      const job = this.queue.shift()!;
+      if (job.owner.failure) {
+        job.reject(job.owner.failure.error);
+        continue;
+      }
+      this.active += 1;
+      void Promise.resolve()
+        .then(job.operation)
+        .then(job.resolve, (error: unknown) => {
+          job.reject(this.latch(job.owner, error));
+        })
+        .finally(() => {
+          this.active -= 1;
+          this.drain();
+        });
     }
   }
 }
 
+const sharedRequestScheduler = new SharedRequestScheduler();
+
+class DiscoveryRun {
+  private readonly owner: RunOwner = {};
+
+  one<T>(operation: () => Promise<T>): Promise<T> {
+    return sharedRequestScheduler.schedule(this.owner, operation);
+  }
+
+  async all<T>(operations: ReadonlyArray<() => Promise<T>>): Promise<T[]> {
+    const settled = await Promise.allSettled(
+      operations.map((operation) => this.one(operation)),
+    );
+    if (this.owner.failure) throw this.owner.failure.error;
+    return settled.map((result) => {
+      if (result.status === "rejected") throw result.reason;
+      return result.value;
+    });
+  }
+}
+
 const fetchOptionalIndex = async <T>(
-  limiter: RequestLimiter,
   operation: () => Promise<T[]>,
 ): Promise<T[] | null> => {
   try {
-    return await limiter.run(operation);
+    return await operation();
   } catch (error) {
     if (error instanceof CanvasCourseIndexUnavailableError) return null;
     throw error;
@@ -254,29 +320,28 @@ const normalizeItem = (
 
 const loadModules = async (
   http: CanvasHttp,
-  limiter: RequestLimiter,
+  run: DiscoveryRun,
   courseId: number,
 ): Promise<ParsedModule[]> => {
-  const rawModules = await limiter.run(() =>
+  const rawModules = await run.one(() =>
     http.fetchAll<unknown>(canvasEndpoint({ type: "courseModules", courseId })),
   );
-  const loaded = await Promise.all(
-    rawModules.map(async (value) => {
-      if (!isRecord(value)) throw new TypeError("Invalid module record");
-      const id = positiveId(own(value, "id"), "module ID");
-      const inline = own(value, "items");
-      let rawItems: unknown[];
-      if (inline === undefined || inline === null) {
-        rawItems = await limiter.run(() =>
-          http.fetchAll<unknown>(
-            canvasEndpoint({ type: "moduleItems", courseId, moduleId: id }),
-          ),
-        );
-      } else if (Array.isArray(inline)) {
-        rawItems = inline;
-      } else {
-        throw new TypeError("Invalid inline module items");
-      }
+  const descriptors = rawModules.map((value) => {
+    if (!isRecord(value)) throw new TypeError("Invalid module record");
+    const id = positiveId(own(value, "id"), "module ID");
+    const inline = own(value, "items");
+    if (inline !== undefined && inline !== null && !Array.isArray(inline)) {
+      throw new TypeError("Invalid inline module items");
+    }
+    return { value, id, inline: Array.isArray(inline) ? inline : null };
+  });
+  const loaded = await run.all(
+    descriptors.map(({ value, id, inline }) => async () => {
+      const rawItems =
+        inline ??
+        (await http.fetchAll<unknown>(
+          canvasEndpoint({ type: "moduleItems", courseId, moduleId: id }),
+        ));
       const normalized = rawItems.map(normalizeItem);
       normalized.sort(
         (left, right) =>
@@ -334,56 +399,74 @@ const addPage = (pages: Map<string, NormalizedPage>, value: unknown): void => {
   pages.set(normalized.token, prior ?? normalized);
 };
 
-const insertSuffix = (path: string, suffix: string): string => {
+const insertSuffixAt = (
+  path: string,
+  segmentIndex: number,
+  suffix: string,
+): string => {
   const segments = path.split("/");
-  const filename = segments.pop()!;
-  const dot = filename.lastIndexOf(".");
-  const hasExtension = dot > 0 && filename.length - dot <= 16;
-  const stem = hasExtension ? filename.slice(0, dot) : filename;
-  const extension = hasExtension ? filename.slice(dot) : "";
+  const value = segments[segmentIndex];
+  if (value === undefined) throw new TypeError("Unsafe archive path");
+  const dot = value.lastIndexOf(".");
+  const isFilename = segmentIndex === segments.length - 1;
+  const hasExtension = isFilename && dot > 0 && value.length - dot <= 16;
+  const stem = hasExtension ? value.slice(0, dot) : value;
+  const extension = hasExtension ? value.slice(dot) : "";
   const marker = `--${suffix}`;
   const stemBudget = Math.max(1, 100 - marker.length - extension.length);
   const boundedStem = Array.from(stem).slice(0, stemBudget).join("");
-  return safeArchivePath(...segments, `${boundedStem}${marker}${extension}`);
+  segments[segmentIndex] = `${boundedStem}${marker}${extension}`;
+  return safeArchivePath(...segments);
+};
+
+const conflictSegment = (candidate: string, other: string): number | null => {
+  const candidateCanonical = canonicalArchivePath(candidate);
+  const otherCanonical = canonicalArchivePath(other);
+  if (candidateCanonical === otherCanonical) {
+    return candidate.split("/").length - 1;
+  }
+  if (candidateCanonical.startsWith(`${otherCanonical}/`)) {
+    return other.split("/").length - 1;
+  }
+  if (otherCanonical.startsWith(`${candidateCanonical}/`)) {
+    return candidate.split("/").length - 1;
+  }
+  return null;
 };
 
 const allocatePaths = (drafts: ResourceDraft[]): PlannedResource[] => {
-  const used = new Set<string>();
-  const canonicalPreferred = drafts.map((draft) =>
-    draft.preferredPath?.normalize("NFC").toLocaleLowerCase("en-US"),
+  const ordered = [...drafts].sort((left, right) =>
+    lexicographic(left.key, right.key),
   );
-  return drafts
-    .sort((left, right) => lexicographic(left.key, right.key))
-    .map(({ preferredPath, disambiguator, ...resource }) => {
-      if (preferredPath === null) return { ...resource, archivePath: null };
-      let archivePath = preferredPath;
-      let attempt = 1;
-      const preferredCanonical = preferredPath
-        .normalize("NFC")
-        .toLocaleLowerCase("en-US");
-      if (
-        canonicalPreferred.some(
-          (other) =>
-            other !== undefined &&
-            other !== preferredCanonical &&
-            other.startsWith(`${preferredCanonical}/`),
-        )
-      ) {
-        archivePath = insertSuffix(preferredPath, disambiguator);
-        attempt += 1;
+  const assigned: string[] = [];
+  return ordered.map(({ preferredPath, disambiguator, ...resource }, index) => {
+    if (preferredPath === null) return { ...resource, archivePath: null };
+    let archivePath = preferredPath;
+    let attempt = 1;
+    for (;;) {
+      let segment: number | null = null;
+      for (const other of assigned) {
+        segment = conflictSegment(archivePath, other);
+        if (segment !== null) break;
       }
-      while (
-        used.has(archivePath.normalize("NFC").toLocaleLowerCase("en-US"))
-      ) {
-        archivePath = insertSuffix(
-          preferredPath,
-          attempt === 1 ? disambiguator : `${disambiguator}-${attempt}`,
-        );
-        attempt += 1;
+      if (segment === null) {
+        for (const future of ordered.slice(index + 1)) {
+          if (future.preferredPath === null) continue;
+          segment = conflictSegment(archivePath, future.preferredPath);
+          if (segment !== null) break;
+        }
       }
-      used.add(archivePath.normalize("NFC").toLocaleLowerCase("en-US"));
-      return { ...resource, archivePath };
-    });
+      if (segment === null) break;
+      archivePath = insertSuffixAt(
+        archivePath,
+        segment,
+        attempt === 1 ? disambiguator : `${disambiguator}-${attempt}`,
+      );
+      attempt += 1;
+    }
+    assigned.push(archivePath);
+    return { ...resource, archivePath };
+  });
 };
 
 const digestToken = (value: string): string => {
@@ -475,26 +558,32 @@ export async function discoverCoursePlan(
   selectedCourse: CourseSummary,
 ): Promise<CoursePlan> {
   const course = validateCourse(selectedCourse);
-  const limiter = new RequestLimiter();
-  const parsedModules = await loadModules(http, limiter, course.id);
+  const run = new DiscoveryRun();
+  const parsedModules = await loadModules(http, run, course.id);
 
-  const [rawFiles, rawFolders, rawPages] = await Promise.all([
-    fetchOptionalIndex(limiter, () =>
-      http.fetchAll<unknown>(
-        canvasEndpoint({ type: "courseFiles", courseId: course.id }),
+  const indexes = await run.all<unknown[] | null>([
+    () =>
+      fetchOptionalIndex(() =>
+        http.fetchAll<unknown>(
+          canvasEndpoint({ type: "courseFiles", courseId: course.id }),
+        ),
       ),
-    ),
-    fetchOptionalIndex(limiter, () =>
-      http.fetchAll<unknown>(
-        canvasEndpoint({ type: "courseFolders", courseId: course.id }),
+    () =>
+      fetchOptionalIndex(() =>
+        http.fetchAll<unknown>(
+          canvasEndpoint({ type: "courseFolders", courseId: course.id }),
+        ),
       ),
-    ),
-    fetchOptionalIndex(limiter, () =>
-      http.fetchAll<unknown>(
-        canvasEndpoint({ type: "coursePages", courseId: course.id }),
+    () =>
+      fetchOptionalIndex(() =>
+        http.fetchAll<unknown>(
+          canvasEndpoint({ type: "coursePages", courseId: course.id }),
+        ),
       ),
-    ),
   ]);
+  const rawFiles = indexes[0]!;
+  const rawFolders = indexes[1]!;
+  const rawPages = indexes[2]!;
 
   const folders =
     rawFolders === null
@@ -555,18 +644,16 @@ export async function discoverCoursePlan(
     }
   }
 
-  await Promise.all(
+  await run.all(
     [...linkedFileIds]
       .filter((id) => !files.has(id))
-      .map(async (id) => {
-        const detail = await limiter.run(() =>
-          http.json<unknown>(
-            canvasEndpoint({
-              type: "courseFile",
-              courseId: course.id,
-              fileId: id,
-            }),
-          ),
+      .map((id) => async () => {
+        const detail = await http.json<unknown>(
+          canvasEndpoint({
+            type: "courseFile",
+            courseId: course.id,
+            fileId: id,
+          }),
         );
         if (
           !isRecord(detail.value) ||
@@ -583,10 +670,12 @@ export async function discoverCoursePlan(
 
   const drafts: ResourceDraft[] = [...extraDrafts.values()];
   for (const file of files.values()) {
-    const folderSegments =
-      rawFolders === null || file.folderId === null
-        ? []
-        : (folders.get(file.folderId) ?? []);
+    let folderSegments: string[] = [];
+    if (rawFolders !== null && file.folderId !== null) {
+      const resolved = folders.get(file.folderId);
+      if (!resolved) throw new TypeError("Missing folder metadata");
+      folderSegments = resolved;
+    }
     drafts.push({
       key: `file:${file.id}`,
       kind: "file",

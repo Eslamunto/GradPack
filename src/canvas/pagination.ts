@@ -50,11 +50,73 @@ export function parseNextLink(header: string | null): URL | null {
     url.origin !== CANVAS_ORIGIN ||
     !url.pathname.startsWith("/api/v1/") ||
     url.username !== "" ||
-    url.password !== ""
+    url.password !== "" ||
+    url.hash !== ""
   ) {
     throw new TypeError("Rejected pagination URL");
   }
   return url;
+}
+
+const PAGINATION_PARAMETERS = new Set(["page", "per_page", "bookmark"]);
+
+const sortedValues = (url: URL, key: string): string[] =>
+  url.searchParams.getAll(key).sort();
+
+const sameValues = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean =>
+  left.length === right.length &&
+  left.every((value, index) => value === right[index]);
+
+function validatePaginationParameters(first: URL, next: URL): void {
+  const keys = new Set([
+    ...first.searchParams.keys(),
+    ...next.searchParams.keys(),
+  ]);
+  for (const key of keys) {
+    if (PAGINATION_PARAMETERS.has(key)) continue;
+    if (!sameValues(sortedValues(first, key), sortedValues(next, key))) {
+      throw new TypeError("Rejected pagination query");
+    }
+  }
+  const pageValues = next.searchParams.getAll("page");
+  const page = pageValues.length === 1 ? Number(pageValues[0]) : null;
+  if (
+    pageValues.length > 1 ||
+    (pageValues.length === 1 &&
+      (!/^[1-9]\d*$/.test(pageValues[0]!) ||
+        !Number.isSafeInteger(page) ||
+        page === null ||
+        page < 1))
+  ) {
+    throw new TypeError("Rejected pagination query");
+  }
+  const perPageValues = next.searchParams.getAll("per_page");
+  if (perPageValues.length > 1)
+    throw new TypeError("Rejected pagination query");
+  if (perPageValues.length === 1) {
+    const perPage = Number(perPageValues[0]);
+    if (!Number.isSafeInteger(perPage) || perPage < 1 || perPage > 100) {
+      throw new TypeError("Rejected pagination query");
+    }
+  }
+  const bookmarkValues = next.searchParams.getAll("bookmark");
+  if (
+    bookmarkValues.length > 1 ||
+    (bookmarkValues.length === 1 &&
+      (!bookmarkValues[0] || bookmarkValues[0].length > 1_000))
+  ) {
+    throw new TypeError("Rejected pagination query");
+  }
+}
+
+function validateContinuation(first: URL, next: URL): void {
+  if (next.pathname !== first.pathname) {
+    throw new TypeError("Rejected pagination path");
+  }
+  validatePaginationParameters(first, next);
 }
 
 export async function fetchAllPages<T>(
@@ -71,6 +133,7 @@ export async function fetchAllPages<T>(
     const page = await request(next);
     output.push(...page.value);
     next = parseNextLink(page.response.headers.get("link"));
+    if (next) validateContinuation(first, next);
   }
 
   return output;

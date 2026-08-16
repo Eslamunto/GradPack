@@ -27,6 +27,14 @@ const moduleItem = (
   extra: Record<string, unknown> = {},
 ) => ({ id, title: `Item ${id}`, position: id, type, ...extra });
 
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: (() => void) | undefined;
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve: () => resolve?.() };
+}
+
 describe("discoverCoursePlan", () => {
   it("unions broad indexes with module-linked resources and deduplicates canonically", async () => {
     const http = syntheticCanvasHttp({
@@ -307,6 +315,111 @@ describe("discoverCoursePlan", () => {
     expect(paths.some((path) => path.includes("--file-1"))).toBe(true);
   });
 
+  it("rechecks generated disambiguators against future folder ancestors", async () => {
+    const long = "x".repeat(100);
+    const longGenerated = `${"x".repeat(92)}--file-4`;
+    const http = syntheticCanvasHttp({
+      modules: [],
+      folders: [
+        { id: 401, full_name: "course files/Folder" },
+        { id: 402, full_name: "course files/Folder--file-1" },
+        { id: 403, full_name: `course files/${long}` },
+        { id: 404, full_name: `course files/${longGenerated}` },
+      ],
+      files: [
+        { ...file(1, "Folder"), folder_id: null },
+        { ...file(2, "inside.txt"), folder_id: 401 },
+        { ...file(3, "future.txt"), folder_id: 402 },
+        { ...file(4, `${long}tail.txt`), folder_id: null },
+        { ...file(5, "long-inside.txt"), folder_id: 403 },
+        { ...file(6, "long-future.txt"), folder_id: 404 },
+      ],
+      pages: [],
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+    const paths = plan.resources
+      .map(({ archivePath }) => archivePath)
+      .filter((path): path is string => path !== null);
+    const canonical = paths.map((path) => path.normalize("NFKC").toLowerCase());
+
+    expect(
+      canonical.some((path, index) =>
+        canonical.some(
+          (other, otherIndex) =>
+            index !== otherIndex &&
+            (other === path || other.startsWith(`${path}/`)),
+        ),
+      ),
+    ).toBe(false);
+    expect(paths.every((path) => path.length <= 240)).toBe(true);
+    expect(paths).not.toContain("files/Folder--file-1");
+    expect(paths).not.toContain(`files/${longGenerated}`);
+  });
+
+  it("case-folds Greek sigma and sharp-S collisions deterministically", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [
+        file(10, "ΟΣ.txt"),
+        file(11, "οσ.TXT"),
+        file(12, "Straße.txt"),
+        file(13, "STRASSE.TXT"),
+      ],
+      pages: [],
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+    const paths = plan.resources
+      .map(({ archivePath }) => archivePath)
+      .filter((path): path is string => path !== null);
+
+    expect(paths.some((path) => /--file-(10|11)/.test(path))).toBe(true);
+    expect(paths.some((path) => /--file-(12|13)/.test(path))).toBe(true);
+  });
+
+  it("hard-fails a referenced folder missing from an available folder index", async () => {
+    await expect(
+      discoverCoursePlan(
+        syntheticCanvasHttp({
+          modules: [],
+          files: [{ ...file(1), folder_id: 999 }],
+          folders: [{ id: 401, full_name: "course files/Present" }],
+          pages: [],
+        }),
+        syntheticCourse,
+      ),
+    ).rejects.toThrow("Missing folder metadata");
+  });
+
+  it("requires full_name instead of trusting a name-only folder record", async () => {
+    await expect(
+      discoverCoursePlan(
+        syntheticCanvasHttp({
+          modules: [],
+          files: [file(1)],
+          folders: [{ id: 401, name: "Untrusted" }],
+          pages: [],
+        }),
+        syntheticCourse,
+      ),
+    ).rejects.toThrow("Invalid folder path");
+  });
+
+  it("uses a safe root path when the entire folder index is unavailable", async () => {
+    const plan = await discoverCoursePlan(
+      syntheticCanvasHttp({
+        modules: [],
+        unavailableIndexes: { folders: 404 },
+        files: [file(1, "root.txt")],
+        pages: [],
+      }),
+      syntheticCourse,
+    );
+
+    expect(plan.resources[0]?.archivePath).toBe("files/root.txt");
+  });
+
   it("rejects file metadata whose ID does not match the closed requested endpoint", async () => {
     const http = syntheticCanvasHttp({
       unavailableIndexes: { files: 403 },
@@ -371,6 +484,231 @@ describe("discoverCoursePlan", () => {
       6,
     );
     expect(maxActive).toBe(2);
+  });
+
+  it("latches a module-item failure, cancels queued calls, and joins active work", async () => {
+    const activeGate = deferred();
+    const failureSeen = deferred();
+    const marker = new CanvasResponseError("module item failure");
+    const calls: number[] = [];
+    let active = 0;
+    const fetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
+      if (url.pathname.endsWith("/modules")) {
+        return [201, 202, 203, 204].map((id) => ({ id }));
+      }
+      const match = /\/modules\/(\d+)\/items$/.exec(url.pathname);
+      if (!match) return [];
+      const id = Number(match[1]);
+      calls.push(id);
+      active += 1;
+      if (id === 201) {
+        await activeGate.promise;
+        active -= 1;
+        return [];
+      }
+      if (id === 202) {
+        active -= 1;
+        failureSeen.resolve();
+        throw marker;
+      }
+      active -= 1;
+      return [];
+    });
+    const request = discoverCoursePlan(
+      { fetchAll, json: vi.fn() } as unknown as SyntheticHttp,
+      syntheticCourse,
+    );
+    let terminal = false;
+    const observed = request.then(
+      () => {
+        terminal = true;
+      },
+      () => {
+        terminal = true;
+      },
+    );
+
+    await failureSeen.promise;
+    await Promise.resolve();
+    const terminalBeforeJoin = terminal;
+    activeGate.resolve();
+    await expect(request).rejects.toBe(marker);
+    await observed;
+
+    expect(terminalBeforeJoin).toBe(false);
+    expect(calls).toEqual([201, 202]);
+    expect(active).toBe(0);
+  });
+
+  it("latches an optional-index hard failure without dispatching queued indexes", async () => {
+    const activeGate = deferred();
+    const failureSeen = deferred();
+    const marker = new CanvasResponseError("index failure");
+    const collections: string[] = [];
+    let active = 0;
+    const fetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
+      if (url.pathname.endsWith("/modules")) return [];
+      const collection = url.pathname.split("/").at(-1)!;
+      collections.push(collection);
+      active += 1;
+      if (collection === "files") {
+        await activeGate.promise;
+        active -= 1;
+        return [];
+      }
+      if (collection === "folders") {
+        active -= 1;
+        failureSeen.resolve();
+        throw marker;
+      }
+      active -= 1;
+      return [];
+    });
+    const request = discoverCoursePlan(
+      { fetchAll, json: vi.fn() } as unknown as SyntheticHttp,
+      syntheticCourse,
+    );
+    let terminal = false;
+    const observed = request.then(
+      () => {
+        terminal = true;
+      },
+      () => {
+        terminal = true;
+      },
+    );
+
+    await failureSeen.promise;
+    await Promise.resolve();
+    const terminalBeforeJoin = terminal;
+    activeGate.resolve();
+    await expect(request).rejects.toBe(marker);
+    await observed;
+
+    expect(terminalBeforeJoin).toBe(false);
+    expect(collections).toEqual(["files", "folders"]);
+    expect(active).toBe(0);
+  });
+
+  it("latches a file-metadata failure without dispatching queued metadata", async () => {
+    const activeGate = deferred();
+    const failureSeen = deferred();
+    const marker = new CanvasResponseError("metadata failure");
+    const calls: number[] = [];
+    let active = 0;
+    const http = syntheticCanvasHttp({
+      modules: [
+        {
+          id: 201,
+          items: [701, 702, 703, 704].map((id) =>
+            moduleItem(id, "File", { content_id: id }),
+          ),
+        },
+      ],
+      unavailableIndexes: { files: 404 },
+      pages: [],
+    });
+    http.json.mockImplementation(async (url: URL) => {
+      const id = Number(url.pathname.split("/").at(-1));
+      calls.push(id);
+      active += 1;
+      if (id === 701) {
+        await activeGate.promise;
+        active -= 1;
+        return { value: file(id) };
+      }
+      if (id === 702) {
+        active -= 1;
+        failureSeen.resolve();
+        throw marker;
+      }
+      active -= 1;
+      return { value: file(id) };
+    });
+    const request = discoverCoursePlan(http, syntheticCourse);
+    let terminal = false;
+    const observed = request.then(
+      () => {
+        terminal = true;
+      },
+      () => {
+        terminal = true;
+      },
+    );
+
+    await failureSeen.promise;
+    await Promise.resolve();
+    const terminalBeforeJoin = terminal;
+    activeGate.resolve();
+    await expect(request).rejects.toBe(marker);
+    await observed;
+
+    expect(terminalBeforeJoin).toBe(false);
+    expect(calls).toEqual([701, 702]);
+    expect(active).toBe(0);
+  });
+
+  it("keeps the two-request cap across overlapping discoveries around a failure", async () => {
+    const firstActiveGate = deferred();
+    const failureSeen = deferred();
+    const secondIndexGate = deferred();
+    const secondIndexStarted = deferred();
+    const marker = new CanvasResponseError("first discovery failed");
+    let active = 0;
+    let maxActive = 0;
+    const enter = (): void => {
+      active += 1;
+      maxActive = Math.max(maxActive, active);
+    };
+    const leave = (): void => {
+      active -= 1;
+    };
+    const firstFetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
+      if (url.pathname.endsWith("/modules")) return [{ id: 201 }, { id: 202 }];
+      const id = Number(url.pathname.split("/").at(-2));
+      enter();
+      if (id === 201) {
+        await firstActiveGate.promise;
+        leave();
+        return [];
+      }
+      leave();
+      failureSeen.resolve();
+      throw marker;
+    });
+    const secondFetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
+      enter();
+      if (url.pathname.endsWith("/modules")) {
+        await Promise.resolve();
+        leave();
+        return [];
+      }
+      secondIndexStarted.resolve();
+      await secondIndexGate.promise;
+      leave();
+      return [];
+    });
+    const first = discoverCoursePlan(
+      { fetchAll: firstFetchAll, json: vi.fn() } as unknown as SyntheticHttp,
+      syntheticCourse,
+    );
+    await failureSeen.promise;
+    const second = discoverCoursePlan(
+      { fetchAll: secondFetchAll, json: vi.fn() } as unknown as SyntheticHttp,
+      syntheticCourse,
+    );
+
+    await secondIndexStarted.promise;
+    await Promise.resolve();
+    const observedMax = maxActive;
+    secondIndexGate.resolve();
+    await second;
+    firstActiveGate.resolve();
+    await expect(first).rejects.toBe(marker);
+
+    expect(observedMax).toBe(2);
+    expect(maxActive).toBe(2);
+    expect(active).toBe(0);
   });
 
   it("has no production resource-count cap", async () => {

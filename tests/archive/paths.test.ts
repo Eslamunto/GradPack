@@ -39,4 +39,15 @@ describe("safeArchivePath", () => {
     expect(first.length).toBeLessThanOrEqual(240);
     expect(first.split("/")[0]).toBe(segments[0]);
   });
+
+  it.each([
+    ["safe\u202Ename", "safe_name"],
+    ["safe\u2066name", "safe_name"],
+    ["safe\ud800name", "safe_name"],
+  ])(
+    "neutralizes Unicode format and surrogate controls in %j",
+    (input, expected) => {
+      expect(safeArchivePath(input)).toBe(expected);
+    },
+  );
 });
