@@ -166,6 +166,25 @@ const assertBuildFileIdentity = async (handle, path, seal) => {
 };
 
 /**
+ * @param {string} path
+ * @param {FileSeal} seal
+ */
+const assertPathFileSeal = async (path, seal) => {
+  const stat = await missingAsTypeError(path, "Artifact target");
+  if (
+    stat.isSymbolicLink() ||
+    !stat.isFile() ||
+    stat.nlink !== 1 ||
+    !sameIdentity(seal, identityOf(stat)) ||
+    stat.size !== seal.size ||
+    stat.mtimeMs !== seal.mtimeMs ||
+    stat.ctimeMs !== seal.ctimeMs
+  ) {
+    throw new TypeError("Versioned artifact target identity changed");
+  }
+};
+
+/**
  * @param {SealedDirectory} directory
  * @param {Checkpoint} checkpoint
  */
@@ -274,14 +293,9 @@ const validateText = (path, bytes) => {
 };
 
 /** @param {string} path */
-const assertSafeExistingTarget = async (path) => {
+const lstatOrNull = async (path) => {
   try {
-    const stat = await lstat(path);
-    if (stat.isSymbolicLink() || !stat.isFile() || stat.nlink !== 1) {
-      throw new TypeError(
-        "Artifact target has an unsafe hardlink or link count",
-      );
-    }
+    return await lstat(path);
   } catch (error) {
     if (
       error &&
@@ -289,17 +303,49 @@ const assertSafeExistingTarget = async (path) => {
       "code" in error &&
       error.code === "ENOENT"
     ) {
-      return;
+      return null;
     }
     throw error;
   }
 };
 
 /**
- * @param {SealedDirectory} directory
- * @param {Uint8Array} bytes
+ * @param {string} path
+ * @returns {Promise<{ bytes: Uint8Array, seal: FileSeal } | null>}
  */
-const createTemporaryArtifact = async (directory, bytes) => {
+const readImmutableTarget = async (path) => {
+  const before = await lstatOrNull(path);
+  if (before === null) return null;
+  if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) {
+    throw new TypeError("Artifact target has an unsafe hardlink or link count");
+  }
+  const handle = await open(path, constants.O_RDONLY | NO_FOLLOW);
+  const seal = fileSealOf(before);
+  try {
+    await assertBuildFileIdentity(handle, path, seal);
+    const bytes = new Uint8Array(await handle.readFile());
+    await assertBuildFileIdentity(handle, path, seal);
+    return { bytes, seal };
+  } finally {
+    await handle.close();
+  }
+};
+
+/**
+ * @param {Uint8Array} left
+ * @param {Uint8Array} right
+ */
+const sameBytes = (left, right) =>
+  left.byteLength === right.byteLength &&
+  Buffer.from(left).equals(Buffer.from(right));
+
+/**
+ * @param {SealedDirectory} directory
+ * @param {string} name
+ * @param {Uint8Array} bytes
+ * @param {Checkpoint} checkpoint
+ */
+const createTemporaryArtifact = async (directory, name, bytes, checkpoint) => {
   await assertDirectoryIdentity(directory, "Artifact directory");
   const path = join(
     directory.path,
@@ -310,19 +356,31 @@ const createTemporaryArtifact = async (directory, bytes) => {
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | NO_FOLLOW,
     0o600,
   );
+  /** @type {Identity | null} */
+  let identity = null;
   try {
     const before = await handle.stat();
+    identity = identityOf(before);
+    await checkpoint(`artifact-temporary-created:${name}`);
     if (!before.isFile() || before.nlink !== 1) {
       throw new TypeError("Temporary artifact has an unsafe link count");
     }
-    const identity = identityOf(before);
+    await assertLinkedFileIdentity(handle, path, identity);
+    await checkpoint(`artifact-temporary-opened:${name}`);
     await handle.writeFile(bytes);
+    await checkpoint(`artifact-temporary-written:${name}`);
     await handle.sync();
+    await checkpoint(`artifact-temporary-synced:${name}`);
     await assertLinkedFileIdentity(handle, path, identity);
     await assertDirectoryIdentity(directory, "Artifact directory");
-    return { path, identity };
-  } finally {
     await handle.close();
+    return { path, identity };
+  } catch (error) {
+    await handle.close().catch(() => {});
+    if (identity !== null) {
+      await removeTemporaryArtifact({ path, identity });
+    }
+    throw error;
   }
 };
 
@@ -345,20 +403,76 @@ const removeTemporaryArtifact = async (temporary) => {
 };
 
 /**
+ * @param {{ path: string, identity: Identity }} installed
+ * @returns {Promise<boolean>}
+ */
+const removeInstalledArtifact = async (installed) => {
+  try {
+    const stat = await lstat(installed.path);
+    if (
+      stat.isFile() &&
+      !stat.isSymbolicLink() &&
+      sameIdentity(installed.identity, identityOf(stat))
+    ) {
+      await unlink(installed.path);
+      return true;
+    }
+  } catch {
+    // The caller reports rollback failure without deleting an unknown path.
+  }
+  return false;
+};
+
+/**
  * @param {SealedDirectory} directory
  * @param {ReadonlyArray<{ name: string, bytes: Uint8Array }>} outputs
  * @param {Checkpoint} checkpoint
  */
 const writeArtifactsAtomically = async (directory, outputs, checkpoint) => {
   await assertDirectoryIdentity(directory, "Artifact directory");
+  /** @type {Array<{ bytes: Uint8Array, seal: FileSeal } | null>} */
+  const existing = [];
   for (const { name } of outputs) {
-    await assertSafeExistingTarget(join(directory.path, name));
+    existing.push(await readImmutableTarget(join(directory.path, name)));
+  }
+  await assertDirectoryIdentity(directory, "Artifact directory");
+  for (let index = 0; index < existing.length; index += 1) {
+    const current = existing[index];
+    const output = outputs[index];
+    if (current && output) {
+      await assertPathFileSeal(join(directory.path, output.name), current.seal);
+    }
+  }
+  const present = existing.filter((value) => value !== null).length;
+  if (present !== 0 && present !== outputs.length) {
+    throw new TypeError(
+      "Versioned artifact pair is incomplete or inconsistent",
+    );
+  }
+  if (present === outputs.length) {
+    if (
+      outputs.some(({ bytes }, index) => {
+        const current = existing[index];
+        return (
+          current === null ||
+          current === undefined ||
+          !sameBytes(current.bytes, bytes)
+        );
+      })
+    ) {
+      throw new TypeError("Versioned artifact pair differs and is immutable");
+    }
+    return;
   }
   /** @type {Array<{ path: string, identity: Identity }>} */
   const temporary = [];
+  /** @type {Array<{ path: string, identity: Identity }>} */
+  const installed = [];
   try {
-    for (const { bytes } of outputs) {
-      temporary.push(await createTemporaryArtifact(directory, bytes));
+    for (const { name, bytes } of outputs) {
+      temporary.push(
+        await createTemporaryArtifact(directory, name, bytes, checkpoint),
+      );
     }
     await checkpoint("artifact-temporaries-written");
     await assertDirectoryIdentity(directory, "Artifact directory");
@@ -366,22 +480,44 @@ const writeArtifactsAtomically = async (directory, outputs, checkpoint) => {
       const output = outputs[index];
       const staged = temporary[index];
       if (!output || !staged) throw new TypeError("Incomplete artifact write");
-      await assertSafeExistingTarget(join(directory.path, output.name));
-      await rename(staged.path, join(directory.path, output.name));
-      const installed = await missingAsTypeError(
-        join(directory.path, output.name),
-        "Artifact",
-      );
+      const target = join(directory.path, output.name);
+      await checkpoint(`artifact-before-install:${output.name}`);
+      await assertDirectoryIdentity(directory, "Artifact directory");
+      const unexpectedTarget = await lstatOrNull(target);
       if (
-        installed.isSymbolicLink() ||
-        !installed.isFile() ||
-        installed.nlink !== 1 ||
-        !sameIdentity(staged.identity, identityOf(installed))
+        unexpectedTarget !== null &&
+        (unexpectedTarget.isSymbolicLink() ||
+          !unexpectedTarget.isFile() ||
+          unexpectedTarget.nlink !== 1)
+      ) {
+        throw new TypeError(
+          "Artifact target has an unsafe hardlink or link count",
+        );
+      }
+      if (unexpectedTarget !== null) {
+        throw new TypeError("Versioned artifact target changed before install");
+      }
+      await rename(staged.path, target);
+      installed.push({ path: target, identity: staged.identity });
+      const installedStat = await missingAsTypeError(target, "Artifact");
+      if (
+        installedStat.isSymbolicLink() ||
+        !installedStat.isFile() ||
+        installedStat.nlink !== 1 ||
+        !sameIdentity(staged.identity, identityOf(installedStat))
       ) {
         throw new TypeError("Artifact identity changed");
       }
     }
     await assertDirectoryIdentity(directory, "Artifact directory");
+  } catch (error) {
+    const rolledBack = await Promise.all(
+      installed.reverse().map(removeInstalledArtifact),
+    );
+    if (rolledBack.some((removed) => !removed)) {
+      throw new TypeError("Artifact pair rollback failed", { cause: error });
+    }
+    throw error;
   } finally {
     await Promise.all(temporary.map(removeTemporaryArtifact));
   }
