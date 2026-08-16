@@ -21,6 +21,7 @@ let activeRunId = "";
 let activeTabId: number | null = null;
 let terminalReceived = false;
 let cancelRequested = false;
+let lastProgressTotal: number | null = null;
 
 const button = (
   label: string,
@@ -206,6 +207,7 @@ async function connect(): Promise<void> {
   activeTabId = null;
   terminalReceived = false;
   cancelRequested = false;
+  lastProgressTotal = null;
   update({ type: "CONNECTING" });
   try {
     const result = exactConnection(
@@ -281,8 +283,15 @@ async function cancelRun(): Promise<void> {
       }),
     );
   } catch {
-    terminalReceived = true;
-    update({ type: "FAILED", message: RUNNER_TERMINAL_MESSAGES.tab });
+    if (
+      activeRunId === runId &&
+      activeTabId === tabId &&
+      state.name === "packing" &&
+      !terminalReceived
+    ) {
+      terminalReceived = true;
+      update({ type: "FAILED", message: RUNNER_TERMINAL_MESSAGES.tab });
+    }
   }
 }
 
@@ -302,9 +311,18 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
   if (event.runId !== activeRunId || terminalReceived) return;
   if (event.type === "COURSES")
     update({ type: "COURSES", courses: event.courses });
-  else if (event.type === "PROGRESS")
+  else if (event.type === "PROGRESS") {
+    if (state.name !== "ready" && state.name !== "packing") return;
+    if (
+      lastProgressTotal !== null &&
+      lastProgressTotal !== 0 &&
+      event.total !== lastProgressTotal
+    )
+      return;
+    if (lastProgressTotal === null || event.total > 0)
+      lastProgressTotal = event.total;
     update({ type: "PROGRESS", progress: event });
-  else if (event.type === "COMPLETE") {
+  } else if (event.type === "COMPLETE") {
     const previous = state;
     const counts: OutcomeCounts = {
       success: event.success,
@@ -313,12 +331,35 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       unsupported: event.unsupported,
       external: event.external,
     };
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    if (lastProgressTotal === null || total !== lastProgressTotal) return;
     update({ type: "COMPLETE", counts });
     terminalReceived = state !== previous;
   } else {
     const previous = state;
     update({ type: "FAILED", message: event.message });
     terminalReceived = state !== previous;
+  }
+});
+
+const stopForConnectedTab = (tabId: number): void => {
+  if (
+    activeTabId !== tabId ||
+    terminalReceived ||
+    state.name === "complete" ||
+    state.name === "blocked"
+  )
+    return;
+  terminalReceived = true;
+  cancelRequested = false;
+  activeTabId = null;
+  update({ type: "TAB_LOST", message: RUNNER_TERMINAL_MESSAGES.tab });
+};
+
+chrome.tabs.onRemoved.addListener((tabId) => stopForConnectedTab(tabId));
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === "loading" || changeInfo.url !== undefined) {
+    stopForConnectedTab(tabId);
   }
 });
 

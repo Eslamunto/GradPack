@@ -39,14 +39,28 @@ export function normalizeAccessibleCourses(
 
 export async function listAccessibleCourses(
   http: CanvasHttp,
+  options: { abort?: (reason: Error | DOMException) => void } = {},
 ): Promise<CourseSummary[]> {
-  const [active, completed] = await Promise.all([
-    http.fetchAll<unknown>(
-      canvasEndpoint({ type: "courses", enrollmentState: "active" }),
-    ),
-    http.fetchAll<unknown>(
-      canvasEndpoint({ type: "courses", enrollmentState: "completed" }),
-    ),
+  let firstError: Error | DOMException | undefined;
+  const request = (enrollmentState: "active" | "completed") =>
+    http
+      .fetchAll<unknown>(canvasEndpoint({ type: "courses", enrollmentState }))
+      .catch((error: unknown) => {
+        firstError ??=
+          error instanceof Error || error instanceof DOMException
+            ? error
+            : new TypeError("Canvas course listing failed");
+        options.abort?.(firstError);
+        throw firstError;
+      });
+  const settled = await Promise.allSettled([
+    request("active"),
+    request("completed"),
   ]);
-  return normalizeAccessibleCourses(active, completed);
+  if (firstError) throw firstError;
+  const values = settled.map((result) => {
+    if (result.status === "rejected") throw result.reason;
+    return result.value;
+  });
+  return normalizeAccessibleCourses(values[0]!, values[1]!);
 }

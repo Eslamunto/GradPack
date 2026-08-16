@@ -1,4 +1,8 @@
-import { EXTENSION_CHANNEL, RUNNER_CHANNEL } from "./constants";
+import {
+  EXTENSION_CHANNEL,
+  MAX_ARCHIVE_RESOURCES,
+  RUNNER_CHANNEL,
+} from "./constants";
 import type { CourseSummary } from "./model";
 
 export const RUNNER_TERMINAL_MESSAGES = Object.freeze({
@@ -233,14 +237,24 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     ) {
       throw new TypeError("Unsupported runner event");
     }
+    const completed = nonNegativeInteger(input.completed);
+    const total = nonNegativeInteger(input.total);
+    const failed = nonNegativeInteger(input.failed);
+    if (
+      total > MAX_ARCHIVE_RESOURCES ||
+      completed > total ||
+      failed > completed
+    ) {
+      throw new TypeError("Invalid progress counts");
+    }
     return {
       channel: RUNNER_CHANNEL,
       type: "PROGRESS",
       runId: id,
       stage: stage as "discovery" | "download" | "sanitize" | "package",
-      completed: nonNegativeInteger(input.completed),
-      total: nonNegativeInteger(input.total),
-      failed: nonNegativeInteger(input.failed),
+      completed,
+      total,
+      failed,
     };
   }
   if (input.type === "COMPLETE") {
@@ -259,16 +273,23 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     const message = terminalMessage(input.message, [
       RUNNER_TERMINAL_MESSAGES.complete,
     ]);
-    return {
-      channel: RUNNER_CHANNEL,
-      type: "COMPLETE",
-      runId: id,
-      message,
+    const counts = {
       success: nonNegativeInteger(input.success),
       failed: nonNegativeInteger(input.failed),
       unavailable: nonNegativeInteger(input.unavailable),
       unsupported: nonNegativeInteger(input.unsupported),
       external: nonNegativeInteger(input.external),
+    };
+    const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+    if (!Number.isSafeInteger(total) || total > MAX_ARCHIVE_RESOURCES) {
+      throw new TypeError("Invalid terminal counts");
+    }
+    return {
+      channel: RUNNER_CHANNEL,
+      type: "COMPLETE",
+      runId: id,
+      message,
+      ...counts,
     };
   }
   if (input.type === "CANCELLED" || input.type === "FAILED") {

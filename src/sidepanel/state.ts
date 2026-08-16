@@ -15,7 +15,8 @@ export type UiEvent =
   | { type: "SELECT"; courseId: number }
   | { type: "PROGRESS"; progress: Progress }
   | { type: "COMPLETE"; counts: OutcomeCounts }
-  | { type: "FAILED"; message: string };
+  | { type: "FAILED"; message: string }
+  | { type: "TAB_LOST"; message: string };
 
 export type ViewState =
   | { name: "connect"; message: string; busy: boolean }
@@ -68,6 +69,12 @@ export function reduceState(state: ViewState, event: UiEvent): ViewState {
   if (
     event.type === "FAILED" &&
     (state.name === "connect" || state.name === "packing")
+  )
+    return { name: "blocked", message: event.message };
+  if (
+    event.type === "TAB_LOST" &&
+    state.name !== "complete" &&
+    state.name !== "blocked"
   )
     return { name: "blocked", message: event.message };
   return state;

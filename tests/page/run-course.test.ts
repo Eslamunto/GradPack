@@ -75,15 +75,15 @@ const dependencies = (
 
 describe("runCourse", () => {
   it("builds a complete synthetic ZIP and reports exact scalar progress", async () => {
+    const fileBytes = strToU8("data");
+    const pageBytes = strToU8(
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main><p>Safe</p></main></body></html>',
+    );
     const deps = dependencies(
       plan([file(1), page, external]),
       async (resource) => ({
         status: "success",
-        bytes: strToU8(
-          resource.kind === "page"
-            ? '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main><p>Safe</p></main></body></html>'
-            : "data",
-        ),
+        bytes: resource.kind === "page" ? pageBytes : fileBytes,
       }),
     );
     const progress = vi.fn();
@@ -118,6 +118,11 @@ describe("runCourse", () => {
       failed: 0,
     });
     expect(deps.download).toHaveBeenCalledOnce();
+    expect(fileBytes.every((value) => value === 0)).toBe(true);
+    expect(pageBytes.every((value) => value === 0)).toBe(true);
+    expect(Array.from(unzipSync(result.zipBytes)["files/file-1.bin"]!)).toEqual(
+      Array.from(strToU8("data")),
+    );
   });
 
   it.each([

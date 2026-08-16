@@ -193,7 +193,10 @@ const normalizeFolderMap = (
 };
 
 type DiscoveryFailure = Error | DOMException;
-type RunOwner = { failure?: { error: DiscoveryFailure } };
+type RunOwner = {
+  failure?: { error: DiscoveryFailure };
+  abort?: (reason: DiscoveryFailure) => void;
+};
 
 type ScheduledJob = {
   owner: RunOwner;
@@ -220,12 +223,15 @@ class SharedRequestScheduler {
   }
 
   private latch(owner: RunOwner, error: unknown): DiscoveryFailure {
-    owner.failure ??= {
-      error:
-        error instanceof Error || error instanceof DOMException
-          ? error
-          : new TypeError("Canvas discovery failed"),
-    };
+    if (!owner.failure) {
+      owner.failure = {
+        error:
+          error instanceof Error || error instanceof DOMException
+            ? error
+            : new TypeError("Canvas discovery failed"),
+      };
+      owner.abort?.(owner.failure.error);
+    }
     const failure = owner.failure.error;
     const pending: ScheduledJob[] = [];
     for (const job of this.queue) {
@@ -260,7 +266,11 @@ class SharedRequestScheduler {
 const sharedRequestScheduler = new SharedRequestScheduler();
 
 class DiscoveryRun {
-  private readonly owner: RunOwner = {};
+  private readonly owner: RunOwner;
+
+  constructor(abort?: (reason: DiscoveryFailure) => void) {
+    this.owner = { ...(abort ? { abort } : {}) };
+  }
 
   one<T>(operation: () => Promise<T>): Promise<T> {
     return sharedRequestScheduler.schedule(this.owner, operation);
@@ -556,9 +566,10 @@ export function assertPilotSize(plan: CoursePlan): void {
 export async function discoverCoursePlan(
   http: CanvasHttp,
   selectedCourse: CourseSummary,
+  options: { abort?: (reason: Error | DOMException) => void } = {},
 ): Promise<CoursePlan> {
   const course = validateCourse(selectedCourse);
-  const run = new DiscoveryRun();
+  const run = new DiscoveryRun(options.abort);
   const parsedModules = await loadModules(http, run, course.id);
 
   const indexes = await run.all<unknown[] | null>([

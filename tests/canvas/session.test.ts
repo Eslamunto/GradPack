@@ -70,4 +70,33 @@ describe("listAccessibleCourses", () => {
       ],
     );
   });
+
+  it("latches the first list failure, aborts its sibling, and awaits cleanup", async () => {
+    const controller = new AbortController();
+    const first = new TypeError("first list failure");
+    const siblingCleaned = vi.fn();
+    const fetchAll = vi.fn((url: URL) => {
+      if (url.searchParams.get("enrollment_state") === "active") {
+        return Promise.reject(first);
+      }
+      return new Promise<unknown[]>((_resolve, reject) => {
+        controller.signal.addEventListener(
+          "abort",
+          () => {
+            siblingCleaned();
+            reject(new DOMException("aborted", "AbortError"));
+          },
+          { once: true },
+        );
+      });
+    });
+
+    await expect(
+      listAccessibleCourses({ fetchAll } as never, {
+        abort: (reason) => controller.abort(reason),
+      }),
+    ).rejects.toBe(first);
+    expect(controller.signal.reason).toBe(first);
+    expect(siblingCleaned).toHaveBeenCalledOnce();
+  });
 });

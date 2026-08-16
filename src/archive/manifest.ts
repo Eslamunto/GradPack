@@ -6,6 +6,7 @@ import type {
   ResourceKind,
   ResourceOutcome,
 } from "../shared/model";
+import { MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES } from "../shared/constants";
 
 const GRADPACK_VERSION = "0.1.0-alpha.1";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
@@ -13,8 +14,8 @@ const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
 // Classic ZIP stores at most 65,535 entries. Three are reserved for GradPack's
 // core files, so this pilot stops rather than silently omitting resources.
-export const MAX_ARCHIVE_RESOURCES = 65_532;
-export const MAX_ZIP_PAYLOAD_ENTRIES = 65_532;
+export const MAX_ARCHIVE_RESOURCES = SHARED_MAX_ARCHIVE_RESOURCES;
+export const MAX_ZIP_PAYLOAD_ENTRIES = SHARED_MAX_ARCHIVE_RESOURCES;
 const MAX_TEXT_LENGTH = 4096;
 const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;

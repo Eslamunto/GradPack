@@ -1,5 +1,6 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasSessionError } from "../../src/canvas/http";
+import { RunSafetyError } from "../../src/page/run-course";
 import { EXTENSION_CHANNEL, RUNNER_CHANNEL } from "../../src/shared/constants";
 import { syntheticCourse } from "../fixtures/course-plan";
 
@@ -8,11 +9,16 @@ const mocks = vi.hoisted(() => ({
   listAccessibleCourses: vi.fn(),
   runCourse: vi.fn(),
   http: {},
+  signals: [] as AbortSignal[],
 }));
 
 vi.mock("../../src/canvas/http", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/canvas/http")>()),
-  CanvasHttp: vi.fn(function CanvasHttp() {
+  CanvasHttp: vi.fn(function CanvasHttp(
+    _fetcher: typeof fetch,
+    signal?: AbortSignal,
+  ) {
+    if (signal) mocks.signals.push(signal);
     return mocks.http;
   }),
 }));
@@ -55,6 +61,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
+  mocks.signals.length = 0;
   mocks.assertCurrentUser.mockReset().mockResolvedValue(undefined);
   mocks.listAccessibleCourses.mockReset().mockResolvedValue([syntheticCourse]);
   mocks.runCourse.mockReset().mockResolvedValue({
@@ -224,6 +231,8 @@ describe("production page runner", () => {
       expect(mocks.assertCurrentUser).toHaveBeenCalledOnce(),
     );
     expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce();
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    await Promise.resolve();
     postMessage.mockRestore();
   });
 
@@ -242,7 +251,7 @@ describe("production page runner", () => {
     await vi.waitFor(() =>
       expect(mocks.assertCurrentUser).toHaveBeenCalledOnce(),
     );
-    start("run-list0006");
+    start("run-overlap06");
     await vi.waitFor(() =>
       expect(
         postMessage.mock.calls.some(([value]) => eventType(value) === "FAILED"),
@@ -257,6 +266,42 @@ describe("production page runner", () => {
         ),
       ).toBe(true),
     );
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    postMessage.mockRestore();
+  });
+
+  it("lets a fresh list replace an unused prior list and terminalizes the stale owner", async () => {
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list("run-unused001");
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) =>
+            eventType(value) === "COURSES" &&
+            (value as { payload?: { runId?: unknown } }).payload?.runId ===
+              "run-unused001",
+        ),
+      ).toBe(true),
+    );
+    list("run-fresh0001");
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) =>
+            eventType(value) === "COURSES" &&
+            (value as { payload?: { runId?: unknown } }).payload?.runId ===
+              "run-fresh0001",
+        ),
+      ).toBe(true),
+    );
+    const calls = postMessage.mock.calls.length;
+    start("run-unused001");
+    await Promise.resolve();
+    expect(postMessage).toHaveBeenCalledTimes(calls);
+    expect(mocks.runCourse).not.toHaveBeenCalled();
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
     postMessage.mockRestore();
   });
 
@@ -301,6 +346,192 @@ describe("production page runner", () => {
         ([value]) => eventType(value) === "CANCELLED",
       ),
     ).toHaveLength(1);
+    postMessage.mockRestore();
+  });
+
+  it("consumes list ownership once and ignores duplicate or late commands for the same run", async () => {
+    let finish!: (value: unknown) => void;
+    mocks.runCourse.mockImplementationOnce(
+      () => new Promise((resolve) => (finish = resolve)),
+    );
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list("run-single001");
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) =>
+            eventType(value) === "COURSES" &&
+            (value as { payload?: { runId?: unknown } }).payload?.runId ===
+              "run-single001",
+        ),
+      ).toBe(true),
+    );
+    list("run-single001");
+    start("run-single001");
+    start("run-single001");
+    await vi.waitFor(() => expect(mocks.runCourse).toHaveBeenCalledOnce());
+    expect(
+      postMessage.mock.calls.filter(
+        ([value]) =>
+          (value as { payload?: { runId?: unknown; type?: unknown } }).payload
+            ?.runId === "run-single001" && eventType(value) === "FAILED",
+      ),
+    ).toHaveLength(0);
+    finish({
+      manifest: {
+        totals: {
+          success: 2,
+          failed: 1,
+          unavailable: 1,
+          unsupported: 0,
+          external: 1,
+        },
+      },
+      zipBytes: new Uint8Array(),
+    });
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.filter(
+          ([value]) => eventType(value) === "COMPLETE",
+        ),
+      ).toHaveLength(1),
+    );
+    const calls = postMessage.mock.calls.length;
+    start("run-single001");
+    cancel("run-single001");
+    list("run-single001");
+    await Promise.resolve();
+    expect(mocks.runCourse).toHaveBeenCalledOnce();
+    expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce();
+    expect(postMessage).toHaveBeenCalledTimes(calls);
+    postMessage.mockRestore();
+  });
+
+  it("preserves cancellation as the first terminal cause when navigation follows", async () => {
+    mocks.runCourse.mockImplementationOnce(
+      ({ signal }: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => reject(new DOMException("aborted", "AbortError")),
+            { once: true },
+          );
+        }),
+    );
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list("run-cause0001");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start("run-cause0001");
+    await vi.waitFor(() => expect(mocks.runCourse).toHaveBeenCalledOnce());
+    cancel("run-cause0001");
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    await vi.waitFor(() =>
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          source: "gradpack-runner",
+          payload: {
+            channel: RUNNER_CHANNEL,
+            type: "CANCELLED",
+            runId: "run-cause0001",
+            message: "Packing was cancelled.",
+          },
+        },
+        location.origin,
+      ),
+    );
+    postMessage.mockRestore();
+  });
+
+  it("preserves an internal run failure when cancellation arrives during sibling cleanup", async () => {
+    let internalStarted!: () => void;
+    const started = new Promise<void>((resolve) => (internalStarted = resolve));
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => (finishCleanup = resolve));
+    mocks.runCourse.mockImplementationOnce(async () => {
+      const cause = new RunSafetyError("private safety cause");
+      internalStarted();
+      await cleanup;
+      throw cause;
+    });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list("run-cause0002");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start("run-cause0002");
+    await started;
+    cancel("run-cause0002");
+    finishCleanup();
+    await vi.waitFor(() =>
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          source: "gradpack-runner",
+          payload: {
+            channel: RUNNER_CHANNEL,
+            type: "FAILED",
+            runId: "run-cause0002",
+            message: "GradPack stopped because a safety check failed.",
+          },
+        },
+        location.origin,
+      ),
+    );
+    postMessage.mockRestore();
+  });
+
+  it("aborts and awaits a course listing on navigation before releasing ownership", async () => {
+    mocks.listAccessibleCourses.mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          const signal = mocks.signals[0]!;
+          if (signal.aborted)
+            reject(
+              signal.reason instanceof Error
+                ? signal.reason
+                : new DOMException("aborted", "AbortError"),
+            );
+          else
+            signal.addEventListener(
+              "abort",
+              () =>
+                reject(
+                  signal.reason instanceof Error
+                    ? signal.reason
+                    : new DOMException("aborted", "AbortError"),
+                ),
+              { once: true },
+            );
+        }),
+    );
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list("run-listnav01");
+    await vi.waitFor(() => expect(mocks.signals).toHaveLength(1));
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    await vi.waitFor(() =>
+      expect(postMessage).toHaveBeenCalledWith(
+        {
+          source: "gradpack-runner",
+          payload: {
+            channel: RUNNER_CHANNEL,
+            type: "CANCELLED",
+            runId: "run-listnav01",
+            message:
+              "The Canvas tab navigated or closed. Reopen it and try again.",
+          },
+        },
+        location.origin,
+      ),
+    );
     postMessage.mockRestore();
   });
 });

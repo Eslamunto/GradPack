@@ -103,6 +103,48 @@ describe("parseRunnerEvent", () => {
     });
   });
 
+  it.each([
+    { completed: 4, total: 3, failed: 0 },
+    { completed: 1, total: 3, failed: 2 },
+    { completed: 0, total: 65_533, failed: 0 },
+  ])(
+    "rejects impossible or over-cap progress counts %#",
+    ({ completed, total, failed }) => {
+      expect(() =>
+        parseRunnerEvent({
+          channel: "gradpack/runner/v1",
+          type: "PROGRESS",
+          runId: "run-12345678",
+          stage: "download",
+          completed,
+          total,
+          failed,
+        }),
+      ).toThrow();
+    },
+  );
+
+  it.each([
+    { success: 65_533, failed: 0, unavailable: 0, unsupported: 0, external: 0 },
+    {
+      success: 65_532,
+      failed: 1,
+      unavailable: 0,
+      unsupported: 0,
+      external: 0,
+    },
+  ])("rejects over-cap terminal totals %#", (counts) => {
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "COMPLETE",
+        runId: "run-12345678",
+        message: "Your course ZIP was downloaded.",
+        ...counts,
+      }),
+    ).toThrow();
+  });
+
   it("rejects an extra top-level event field", () => {
     expect(() =>
       parseRunnerEvent({

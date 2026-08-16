@@ -89,8 +89,8 @@ describe("CanvasHttp", () => {
         value: { ok: true },
       });
       expect(fetcher).toHaveBeenCalledTimes(3);
-      expect(sleep).toHaveBeenNthCalledWith(1, 250);
-      expect(sleep).toHaveBeenNthCalledWith(2, 500);
+      expect(sleep).toHaveBeenNthCalledWith(1, 250, undefined);
+      expect(sleep).toHaveBeenNthCalledWith(2, 500, undefined);
     },
   );
 
@@ -112,8 +112,8 @@ describe("CanvasHttp", () => {
         new CanvasHttp(fetcher, undefined, sleep).json(new URL(requestUrl)),
       ).resolves.toMatchObject({ value: { ok: true } });
       expect(fetcher).toHaveBeenCalledTimes(3);
-      expect(sleep).toHaveBeenNthCalledWith(1, 250);
-      expect(sleep).toHaveBeenNthCalledWith(2, 500);
+      expect(sleep).toHaveBeenNthCalledWith(1, 250, undefined);
+      expect(sleep).toHaveBeenNthCalledWith(2, 500, undefined);
     },
   );
 
@@ -332,9 +332,19 @@ describe("CanvasHttp", () => {
       sleepStarted = resolve;
     });
     const sleep = vi.fn(
-      () =>
-        new Promise<void>(() => {
+      (_milliseconds: number, signal?: AbortSignal) =>
+        new Promise<void>((_resolve, reject) => {
           sleepStarted?.();
+          signal?.addEventListener(
+            "abort",
+            () =>
+              reject(
+                signal.reason instanceof Error
+                  ? signal.reason
+                  : new DOMException("aborted", "AbortError"),
+              ),
+            { once: true },
+          );
         }),
     );
     const request = new CanvasHttp(fetcher, controller.signal, sleep).json(
@@ -347,6 +357,26 @@ describe("CanvasHttp", () => {
     await expect(request).rejects.toMatchObject({ name: "AbortError" });
     expect(fetcher).toHaveBeenCalledOnce();
     expect(sleep).toHaveBeenCalledOnce();
+  });
+
+  it("clears the default retry timer when an HTTP request is aborted", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockRejectedValue(new TypeError("network unavailable"));
+      const request = new CanvasHttp(fetcher, controller.signal).json(
+        new URL(requestUrl),
+      );
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+      controller.abort(new DOMException("cancelled", "AbortError"));
+      await expect(request).rejects.toMatchObject({ name: "AbortError" });
+      expect(fetcher).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it.each([
@@ -411,6 +441,46 @@ describe("CanvasHttp", () => {
       value: { title: "Synthetic", body: "<p>Safe</p>" },
     });
     expect(json).not.toHaveBeenCalled();
+  });
+
+  it("scrubs every raw bounded JSON chunk after successful parsing", async () => {
+    const raw = new TextEncoder().encode(
+      JSON.stringify({ title: "Synthetic", body: "<p>Safe</p>" }),
+    );
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(raw);
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+    Object.defineProperty(response, "url", { value: requestUrl });
+    await new CanvasHttp(
+      vi.fn<typeof fetch>().mockResolvedValue(response),
+    ).jsonBoundedResource(new URL(requestUrl), 1024);
+    expect(raw.every((value) => value === 0)).toBe(true);
+  });
+
+  it("scrubs the chunk that crosses the bounded JSON cap", async () => {
+    const raw = new Uint8Array(11).fill(65);
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(raw);
+          controller.close();
+        },
+      }),
+      { status: 200, headers: { "content-type": "application/json" } },
+    );
+    Object.defineProperty(response, "url", { value: requestUrl });
+    await expect(
+      new CanvasHttp(
+        vi.fn<typeof fetch>().mockResolvedValue(response),
+      ).jsonBoundedResource(new URL(requestUrl), 10),
+    ).rejects.toBeInstanceOf(CanvasBodySizeError);
+    expect(raw.every((value) => value === 0)).toBe(true);
   });
 
   it("rejects declared and streamed JSON bodies above the fixed cap with awaited cancellation", async () => {

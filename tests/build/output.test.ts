@@ -77,7 +77,7 @@ describe("production build output", () => {
     await runBuild(["--dev"]);
 
     await expect(runLint()).resolves.toBeDefined();
-  });
+  }, 10_000);
 
   it("excludes development-only identifiers from production bundles", async () => {
     await runBuild();

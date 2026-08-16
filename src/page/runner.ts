@@ -52,17 +52,32 @@ const fixedFailure = (error: unknown): string => {
 };
 
 const productionDependencies = (signal: AbortSignal): RunDependencies => {
-  const http = new CanvasHttp(fetch, signal);
   return {
     discover: async (course) => {
-      await assertCurrentUser(http);
-      return discoverCoursePlan(http, course);
+      const controller = new AbortController();
+      const onAbort = (): void => controller.abort(signal.reason);
+      signal.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted) onAbort();
+      const http = new CanvasHttp(fetch, controller.signal);
+      try {
+        await assertCurrentUser(http);
+        return await discoverCoursePlan(http, course, {
+          abort: (reason) => controller.abort(reason),
+        });
+      } finally {
+        signal.removeEventListener("abort", onAbort);
+      }
     },
     retrieve: async (resource, plan, activeSignal) => {
       if (resource.kind === "file")
         return fetchFileResource(resource, activeSignal);
       if (resource.kind === "page")
-        return fetchPageResource(resource, plan, activeSignal, http);
+        return fetchPageResource(
+          resource,
+          plan,
+          activeSignal,
+          new CanvasHttp(fetch, activeSignal),
+        );
       throw new RunSafetyError("Unexpected retrieval kind");
     },
     archiveCss: ARCHIVE_CSS,
@@ -75,19 +90,48 @@ const productionDependencies = (signal: AbortSignal): RunDependencies => {
 type ActiveRun = {
   runId: string;
   controller: AbortController;
-  navigation: boolean;
   terminal: boolean;
+  cause: "cancelled" | "navigation" | null;
 };
+
+const TERMINAL_ID_LIMIT = 128;
 
 if (scope[marker] !== true) {
   scope[marker] = true;
-  let courses: CourseSummary[] = [];
-  let listedRunId = "";
-  let listing = false;
+  let listed: { runId: string; courses: readonly CourseSummary[] } | null =
+    null;
+  let listing: ActiveRun | null = null;
   let active: ActiveRun | null = null;
+  const terminalizedIds = new Set<string>();
+  const terminalizedOrder: string[] = [];
+
+  const markTerminal = (runId: string): boolean => {
+    if (terminalizedIds.has(runId)) return false;
+    terminalizedIds.add(runId);
+    terminalizedOrder.push(runId);
+    if (terminalizedOrder.length > TERMINAL_ID_LIMIT) {
+      terminalizedIds.delete(terminalizedOrder.shift()!);
+    }
+    return true;
+  };
 
   const postFailure = (runId: string, message: string): void => {
+    if (!markTerminal(runId)) return;
     post({ channel: RUNNER_CHANNEL, type: "FAILED", runId, message });
+  };
+
+  const abortOwned = (
+    owned: ActiveRun,
+    cause: "cancelled" | "navigation",
+  ): void => {
+    if (owned.terminal || owned.cause !== null) return;
+    owned.cause = cause;
+    owned.controller.abort(
+      new DOMException(
+        cause === "navigation" ? "Canvas navigation" : "Packing was cancelled",
+        "AbortError",
+      ),
+    );
   };
 
   const runSelectedCourse = async (
@@ -98,8 +142,8 @@ if (scope[marker] !== true) {
     const owned: ActiveRun = {
       runId: command.runId,
       controller,
-      navigation: false,
       terminal: false,
+      cause: null,
     };
     active = owned;
     try {
@@ -125,6 +169,7 @@ if (scope[marker] !== true) {
       if (active !== owned || owned.terminal || controller.signal.aborted)
         return;
       owned.terminal = true;
+      if (!markTerminal(command.runId)) return;
       const totals = result.manifest.totals;
       post({
         channel: RUNNER_CHANNEL,
@@ -140,45 +185,76 @@ if (scope[marker] !== true) {
     } catch (error) {
       if (owned.terminal) return;
       owned.terminal = true;
-      const cancelled = controller.signal.aborted;
-      post({
-        channel: RUNNER_CHANNEL,
-        type: cancelled ? "CANCELLED" : "FAILED",
-        runId: command.runId,
-        message: cancelled
-          ? owned.navigation
-            ? FIXED.navigation
-            : FIXED.cancelled
-          : fixedFailure(error),
-      });
+      if (!markTerminal(command.runId)) return;
+      if (
+        error instanceof DOMException &&
+        error.name === "AbortError" &&
+        owned.cause !== null
+      ) {
+        post({
+          channel: RUNNER_CHANNEL,
+          type: "CANCELLED",
+          runId: command.runId,
+          message:
+            owned.cause === "navigation" ? FIXED.navigation : FIXED.cancelled,
+        });
+      } else {
+        post({
+          channel: RUNNER_CHANNEL,
+          type: "FAILED",
+          runId: command.runId,
+          message: fixedFailure(error),
+        });
+      }
     } finally {
       if (active === owned) active = null;
     }
   };
 
   const handleCommand = async (command: ExtensionCommand): Promise<void> => {
+    if (terminalizedIds.has(command.runId)) return;
     if (command.type === "CANCEL") {
-      if (active?.runId === command.runId && !active.terminal) {
-        active.controller.abort(
-          new DOMException("Packing was cancelled", "AbortError"),
-        );
-      }
+      if (active?.runId === command.runId) abortOwned(active, "cancelled");
+      else if (listing?.runId === command.runId)
+        abortOwned(listing, "cancelled");
       return;
     }
     if (command.type === "LIST_COURSES") {
+      if (
+        listing?.runId === command.runId ||
+        active?.runId === command.runId ||
+        listed?.runId === command.runId
+      ) {
+        return;
+      }
       if (listing || active) {
         postFailure(command.runId, FIXED.active);
         return;
       }
-      listing = true;
-      courses = [];
-      listedRunId = "";
+      if (listed) {
+        markTerminal(listed.runId);
+        listed = null;
+      }
+      const controller = new AbortController();
+      const owned: ActiveRun = {
+        runId: command.runId,
+        controller,
+        terminal: false,
+        cause: null,
+      };
+      listing = owned;
       try {
-        const http = new CanvasHttp();
+        const http = new CanvasHttp(fetch, controller.signal);
         await assertCurrentUser(http);
-        const discovered = await listAccessibleCourses(http);
-        courses = discovered.map((course) => Object.freeze({ ...course }));
-        listedRunId = command.runId;
+        const discovered = await listAccessibleCourses(http, {
+          abort: (reason) => controller.abort(reason),
+        });
+        if (listing !== owned || owned.terminal || controller.signal.aborted)
+          return;
+        const courses = discovered.map((course) =>
+          Object.freeze({ ...course }),
+        );
+        listed = { runId: command.runId, courses };
         post({
           channel: RUNNER_CHANNEL,
           type: "COURSES",
@@ -186,34 +262,62 @@ if (scope[marker] !== true) {
           courses,
         });
       } catch (error) {
-        postFailure(command.runId, fixedFailure(error));
+        if (owned.terminal) return;
+        owned.terminal = true;
+        if (!markTerminal(command.runId)) return;
+        if (
+          error instanceof DOMException &&
+          error.name === "AbortError" &&
+          owned.cause !== null
+        ) {
+          post({
+            channel: RUNNER_CHANNEL,
+            type: "CANCELLED",
+            runId: command.runId,
+            message:
+              owned.cause === "navigation" ? FIXED.navigation : FIXED.cancelled,
+          });
+        } else {
+          post({
+            channel: RUNNER_CHANNEL,
+            type: "FAILED",
+            runId: command.runId,
+            message: fixedFailure(error),
+          });
+        }
       } finally {
-        listing = false;
+        if (listing === owned) listing = null;
       }
+      return;
+    }
+    if (listing?.runId === command.runId || active?.runId === command.runId) {
       return;
     }
     if (listing || active) {
       postFailure(command.runId, FIXED.active);
       return;
     }
-    if (command.runId !== listedRunId) {
+    if (command.runId !== listed?.runId) {
       postFailure(command.runId, FIXED.unlisted);
       return;
     }
-    const course = courses.find(({ id }) => id === command.courseId);
+    const course = listed.courses.find(({ id }) => id === command.courseId);
     if (!course) {
+      listed = null;
       postFailure(command.runId, FIXED.unlisted);
       return;
     }
+    listed = null;
     await runSelectedCourse(command, course);
   };
 
   const stopForNavigation = (): void => {
-    if (!active || active.terminal) return;
-    active.navigation = true;
-    active.controller.abort(
-      new DOMException("Canvas navigation", "AbortError"),
-    );
+    if (listing) abortOwned(listing, "navigation");
+    if (active) abortOwned(active, "navigation");
+    if (listed) {
+      markTerminal(listed.runId);
+      listed = null;
+    }
   };
 
   window.addEventListener("pagehide", stopForNavigation);

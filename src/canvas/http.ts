@@ -24,7 +24,7 @@ export class CanvasCourseIndexUnavailableError extends CanvasResponseError {
   }
 }
 
-type Sleep = (milliseconds: number) => Promise<void>;
+type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 
 const isAbortError = (error: unknown): boolean =>
   error instanceof DOMException && error.name === "AbortError";
@@ -33,6 +33,27 @@ const abortError = (signal: AbortSignal): DOMException =>
   isAbortError(signal.reason)
     ? (signal.reason as DOMException)
     : new DOMException("Canvas request aborted", "AbortError");
+
+const abortableDelay: Sleep = (milliseconds, signal) =>
+  new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+    const timer = setTimeout(finish, milliseconds);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(
+        signal ? abortError(signal) : new DOMException("Aborted", "AbortError"),
+      );
+    };
+    function finish(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 const isCanvasApiUrl = (url: URL): boolean =>
   url.origin === CANVAS_ORIGIN &&
@@ -102,8 +123,7 @@ export class CanvasHttp {
   constructor(
     private readonly fetcher: typeof fetch = fetch,
     private readonly signal?: AbortSignal,
-    private readonly sleep: Sleep = (milliseconds) =>
-      new Promise((resolve) => setTimeout(resolve, milliseconds)),
+    private readonly sleep: Sleep = abortableDelay,
   ) {}
 
   private throwIfAborted(): void {
@@ -112,23 +132,7 @@ export class CanvasHttp {
 
   private async waitBeforeRetry(milliseconds: number): Promise<void> {
     const signal = this.signal;
-    if (!signal) {
-      await this.sleep(milliseconds);
-      return;
-    }
-
-    this.throwIfAborted();
-    let rejectAbort: (reason: DOMException) => void = () => {};
-    const aborted = new Promise<never>((_resolve, reject) => {
-      rejectAbort = reject;
-    });
-    const onAbort = (): void => rejectAbort(abortError(signal));
-    signal.addEventListener("abort", onAbort, { once: true });
-    try {
-      await Promise.race([this.sleep(milliseconds), aborted]);
-    } finally {
-      signal.removeEventListener("abort", onAbort);
-    }
+    await this.sleep(milliseconds, signal);
     this.throwIfAborted();
   }
 
@@ -331,10 +335,14 @@ export class CanvasHttp {
       for (;;) {
         this.throwIfAborted();
         const result = await reader.read();
-        this.throwIfAborted();
+        if (this.signal?.aborted) {
+          if (!result.done) result.value.fill(0);
+          this.throwIfAborted();
+        }
         if (result.done) break;
         total += result.value.byteLength;
         if (!Number.isSafeInteger(total) || total > maximumBytes) {
+          result.value.fill(0);
           throw new CanvasBodySizeError("Canvas JSON body is too large");
         }
         chunks.push(result.value);
@@ -352,6 +360,7 @@ export class CanvasHttp {
         ) as unknown;
       } finally {
         bytes.fill(0);
+        chunks.forEach((chunk) => chunk.fill(0));
         chunks.length = 0;
       }
     } catch (error) {
@@ -360,6 +369,7 @@ export class CanvasHttp {
       } catch {
         // The original bounded-read failure remains authoritative.
       }
+      chunks.forEach((chunk) => chunk.fill(0));
       chunks.length = 0;
       throw error;
     }

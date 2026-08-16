@@ -134,6 +134,31 @@ describe("production file retrieval", () => {
   });
 
   it.each([
+    [403, "http://cdn.example/file"],
+    [404, "https://user@cdn.example/file"],
+    [503, "https://cdn.example/file#unsafe"],
+    [404, ""],
+  ] as const)(
+    "rejects unsafe final URL %s before classifying status %i",
+    async (status, url) => {
+      const fetcher = vi.fn(async () =>
+        streamResponse([], {
+          status,
+          headers: { "content-type": "application/json" },
+          url,
+        }),
+      );
+      await expect(
+        fetchFileResource(resource, new AbortController().signal, {
+          fetcher,
+          sleep: vi.fn(),
+        }),
+      ).rejects.toBeInstanceOf(RunSafetyError);
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
     ["text/html", "19"],
     ["application/pdf", "20"],
     ["application/pdf", "not-a-number"],
@@ -221,6 +246,24 @@ describe("production file retrieval", () => {
     await expect(action).rejects.toMatchObject({ name: "AbortError" });
     expect(cancelled).toHaveBeenCalled();
   });
+
+  it("cancels the retry timer when aborted during file backoff", async () => {
+    vi.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const request = fetchFileResource(resource, controller.signal, {
+        fetcher: vi.fn(async () => {
+          throw new TypeError("network");
+        }),
+      });
+      await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
+      controller.abort(new DOMException("cancelled", "AbortError"));
+      await expect(request).rejects.toMatchObject({ name: "AbortError" });
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe("production page retrieval and local links", () => {
@@ -295,6 +338,10 @@ describe("production page retrieval and local links", () => {
       ["/courses/999/pages/welcome", null],
       ["/courses/101/assignments/1", null],
       ["/courses/101/files/301/download?download=1", null],
+      ["/courses/101/files/301?%77rap=1", null],
+      ["/courses/101/files/301?wrap=%31", null],
+      ["/courses/101/files/301?wrap=1&", null],
+      ["/courses/101/files/301/download?wrap=1&", null],
       [
         "https://user@frankfurtschool.instructure.com/courses/101/pages/welcome",
         null,

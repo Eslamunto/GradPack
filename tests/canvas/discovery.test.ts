@@ -72,6 +72,39 @@ describe("discoverCoursePlan", () => {
     );
   });
 
+  it("aborts active discovery siblings, rejects queued work, and awaits cleanup on first failure", async () => {
+    const controller = new AbortController();
+    const first = new TypeError("first discovery failure");
+    const started: string[] = [];
+    const siblingCleaned = vi.fn();
+    const fetchAll = vi.fn((url: URL) => {
+      started.push(url.pathname);
+      if (url.pathname.endsWith("/modules")) return Promise.resolve([]);
+      if (url.pathname.endsWith("/files")) return Promise.reject(first);
+      if (url.pathname.endsWith("/folders")) {
+        return new Promise<unknown[]>((_resolve, reject) => {
+          controller.signal.addEventListener(
+            "abort",
+            () => {
+              siblingCleaned();
+              reject(new DOMException("aborted", "AbortError"));
+            },
+            { once: true },
+          );
+        });
+      }
+      return Promise.resolve([]);
+    });
+
+    await expect(
+      discoverCoursePlan({ fetchAll } as never, syntheticCourse, {
+        abort: (reason) => controller.abort(reason),
+      }),
+    ).rejects.toBe(first);
+    expect(siblingCleaned).toHaveBeenCalledOnce();
+    expect(started.some((path) => path.endsWith("/pages"))).toBe(false);
+  });
+
   it("uses closed module-only fallbacks for exact unavailable indexes", async () => {
     const http = syntheticCanvasHttp({
       unavailableIndexes: { files: 403, folders: 404, pages: 404 },

@@ -288,36 +288,50 @@ export async function runCourse(options: {
   } finally {
     signal.removeEventListener("abort", onCallerAbort);
     entries.clear();
-    if (!succeeded) {
-      retained.forEach((bytes) => bytes.fill(0));
-      zipBytes?.fill(0);
-    }
+    retained.forEach((bytes) => bytes.fill(0));
+    if (!succeeded) zipBytes?.fill(0);
     retained.clear();
   }
 }
 
 type FileTransport = {
   fetcher?: typeof fetch;
-  sleep?: (milliseconds: number) => Promise<void>;
+  sleep?: (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 };
+
+const abortableDelay = (
+  milliseconds: number,
+  signal?: AbortSignal,
+): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(abortError(signal));
+      return;
+    }
+    const timer = setTimeout(finish, milliseconds);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      reject(
+        signal
+          ? abortError(signal)
+          : new DOMException("Packing was cancelled", "AbortError"),
+      );
+    };
+    function finish(): void {
+      signal?.removeEventListener("abort", onAbort);
+      resolve();
+    }
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
 
 const waitForRetry = async (
   milliseconds: number,
   signal: AbortSignal,
-  sleep: (milliseconds: number) => Promise<void>,
+  sleep: (milliseconds: number, signal?: AbortSignal) => Promise<void>,
 ): Promise<void> => {
   throwIfAborted(signal);
-  let rejectAbort: (error: DOMException) => void = () => {};
-  const interrupted = new Promise<never>((_resolve, reject) => {
-    rejectAbort = reject;
-  });
-  const onAbort = (): void => rejectAbort(abortError(signal));
-  signal.addEventListener("abort", onAbort, { once: true });
-  try {
-    await Promise.race([sleep(milliseconds), interrupted]);
-  } finally {
-    signal.removeEventListener("abort", onAbort);
-  }
+  await sleep(milliseconds, signal);
   throwIfAborted(signal);
 };
 
@@ -362,10 +376,7 @@ export async function fetchFileResource(
   const initial = validatedFileUrl(resource);
   const advertisedBytes = resource.advertisedBytes!;
   const fetcher = transport.fetcher ?? fetch;
-  const sleep =
-    transport.sleep ??
-    ((milliseconds) =>
-      new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  const sleep = transport.sleep ?? abortableDelay;
   const local = new AbortController();
   const onCallerAbort = (): void => local.abort(abortError(callerSignal));
   callerSignal.addEventListener("abort", onCallerAbort, { once: true });
@@ -396,8 +407,20 @@ export async function fetchFileResource(
 
       let finalUrl: URL;
       try {
-        finalUrl = new URL(response.url || initial);
+        if (typeof response.url !== "string" || response.url.length === 0) {
+          throw new TypeError("Missing final response URL");
+        }
+        finalUrl = new URL(response.url);
       } catch {
+        await cancelBody(response);
+        throw new RunSafetyError("Rejected file response URL");
+      }
+      if (
+        finalUrl.protocol !== "https:" ||
+        finalUrl.username !== "" ||
+        finalUrl.password !== "" ||
+        finalUrl.hash !== ""
+      ) {
         await cancelBody(response);
         throw new RunSafetyError("Rejected file response URL");
       }
@@ -432,13 +455,7 @@ export async function fetchFileResource(
         await waitForRetry(250 * 2 ** attempt, local.signal, sleep);
         continue;
       }
-      if (
-        !response.ok ||
-        finalUrl.protocol !== "https:" ||
-        finalUrl.username !== "" ||
-        finalUrl.password !== "" ||
-        finalUrl.hash !== ""
-      ) {
+      if (!response.ok) {
         await cancelBody(response);
         throw new RunSafetyError("Rejected file response");
       }
@@ -561,14 +578,8 @@ export function resolveLocalHref(raw: string, plan: CoursePlan): string | null {
     "u",
   ).exec(url.pathname);
   if (fileMatch) {
-    const query = [...url.searchParams.entries()];
-    const wrap =
-      query.length === 1 && query[0]?.[0] === "wrap" && query[0][1] === "1";
-    if (
-      query.length > 1 ||
-      (query.length === 1 && !wrap) ||
-      (fileMatch[2] === undefined && !wrap)
-    ) {
+    const wrap = url.search === "?wrap=1";
+    if ((url.search !== "" && !wrap) || (fileMatch[2] === undefined && !wrap)) {
       return null;
     }
     const resource = plan.resources.find(
