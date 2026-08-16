@@ -475,6 +475,18 @@ describe("buildCourseZip", () => {
     }
   });
 
+  it("rejects a network-bearing background attribute on the actual body element", () => {
+    const input = copyInput();
+    const document = new DOMParser().parseFromString(
+      input.indexHtml,
+      "text/html",
+    );
+    document.body.setAttribute("background", "https://tracking.example/pixel");
+    input.indexHtml = `<!doctype html>${document.documentElement.outerHTML}`;
+
+    expect(() => buildCourseZip(input)).toThrowError(TypeError);
+  });
+
   it.each([
     ["duplicate", "files/slides.pdf", "failed"],
     ["case-fold", "files/SLIDES.PDF", "unavailable"],
