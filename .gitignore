@@ -12,6 +12,7 @@ coverage/
 
 # Local tooling and temporary artifacts
 .superpowers/
+.worktrees/
 *.log
 *.tmp
 
