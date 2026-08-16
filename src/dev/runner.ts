@@ -70,15 +70,19 @@ const start = (runId: string): void => {
     .then(
       (result) => {
         if (activeRun !== run) return;
-        activeRun = null;
         let parsed: DevResult;
         try {
           parsed = parseDevResult(result);
         } catch {
+          activeRun = null;
           post(failureResult(runId, "safety"));
           return;
         }
-        if (parsed.runId !== runId) return;
+        activeRun = null;
+        if (parsed.runId !== runId) {
+          post(failureResult(runId, "safety"));
+          return;
+        }
         post(parsed);
       },
       () => {

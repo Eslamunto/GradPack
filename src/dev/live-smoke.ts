@@ -1,7 +1,10 @@
 import { canvasEndpoint } from "../canvas/endpoints";
 import { CanvasHttp } from "../canvas/http";
 import { parseNextLink } from "../canvas/pagination";
-import { assertCurrentUser, listAccessibleCourses } from "../canvas/session";
+import {
+  assertCurrentUser,
+  normalizeAccessibleCourses,
+} from "../canvas/session";
 import { CANVAS_ORIGIN } from "../shared/constants";
 import { DEV_CHANNEL, parseDevResult, type DevResult } from "./protocol";
 
@@ -231,6 +234,26 @@ async function discoverRepresentative(
   };
 }
 
+async function listBoundedCourses(http: CanvasHttp) {
+  const loadFirstPage = async (
+    enrollmentState: "active" | "completed",
+  ): Promise<unknown[]> => {
+    const page = await http.json<unknown>(
+      canvasEndpoint({ type: "courses", enrollmentState }),
+    );
+    parseNextLink(page.response.headers.get("link"));
+    if (!Array.isArray(page.value)) {
+      throw new TypeError("Invalid course response");
+    }
+    return Array.from(page.value, (value: unknown) => value);
+  };
+  const [active, completed] = await Promise.all([
+    loadFirstPage("active"),
+    loadFirstPage("completed"),
+  ]);
+  return normalizeAccessibleCourses(active, completed);
+}
+
 function strictFileUrl(value: unknown): URL | null {
   if (typeof value !== "string") return null;
   let url: URL;
@@ -367,7 +390,7 @@ export async function runLiveSmokeTest(
 
   let courseIds: number[];
   try {
-    const courses = await listAccessibleCourses(http);
+    const courses = await listBoundedCourses(http);
     courseIds = courses
       .slice(0, MAX_COURSES)
       .map(({ id }) => id)

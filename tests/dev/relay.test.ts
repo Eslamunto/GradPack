@@ -289,7 +289,7 @@ describe("development Canvas relay", () => {
     expect(marker()).toBe("preserved");
   });
 
-  it("ignores a mismatched result and keeps the active run pending", async () => {
+  it("terminalizes a mismatched result for the active run and accepts the next run", async () => {
     const postMessage = vi
       .spyOn(window, "postMessage")
       .mockImplementation(() => {});
@@ -302,17 +302,29 @@ describe("development Canvas relay", () => {
     });
 
     dispatchRunner({ ...passingResult, runId: "run-stale-12345678" });
-    expect(marker()).toBeNull();
+    const mismatchedMarker = marker();
 
     const secondRun = { ...runCommand, runId: "run-live-87654321" };
     dispatchController(secondRun);
-    expect(sendMessage).toHaveBeenCalledOnce();
-    expect(marker()).toBe(
-      serializeDevResult(failureResult(secondRun.runId, "busy")),
-    );
-
-    dispatchRunner(passingResult);
+    await Promise.resolve();
+    const acceptedNextRun = sendMessage.mock.calls.length === 2;
+    if (acceptedNextRun) {
+      await vi.waitFor(() => {
+        expect(postMessage).toHaveBeenCalledWith(
+          { source: DEV_RELAY_SOURCE, payload: secondRun },
+          location.origin,
+        );
+      });
+      dispatchRunner({ ...passingResult, runId: secondRun.runId });
+    } else {
+      dispatchRunner(passingResult);
+    }
     postMessage.mockRestore();
+
+    expect(mismatchedMarker).toBe(
+      serializeDevResult(failureResult(runCommand.runId, "safety")),
+    );
+    expect(acceptedNextRun).toBe(true);
   });
 
   it("ignores even a matching result while runner setup is pending", async () => {
@@ -374,5 +386,40 @@ describe("development Canvas relay", () => {
     });
     dispatchRunner({ ...passingResult, runId: nextRun.runId });
     postMessage.mockRestore();
+  });
+
+  it("terminalizes a synchronous ensure throw and accepts the next run", async () => {
+    sendMessage
+      .mockImplementationOnce(() => {
+        throw new Error("sensitive invalidated extension detail");
+      })
+      .mockResolvedValueOnce({ ok: true });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+
+    dispatchController(runCommand);
+    const thrownMarker = marker();
+
+    const nextRun = { ...runCommand, runId: "run-live-87654321" };
+    dispatchController(nextRun);
+    await Promise.resolve();
+    const acceptedNextRun = sendMessage.mock.calls.length === 2;
+    if (acceptedNextRun) {
+      await vi.waitFor(() => {
+        expect(postMessage).toHaveBeenCalledWith(
+          { source: DEV_RELAY_SOURCE, payload: nextRun },
+          location.origin,
+        );
+      });
+      dispatchRunner({ ...passingResult, runId: nextRun.runId });
+    }
+    postMessage.mockRestore();
+
+    expect(thrownMarker).toBe(
+      serializeDevResult(failureResult(runCommand.runId, "safety")),
+    );
+    expect(thrownMarker).not.toContain("invalidated extension detail");
+    expect(acceptedNextRun).toBe(true);
   });
 });

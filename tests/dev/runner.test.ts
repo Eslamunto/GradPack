@@ -206,7 +206,7 @@ describe("development live-smoke runner", () => {
     postMessage.mockRestore();
   });
 
-  it("rejects an uncorrelated result and permits the next run", async () => {
+  it("terminalizes an uncorrelated result for the active run and permits the next run", async () => {
     runnerMocks.runLiveSmokeTest
       .mockResolvedValueOnce(passingResult("run-stale-12345678"))
       .mockResolvedValueOnce(passingResult("run-next2-12345678"));
@@ -216,7 +216,13 @@ describe("development live-smoke runner", () => {
 
     dispatch(command("run-active-12345678"));
     await flush();
-    expect(postMessage).not.toHaveBeenCalled();
+    expect(postMessage).toHaveBeenCalledWith(
+      {
+        source: DEV_RUNNER_SOURCE,
+        payload: fixedFailure("run-active-12345678", "safety"),
+      },
+      location.origin,
+    );
 
     dispatch(command("run-next2-12345678"));
     await vi.waitFor(() => {

@@ -33,5 +33,8 @@ describe("live Canvas smoke-test documentation", () => {
     expect(documentation).toContain(
       "Do not share credentials, cookies, or sessions",
     );
+    expect(documentation).toMatch(
+      /Only a metadata-selected file download may finish at a cross-origin\s+HTTPS URL/,
+    );
   });
 });

@@ -18,6 +18,11 @@ and stops on authentication, permission, redirect, content-type, or size
 failures. Live tests never run in CI, and sanitized local results are never CI
 artifacts.
 
+Canvas API, pagination, and unapproved redirects remain exact-origin and fail
+closed. Only a metadata-selected file download may finish at a cross-origin
+HTTPS URL when protocol, userinfo, hash, login, content-type, and size checks
+all pass.
+
 `pnpm build` remains the production build: it writes `dist/` and excludes the
 development relay, runner, commands, and result marker. The separate
 `pnpm build:dev` command writes `dist-dev/` with the distinct **GradPack Dev**

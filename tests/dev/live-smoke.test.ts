@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CanvasHttp } from "../../src/canvas/http";
+import { CanvasHttp } from "../../src/canvas/http";
 import { CANVAS_ORIGIN } from "../../src/shared/constants";
 import {
   parseDevResult,
@@ -61,7 +61,17 @@ function syntheticHttp(
   courses: unknown[] = [course(11)],
 ): SyntheticHttp {
   return {
-    json: vi.fn(json),
+    json: vi.fn((url: URL) =>
+      url.pathname === "/api/v1/courses"
+        ? Promise.resolve(
+            apiResponse(
+              url.searchParams.get("enrollment_state") === "active"
+                ? courses
+                : [],
+            ),
+          )
+        : json(url),
+    ),
     fetchAll: vi.fn((url: URL) =>
       Promise.resolve(
         url.searchParams.get("enrollment_state") === "active" ? courses : [],
@@ -150,7 +160,74 @@ describe("runLiveSmokeTest", () => {
       courses: "empty",
       modules: "not-run",
     });
-    expect(http.fetchAll).toHaveBeenCalledTimes(2);
+    expect(
+      http.json.mock.calls.filter(
+        ([url]) => url.pathname === "/api/v1/courses",
+      ),
+    ).toHaveLength(2);
+    expect(http.fetchAll).not.toHaveBeenCalled();
+    expectClosed(result);
+  });
+
+  it("does not follow course pagination beyond the two fixed first-page requests", async () => {
+    let courseRequests = 0;
+    const fetcher = vi.fn<typeof fetch>().mockImplementation((input) => {
+      const url =
+        input instanceof URL
+          ? input
+          : new URL(typeof input === "string" ? input : input.url);
+      let value: unknown;
+      let link: string | null = null;
+
+      if (url.pathname === "/api/v1/users/self/profile") {
+        value = { id: 1 };
+      } else if (url.pathname === "/api/v1/courses") {
+        courseRequests += 1;
+        if (url.searchParams.get("page") === "2") {
+          value = [{ id: 11 }];
+        } else {
+          value = [];
+          const next = new URL(url);
+          next.searchParams.set("page", "2");
+          link = `<${next.href}>; rel="next"`;
+        }
+      } else if (url.pathname === "/api/v1/courses/11/modules") {
+        value = [];
+      } else {
+        return Promise.reject(new Error("unexpected synthetic endpoint"));
+      }
+
+      const response = new Response(JSON.stringify(value), {
+        headers: {
+          "content-type": "application/json",
+          ...(link ? { link } : {}),
+        },
+      });
+      Object.defineProperty(response, "url", { value: url.href });
+      return Promise.resolve(response);
+    });
+
+    const result = await runLiveSmokeTest(RUN_ID, {
+      http: new CanvasHttp(fetcher),
+      fetcher,
+    });
+
+    expect(courseRequests).toBe(2);
+    expect(
+      fetcher.mock.calls.some(([input]) => {
+        const url =
+          input instanceof URL
+            ? input
+            : new URL(typeof input === "string" ? input : input.url);
+        return url.searchParams.get("page") === "2";
+      }),
+    ).toBe(false);
+    expect(result).toMatchObject({
+      outcome: "fail",
+      failure: "courses",
+      courses: "empty",
+      modules: "not-run",
+    });
     expectClosed(result);
   });
 

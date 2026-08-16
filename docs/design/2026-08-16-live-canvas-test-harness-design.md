@@ -133,7 +133,10 @@ extension storage.
 - Module and item traversal is bounded, with concurrency no greater than two.
 - Representative file streaming has a hard five-MiB ceiling and aborts when
   the bound is reached.
-- Cross-origin, downgraded, login, HTML, and unexpected redirects fail closed.
+- Canvas API, pagination, unapproved redirect, downgrade, login, and unexpected
+  content paths fail closed at the exact origin.
+- Only a metadata-selected file download may finish at a cross-origin HTTPS URL
+  when protocol, userinfo, hash, login, content-type, and size checks pass.
 - No production logging, analytics, telemetry, screenshots, or captured Canvas
   content are introduced.
 - Authentication expiry and Chrome permission prompts stop the run and require

@@ -65,8 +65,18 @@ const ensureRunner = (command: DevCommand): void => {
     type: "ENSURE_DEV_RUNNER",
     runId,
   };
+  let runtimeMessage: Promise<unknown>;
+  try {
+    runtimeMessage = chrome.runtime.sendMessage(runtimeCommand);
+  } catch {
+    if (runState.phase === "ensuring" && runState.runId === runId) {
+      runState = { phase: "idle" };
+      setResult(failureResult(runId, "safety"));
+    }
+    return;
+  }
   let timeout: ReturnType<typeof setTimeout>;
-  const setup = chrome.runtime.sendMessage(runtimeCommand).then(
+  const setup = runtimeMessage.then(
     (response: unknown) =>
       isSuccessfulResponse(response) ? "ready" : "safety",
     () => "safety" as const,
@@ -131,7 +141,13 @@ window.addEventListener("message", (event: MessageEvent<unknown>) => {
 
   try {
     const result = parseDevResult(envelope.payload);
-    if (runState.phase !== "running" || runState.runId !== result.runId) {
+    if (runState.phase !== "running") {
+      return;
+    }
+    if (runState.runId !== result.runId) {
+      const activeRunId = runState.runId;
+      runState = { phase: "idle" };
+      setResult(failureResult(activeRunId, "safety"));
       return;
     }
     setResult(result);
