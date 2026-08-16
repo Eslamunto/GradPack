@@ -3,7 +3,15 @@ import globals from "globals";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
-  { ignores: ["dist/**", "artifacts/**", "coverage/**", ".superpowers/**"] },
+  {
+    ignores: [
+      "dist/**",
+      "dist-dev/**",
+      "artifacts/**",
+      "coverage/**",
+      ".superpowers/**",
+    ],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
