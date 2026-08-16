@@ -1,10 +1,17 @@
 import { strToU8, zipSync, type Zippable } from "fflate";
 import {
+  ArchiveSafetyError,
+  MAX_ZIP_PAYLOAD_ENTRIES,
   normalizeArchiveManifest,
   type ArchiveManifest,
   type ArchiveManifestResource,
 } from "./manifest";
-import { canonicalArchivePath, isCanonicalArchivePath } from "./paths";
+import {
+  assertArchivePathSet,
+  canonicalArchivePath,
+  isCanonicalArchivePath,
+} from "./paths";
+import { ARCHIVE_CSS } from "./style";
 
 const CORE_PATHS = [
   "assets/archive.css",
@@ -17,6 +24,45 @@ const FIXED_ZIP_TIME = 0;
 const ZIP_MTIME_SEED = "2000-01-01T12:00:00.000Z";
 const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_ZIP_NAME_LENGTH = 180;
+const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const INDEX_TAGS = new Set([
+  "a",
+  "aside",
+  "body",
+  "dd",
+  "div",
+  "dl",
+  "h1",
+  "h2",
+  "head",
+  "header",
+  "html",
+  "li",
+  "link",
+  "main",
+  "meta",
+  "ol",
+  "p",
+  "section",
+  "span",
+  "title",
+  "ul",
+]);
+const INDEX_CLASSES = new Set([
+  "all-resources",
+  "archive-header",
+  "eyebrow",
+  "metadata",
+  "module",
+  "resource-status",
+  "responsibility-notice",
+  "summary",
+]);
+const INDEX_IDS = new Set([
+  "modules-title",
+  "resources-title",
+  "summary-title",
+]);
 
 export type ArchiveInput = {
   indexHtml: string;
@@ -26,12 +72,20 @@ export type ArchiveInput = {
 };
 
 const exactInput = (value: unknown): Record<string, unknown> => {
+  let prototype: object | null;
+  try {
+    prototype =
+      typeof value === "object" && value !== null
+        ? (Object.getPrototypeOf(value) as object | null)
+        : null;
+  } catch {
+    throw new TypeError("Invalid archive input");
+  }
   if (
     typeof value !== "object" ||
     value === null ||
     Array.isArray(value) ||
-    (Object.getPrototypeOf(value) !== Object.prototype &&
-      Object.getPrototypeOf(value) !== null)
+    (prototype !== Object.prototype && prototype !== null)
   ) {
     throw new TypeError("Invalid archive input");
   }
@@ -48,21 +102,22 @@ const exactInput = (value: unknown): Record<string, unknown> => {
   ) {
     throw new TypeError("Invalid archive input");
   }
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   for (const key of expected) {
     const descriptor = Object.getOwnPropertyDescriptor(value, key);
     if (!descriptor || !("value" in descriptor)) {
       throw new TypeError("Invalid archive input");
     }
+    snapshot[key] = descriptor.value;
   }
-  return value as Record<string, unknown>;
+  return snapshot;
 };
 
 const ownValue = (value: Record<string, unknown>, key: string): unknown => {
-  const descriptor = Object.getOwnPropertyDescriptor(value, key);
-  if (!descriptor || !("value" in descriptor)) {
-    throw new TypeError("Invalid archive input");
-  }
-  return descriptor.value;
+  return value[key];
 };
 
 const archiveText = (value: unknown): string => {
@@ -103,43 +158,108 @@ const safeLocalHref = (value: string): boolean => {
   );
 };
 
+const exactAttributes = (
+  element: Element,
+  expected: Readonly<Record<string, string>>,
+): boolean => {
+  const attributes = [...element.attributes];
+  return (
+    attributes.length === Object.keys(expected).length &&
+    attributes.every(
+      (attribute) =>
+        attribute.namespaceURI === null &&
+        Object.hasOwn(expected, attribute.name) &&
+        expected[attribute.name] === attribute.value,
+    )
+  );
+};
+
 const validateIndexHtml = (value: unknown): string => {
   const html = archiveText(value);
   const document = new DOMParser().parseFromString(html, "text/html");
+  const main = document.body.firstElementChild;
   if (
-    !/^\s*<!doctype html>/iu.test(html) ||
-    document.querySelector(
-      "base, script, style, iframe, frame, object, embed, form, input, button, select, textarea, audio, video, source, track, canvas, svg, math, template, meta[http-equiv]",
-    )
+    document.doctype?.name.toLowerCase() !== "html" ||
+    document.documentElement.namespaceURI !== HTML_NAMESPACE ||
+    !exactAttributes(document.documentElement, { lang: "en" }) ||
+    !exactAttributes(document.head, {}) ||
+    document.body.children.length !== 1 ||
+    main?.localName !== "main" ||
+    !exactAttributes(document.body, {}) ||
+    !exactAttributes(main, {})
   ) {
     throw new TypeError("Invalid archive index");
   }
-  const stylesheets = [...document.querySelectorAll("link")];
+  const head = [...document.head.children];
   if (
-    stylesheets.length !== 1 ||
-    stylesheets[0]!.getAttribute("rel") !== "stylesheet" ||
-    stylesheets[0]!.getAttribute("href") !== "assets/archive.css"
+    head.length !== 4 ||
+    head[0]?.localName !== "meta" ||
+    !exactAttributes(head[0], { charset: "utf-8" }) ||
+    head[1]?.localName !== "meta" ||
+    !exactAttributes(head[1], {
+      name: "viewport",
+      content: "width=device-width,initial-scale=1",
+    }) ||
+    head[2]?.localName !== "title" ||
+    !exactAttributes(head[2], {}) ||
+    head[2].children.length !== 0 ||
+    head[3]?.localName !== "link" ||
+    !exactAttributes(head[3], {
+      rel: "stylesheet",
+      href: "assets/archive.css",
+    })
   ) {
     throw new TypeError("Invalid archive index");
   }
+  const trustedStructure = new Set<Element>([
+    document.documentElement,
+    document.head,
+    document.body,
+    main,
+    ...head,
+  ]);
   for (const element of document.querySelectorAll("*")) {
-    for (const attribute of [...element.attributes]) {
-      const name = attribute.name.toLowerCase();
-      if (
-        name.startsWith("on") ||
-        name.includes(":") ||
-        [
-          "style",
-          "src",
-          "srcset",
-          "poster",
-          "data",
-          "action",
-          "formaction",
-        ].includes(name)
-      ) {
+    if (
+      element.namespaceURI !== HTML_NAMESPACE ||
+      !INDEX_TAGS.has(element.localName)
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+    if (
+      ["html", "head", "body", "main", "meta", "title", "link"].includes(
+        element.localName,
+      )
+    ) {
+      if (!trustedStructure.has(element)) {
         throw new TypeError("Invalid archive index");
       }
+      continue;
+    }
+    if (element.localName === "a") continue;
+    const attributes = [...element.attributes];
+    if (
+      attributes.some(
+        (attribute) =>
+          attribute.namespaceURI !== null ||
+          !["aria-labelledby", "class", "id"].includes(attribute.name),
+      )
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+    const className = element.getAttribute("class");
+    const id = element.getAttribute("id");
+    const labelledBy = element.getAttribute("aria-labelledby");
+    if (
+      (className !== null && !INDEX_CLASSES.has(className)) ||
+      (id !== null && !INDEX_IDS.has(id)) ||
+      (labelledBy !== null &&
+        !(
+          INDEX_IDS.has(labelledBy) &&
+          (labelledBy === id ||
+            (element.localName === "section" && id === null))
+        ))
+    ) {
+      throw new TypeError("Invalid archive index");
     }
   }
   for (const anchor of document.querySelectorAll("a[href]")) {
@@ -149,16 +269,22 @@ const validateIndexHtml = (value: unknown): string => {
     if (!local && !safeExternalHref(href)) {
       throw new TypeError("Invalid archive index");
     }
-    if (!local && anchor.getAttribute("rel") !== "noopener noreferrer") {
+    const expected = local ? { href } : { href, rel: "noopener noreferrer" };
+    if (!exactAttributes(anchor, expected)) {
       throw new TypeError("Invalid archive index");
     }
   }
-  return html;
+  if (document.querySelector("a:not([href])")) {
+    throw new TypeError("Invalid archive index");
+  }
+  const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+  if (walker.nextNode()) throw new TypeError("Invalid archive index");
+  return `<!doctype html>${document.documentElement.outerHTML}`;
 };
 
 const validateArchiveCss = (value: unknown): string => {
   const css = archiveText(value);
-  if (/@import|@font-face|url\s*\(|javascript:|content\s*:/iu.test(css)) {
+  if (css !== ARCHIVE_CSS) {
     throw new TypeError("Invalid archive stylesheet");
   }
   return css;
@@ -167,60 +293,95 @@ const validateArchiveCss = (value: unknown): string => {
 const typedArrayPrototype = Object.getPrototypeOf(
   Uint8Array.prototype,
 ) as object;
-// This intrinsic getter is intentionally invoked with Reflect.apply below so
-// only values with real typed-array internal slots are accepted.
 // eslint-disable-next-line @typescript-eslint/unbound-method
 const typedArrayBufferGetter = Object.getOwnPropertyDescriptor(
   typedArrayPrototype,
   "buffer",
 )?.get;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const typedArrayByteLengthGetter = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  "byteLength",
+)?.get;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const typedArrayTagGetter = Object.getOwnPropertyDescriptor(
+  typedArrayPrototype,
+  Symbol.toStringTag,
+)?.get;
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const arrayBufferByteLengthGetter = Object.getOwnPropertyDescriptor(
+  ArrayBuffer.prototype,
+  "byteLength",
+)?.get;
+/* eslint-disable @typescript-eslint/unbound-method -- captured intrinsic getters are invoked only through Reflect.apply */
+const sharedArrayBufferByteLengthGetter =
+  typeof SharedArrayBuffer === "undefined"
+    ? undefined
+    : Object.getOwnPropertyDescriptor(SharedArrayBuffer.prototype, "byteLength")
+        ?.get;
+/* eslint-enable @typescript-eslint/unbound-method */
+// eslint-disable-next-line @typescript-eslint/unbound-method
+const uint8ArraySet = Uint8Array.prototype.set;
+const IntrinsicDataView = DataView;
 
 const cloneBytes = (value: unknown): Uint8Array => {
-  let prototype: object | null;
-  try {
-    prototype = Object.getPrototypeOf(value) as object | null;
-  } catch {
-    throw new TypeError("Invalid archive bytes");
-  }
-  const bytesPerElement =
-    prototype === null
-      ? undefined
-      : Object.getOwnPropertyDescriptor(prototype, "BYTES_PER_ELEMENT");
-  const constructor =
-    prototype === null
-      ? undefined
-      : Object.getOwnPropertyDescriptor(prototype, "constructor");
-  const constructorValue: unknown = constructor?.value;
   if (
     !typedArrayBufferGetter ||
-    !bytesPerElement ||
-    !("value" in bytesPerElement) ||
-    bytesPerElement.value !== 1 ||
-    !constructor ||
-    !("value" in constructor) ||
-    typeof constructorValue !== "function" ||
-    constructorValue.name !== "Uint8Array"
+    !typedArrayByteLengthGetter ||
+    !typedArrayTagGetter ||
+    !arrayBufferByteLengthGetter
   ) {
     throw new TypeError("Invalid archive bytes");
   }
   let buffer: ArrayBufferLike;
+  let byteLength: number;
+  let tag: unknown;
   try {
     buffer = Reflect.apply(
       typedArrayBufferGetter,
       value,
       [],
     ) as ArrayBufferLike;
+    byteLength = Reflect.apply(typedArrayByteLengthGetter, value, []) as number;
+    tag = Reflect.apply(typedArrayTagGetter, value, []);
   } catch {
     throw new TypeError("Invalid archive bytes");
   }
   if (
-    typeof SharedArrayBuffer !== "undefined" &&
-    buffer instanceof SharedArrayBuffer
+    tag !== "Uint8Array" ||
+    !Number.isSafeInteger(byteLength) ||
+    byteLength < 0
+  ) {
+    throw new TypeError("Invalid archive bytes");
+  }
+  let arrayBufferLength: number;
+  try {
+    arrayBufferLength = Reflect.apply(
+      arrayBufferByteLengthGetter,
+      buffer,
+      [],
+    ) as number;
+  } catch {
+    if (sharedArrayBufferByteLengthGetter) {
+      try {
+        Reflect.apply(sharedArrayBufferByteLengthGetter, buffer, []);
+      } catch {
+        throw new TypeError("Invalid archive bytes");
+      }
+    }
+    throw new TypeError("Invalid archive bytes");
+  }
+  if (
+    !Number.isSafeInteger(arrayBufferLength) ||
+    arrayBufferLength < byteLength
   ) {
     throw new TypeError("Invalid archive bytes");
   }
   try {
-    return Uint8Array.prototype.slice.call(value as Uint8Array);
+    new IntrinsicDataView(buffer as ArrayBuffer, 0, 0);
+    const output = new Uint8Array(byteLength);
+    Reflect.apply(uint8ArraySet, output, [value, 0]);
+    return output;
   } catch {
     throw new TypeError("Invalid archive bytes");
   }
@@ -240,9 +401,6 @@ const validateContentPath = (path: unknown): string => {
   return path;
 };
 
-const hasAncestorConflict = (left: string, right: string): boolean =>
-  left.startsWith(`${right}/`) || right.startsWith(`${left}/`);
-
 const expectedPrefix = (resource: ArchiveManifestResource): string =>
   resource.kind === "file" ? "files/" : "pages/";
 
@@ -252,6 +410,22 @@ const collectPayloads = (
 ): Map<string, Uint8Array> => {
   if (Object.getPrototypeOf(rawEntries) !== Map.prototype) {
     throw new TypeError("Invalid archive entries");
+  }
+  // eslint-disable-next-line @typescript-eslint/unbound-method
+  const mapSizeGetter = Object.getOwnPropertyDescriptor(
+    Map.prototype,
+    "size",
+  )?.get;
+  let entryCount: number;
+  try {
+    entryCount = mapSizeGetter
+      ? (Reflect.apply(mapSizeGetter, rawEntries, []) as number)
+      : Number.NaN;
+  } catch {
+    throw new TypeError("Invalid archive entries");
+  }
+  if (entryCount > MAX_ZIP_PAYLOAD_ENTRIES) {
+    throw new ArchiveSafetyError("ZIP payload entry limit exceeded");
   }
   let rawPairs: [unknown, unknown][];
   try {
@@ -264,21 +438,16 @@ const collectPayloads = (
     throw new TypeError("Invalid archive entries");
   }
   const payloads = new Map<string, Uint8Array>();
-  const canonicalPaths = new Map<string, string>();
   for (const [rawPath, rawBytes] of rawPairs) {
     const path = validateContentPath(rawPath);
-    const canonical = canonicalArchivePath(path);
-    if (canonicalPaths.has(canonical)) {
-      throw new TypeError("Duplicate ZIP entry path");
-    }
-    for (const other of canonicalPaths.keys()) {
-      if (hasAncestorConflict(canonical, other)) {
-        throw new TypeError("Conflicting ZIP entry path");
-      }
-    }
-    canonicalPaths.set(canonical, path);
     payloads.set(path, cloneBytes(rawBytes));
   }
+  assertArchivePathSet(
+    [...payloads.keys()].map((path) => ({
+      kind: path.startsWith("files/") ? ("file" as const) : ("page" as const),
+      archivePath: path,
+    })),
+  );
 
   const expected = new Map<string, ArchiveManifestResource>();
   for (const resource of manifest.resources) {
@@ -290,14 +459,6 @@ const collectPayloads = (
       throw new TypeError("Invalid successful resource path");
     }
     const canonical = canonicalArchivePath(resource.archivePath);
-    if (expected.has(canonical)) {
-      throw new TypeError("Duplicate manifest payload path");
-    }
-    for (const other of expected.keys()) {
-      if (hasAncestorConflict(canonical, other)) {
-        throw new TypeError("Conflicting manifest payload path");
-      }
-    }
     expected.set(canonical, resource);
   }
   if (payloads.size !== expected.size) {

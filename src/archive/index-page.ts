@@ -1,5 +1,9 @@
 import { isCanonicalArchivePath } from "./paths";
-import { buildManifest, type ArchiveManifestResource } from "./manifest";
+import {
+  buildManifestFromSnapshot,
+  snapshotArchiveData,
+  type ArchiveManifestResource,
+} from "./manifest";
 import type { CoursePlan, ResourceOutcome } from "../shared/model";
 
 const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
@@ -102,12 +106,9 @@ export function renderIndexPage(
   outcomes: unknown,
   createdAt: unknown,
 ): string {
-  const manifest = buildManifest(
-    plan as CoursePlan,
-    outcomes as ResourceOutcome[],
-    createdAt as string,
-  );
-  const validatedPlan = plan as CoursePlan;
+  const snapshot = snapshotArchiveData(plan, outcomes, createdAt);
+  const manifest = buildManifestFromSnapshot(snapshot);
+  const validatedPlan = snapshot.plan;
   const byKey = new Map(
     manifest.resources.map((resource) => [resource.key, resource]),
   );

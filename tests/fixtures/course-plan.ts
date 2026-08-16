@@ -246,7 +246,7 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
 
 export const syntheticArchiveInput: ArchiveInput = {
   indexHtml:
-    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
   archiveCss: "body{font-family:system-ui}",
   manifest: {
     schemaVersion: 1,

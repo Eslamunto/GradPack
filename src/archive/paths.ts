@@ -100,3 +100,45 @@ export function isCanonicalArchivePath(path: unknown): path is string {
     return false;
   }
 }
+
+export type ArchivePathRecord = {
+  kind: "file" | "page" | "external" | "unsupported";
+  archivePath: string | null;
+};
+
+/**
+ * Validates a complete archive namespace in bounded O(total path segments)
+ * work. Canonical equality and file/directory ancestor conflicts are checked
+ * across every resource, regardless of retrieval outcome.
+ */
+export function assertArchivePathSet(
+  resources: readonly ArchivePathRecord[],
+): void {
+  const paths = new Set<string>();
+  for (const resource of resources) {
+    const { kind, archivePath } = resource;
+    if (kind === "external" || kind === "unsupported") {
+      if (archivePath !== null) throw new TypeError("Invalid archive path set");
+      continue;
+    }
+    if (
+      !isCanonicalArchivePath(archivePath) ||
+      (kind === "file" && !archivePath.startsWith("files/")) ||
+      (kind === "page" && !archivePath.startsWith("pages/"))
+    ) {
+      throw new TypeError("Invalid archive path set");
+    }
+    const canonical = canonicalArchivePath(archivePath);
+    if (paths.has(canonical)) throw new TypeError("Conflicting archive path");
+    paths.add(canonical);
+  }
+  for (const path of paths) {
+    let separator = path.indexOf("/");
+    while (separator !== -1) {
+      if (paths.has(path.slice(0, separator))) {
+        throw new TypeError("Conflicting archive path");
+      }
+      separator = path.indexOf("/", separator + 1);
+    }
+  }
+}

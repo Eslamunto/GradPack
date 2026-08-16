@@ -1,4 +1,4 @@
-import { canonicalArchivePath, isCanonicalArchivePath } from "./paths";
+import { assertArchivePathSet, isCanonicalArchivePath } from "./paths";
 import type {
   CoursePlan,
   OutcomeStatus,
@@ -11,6 +11,10 @@ const GRADPACK_VERSION = "0.1.0-alpha.1";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
 const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
+// Classic ZIP stores at most 65,535 entries. Three are reserved for GradPack's
+// core files, so this pilot stops rather than silently omitting resources.
+export const MAX_ARCHIVE_RESOURCES = 65_532;
+export const MAX_ZIP_PAYLOAD_ENTRIES = 65_532;
 const MAX_TEXT_LENGTH = 4096;
 const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
 const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
@@ -53,6 +57,16 @@ export type ArchiveManifest = {
   resources: ArchiveManifestResource[];
 };
 
+export class ArchiveSafetyError extends TypeError {
+  override readonly name = "ArchiveSafetyError";
+}
+
+export type ArchiveSnapshot = Readonly<{
+  plan: CoursePlan;
+  outcomes: ResourceOutcome[];
+  createdAt: string;
+}>;
+
 const isPlainRecord = (
   value: unknown,
 ): value is Record<PropertyKey, unknown> => {
@@ -88,6 +102,10 @@ const exactRecord = (
   ) {
     throw new TypeError("Invalid archive data");
   }
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
   for (const key of expectedKeys) {
     let descriptor: PropertyDescriptor | undefined;
     try {
@@ -98,16 +116,13 @@ const exactRecord = (
     if (!descriptor || !("value" in descriptor)) {
       throw new TypeError("Invalid archive data");
     }
+    snapshot[key] = descriptor.value;
   }
-  return value;
+  return snapshot;
 };
 
 const valueOf = (record: Record<string, unknown>, key: string): unknown => {
-  const descriptor = Object.getOwnPropertyDescriptor(record, key);
-  if (!descriptor || !("value" in descriptor)) {
-    throw new TypeError("Invalid archive data");
-  }
-  return descriptor.value;
+  return record[key];
 };
 
 const exactArray = (value: unknown): unknown[] => {
@@ -127,8 +142,20 @@ const exactArray = (value: unknown): unknown[] => {
   ) {
     throw new TypeError("Invalid archive data");
   }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (!lengthDescriptor || !("value" in lengthDescriptor)) {
+    throw new TypeError("Invalid archive data");
+  }
+  const length = lengthDescriptor.value as unknown;
+  if (
+    typeof length !== "number" ||
+    !Number.isSafeInteger(length) ||
+    length < 0
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
   const output: unknown[] = [];
-  for (let index = 0; index < value.length; index += 1) {
+  for (let index = 0; index < length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
     if (!descriptor || !("value" in descriptor)) {
       throw new TypeError("Invalid archive data");
@@ -221,7 +248,7 @@ const validateSourceUrl = (
   if (kind === "page" || kind === "unsupported") {
     throw new TypeError("Invalid archive data");
   }
-  return url.href;
+  return value;
 };
 
 type ValidatedResource = PlannedResource;
@@ -410,32 +437,20 @@ const validatePlan = (value: unknown): CoursePlan => {
     "resources",
     "advertisedBytes",
   ]);
-  const resources = exactArray(valueOf(record, "resources")).map(
-    validateResource,
-  );
+  const rawResources = exactArray(valueOf(record, "resources"));
+  if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const resources = rawResources.map(validateResource);
   const keys = new Set<string>();
-  const paths = new Set<string>();
   let advertisedBytes = 0;
   for (const resource of resources) {
     if (keys.has(resource.key))
       throw new TypeError("Duplicate planned resource");
     keys.add(resource.key);
-    if (resource.archivePath !== null) {
-      const canonical = canonicalArchivePath(resource.archivePath);
-      if (
-        paths.has(canonical) ||
-        [...paths].some(
-          (other) =>
-            canonical.startsWith(`${other}/`) ||
-            other.startsWith(`${canonical}/`),
-        )
-      ) {
-        throw new TypeError("Conflicting planned archive path");
-      }
-      paths.add(canonical);
-    }
     advertisedBytes = addSafe(advertisedBytes, resource.advertisedBytes ?? 0);
   }
+  assertArchivePathSet(resources);
   const declared = safeInteger(valueOf(record, "advertisedBytes"));
   if (declared !== advertisedBytes || declared > MAX_ADVERTISED_BYTES) {
     throw new TypeError("Invalid advertised byte total");
@@ -465,7 +480,26 @@ const sameResource = (
   planned.title === outcome.title &&
   planned.sourceId === outcome.sourceId &&
   planned.archivePath === outcome.archivePath &&
-  planned.advertisedBytes === outcome.advertisedBytes;
+  planned.advertisedBytes === outcome.advertisedBytes &&
+  planned.sourceUrl === outcome.sourceUrl;
+
+const freezePlan = (plan: CoursePlan): CoursePlan => {
+  Object.freeze(plan.course);
+  for (const module of plan.modules) {
+    for (const item of module.items) Object.freeze(item);
+    Object.freeze(module.items);
+    Object.freeze(module);
+  }
+  Object.freeze(plan.modules);
+  for (const resource of plan.resources) Object.freeze(resource);
+  Object.freeze(plan.resources);
+  return Object.freeze(plan);
+};
+
+const freezeOutcomes = (outcomes: ResourceOutcome[]): ResourceOutcome[] => {
+  for (const outcome of outcomes) Object.freeze(outcome);
+  return Object.freeze(outcomes) as ResourceOutcome[];
+};
 
 const freezeManifest = (manifest: ArchiveManifest): ArchiveManifest => {
   for (const resource of manifest.resources) Object.freeze(resource);
@@ -475,18 +509,17 @@ const freezeManifest = (manifest: ArchiveManifest): ArchiveManifest => {
   return Object.freeze(manifest);
 };
 
-export function buildManifest(
-  plan: CoursePlan,
-  outcomes: ResourceOutcome[],
-  createdAt: string,
-): ArchiveManifest;
-export function buildManifest(
+export function snapshotArchiveData(
   plan: unknown,
   outcomes: unknown,
   createdAt: unknown,
-): ArchiveManifest {
+): ArchiveSnapshot {
   const validatedPlan = validatePlan(plan);
-  const validatedOutcomes = exactArray(outcomes).map(validateOutcome);
+  const rawOutcomes = exactArray(outcomes);
+  if (rawOutcomes.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const validatedOutcomes = rawOutcomes.map(validateOutcome);
   if (validatedOutcomes.length !== validatedPlan.resources.length) {
     throw new TypeError("Incomplete resource outcomes");
   }
@@ -497,6 +530,27 @@ export function buildManifest(
     byKey.set(outcome.key, outcome);
   }
 
+  const orderedOutcomes = validatedPlan.resources.map((planned) => {
+    const outcome = byKey.get(planned.key);
+    if (!outcome || !sameResource(planned, outcome)) {
+      throw new TypeError("Mismatched resource outcome");
+    }
+    return outcome;
+  });
+  const snapshot = {
+    plan: freezePlan(validatedPlan),
+    outcomes: freezeOutcomes(orderedOutcomes),
+    createdAt: canonicalTimestamp(createdAt),
+  };
+  return Object.freeze(snapshot);
+}
+
+export function buildManifestFromSnapshot(
+  snapshot: ArchiveSnapshot,
+): ArchiveManifest {
+  const validatedPlan = snapshot.plan;
+  const validatedOutcomes = snapshot.outcomes;
+
   const totals: ArchiveManifest["totals"] = {
     success: 0,
     failed: 0,
@@ -506,11 +560,7 @@ export function buildManifest(
     advertisedBytes: validatedPlan.advertisedBytes,
     archivedBytes: 0,
   };
-  const resources = validatedPlan.resources.map((planned) => {
-    const outcome = byKey.get(planned.key);
-    if (!outcome || !sameResource(planned, outcome)) {
-      throw new TypeError("Mismatched resource outcome");
-    }
+  const resources = validatedOutcomes.map((outcome) => {
     totals[outcome.status] += 1;
     if (outcome.status === "success") {
       totals.archivedBytes = addSafe(
@@ -536,7 +586,7 @@ export function buildManifest(
   return freezeManifest({
     schemaVersion: 1,
     gradPackVersion: GRADPACK_VERSION,
-    createdAt: canonicalTimestamp(createdAt),
+    createdAt: snapshot.createdAt,
     canvasHost: CANVAS_HOST,
     course: {
       id: validatedPlan.course.id,
@@ -546,6 +596,16 @@ export function buildManifest(
     totals,
     resources,
   });
+}
+
+export function buildManifest(
+  plan: unknown,
+  outcomes: unknown,
+  createdAt: unknown,
+): ArchiveManifest {
+  return buildManifestFromSnapshot(
+    snapshotArchiveData(plan, outcomes, createdAt),
+  );
 }
 
 export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
@@ -570,7 +630,11 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     "name",
     "courseCode",
   ]);
-  const resources = exactArray(valueOf(record, "resources")).map((value) => {
+  const rawResources = exactArray(valueOf(record, "resources"));
+  if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const resources = rawResources.map((value) => {
     const resourceRecord = exactRecord(value, [
       "key",
       "kind",
@@ -604,6 +668,7 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
             : null,
     });
   });
+  assertArchivePathSet(resources);
   const totalsRecord = exactRecord(valueOf(record, "totals"), [
     "success",
     "failed",

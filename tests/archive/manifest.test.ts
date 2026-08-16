@@ -104,6 +104,39 @@ describe("buildManifest", () => {
         ...values.slice(1),
       ],
     ],
+    [
+      "mismatched file source URL",
+      (values: ResourceOutcome[]) => [
+        {
+          ...values[0]!,
+          sourceUrl:
+            "https://frankfurtschool.instructure.com/files/301/download?verifier=other-synthetic",
+        },
+        ...values.slice(1),
+      ],
+    ],
+    [
+      "mismatched external source URL",
+      (values: ResourceOutcome[]) => [
+        ...values.slice(0, 2),
+        {
+          ...values[2]!,
+          sourceUrl: "https://reference.example/other-reading",
+        },
+        ...values.slice(3),
+      ],
+    ],
+    [
+      "textually different external source URL",
+      (values: ResourceOutcome[]) => [
+        ...values.slice(0, 2),
+        {
+          ...values[2]!,
+          sourceUrl: "https://REFERENCE.example/reading",
+        },
+        ...values.slice(3),
+      ],
+    ],
   ])("rejects a %s outcome set", (_label, change) => {
     expect(() =>
       buildManifest(copyPlan(), change(copyOutcomes()), CREATED_AT),
@@ -233,6 +266,54 @@ describe("buildManifest", () => {
     plan.course.id = "101" as unknown as number;
     expect(() => buildManifest(plan, copyOutcomes(), CREATED_AT)).toThrowError(
       TypeError,
+    );
+  });
+
+  it("reads each proxied resource data property only once", () => {
+    const plan = copyPlan();
+    const target = plan.resources[0]!;
+    const reads = new Map<PropertyKey, number>();
+    plan.resources[0] = new Proxy(target, {
+      getOwnPropertyDescriptor(value, key) {
+        const count = (reads.get(key) ?? 0) + 1;
+        reads.set(key, count);
+        if (count > 1) throw new Error("property read twice");
+        return Reflect.getOwnPropertyDescriptor(value, key);
+      },
+    });
+
+    expect(() => buildManifest(plan, copyOutcomes(), CREATED_AT)).not.toThrow();
+    expect([...reads.values()].every((count) => count === 1)).toBe(true);
+  });
+
+  it("caps the total immutable resource plan before packaging", () => {
+    const count = 65_533;
+    const plan: CoursePlan = {
+      course: structuredClone(syntheticArchivePlan.course),
+      modules: [],
+      advertisedBytes: 0,
+      resources: Array.from({ length: count }, (_, index) => ({
+        key: `unsupported:${index}`,
+        kind: "unsupported",
+        title: "Synthetic unsupported item",
+        sourceId: String(index),
+        archivePath: null,
+        advertisedBytes: 0,
+        sourceUrl: null,
+      })),
+    };
+    const outcomes: ResourceOutcome[] = plan.resources.map((resource) => ({
+      ...resource,
+      status: "unsupported",
+      actualBytes: 0,
+      failureCategory: null,
+    }));
+
+    expect(() => buildManifest(plan, outcomes, CREATED_AT)).toThrowError(
+      expect.objectContaining({
+        name: "ArchiveSafetyError",
+        message: "Archive resource limit exceeded",
+      }),
     );
   });
 });

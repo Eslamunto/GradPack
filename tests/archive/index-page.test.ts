@@ -164,4 +164,26 @@ describe("renderIndexPage", () => {
       renderIndexPage(copyPlan(), copyOutcomes().slice(1), CREATED_AT),
     ).toThrowError(TypeError);
   });
+
+  it("renders solely from the validated snapshot without direct caller rereads", () => {
+    const plan = copyPlan();
+    const target = plan.resources[2]!;
+    plan.resources[2] = new Proxy(target, {
+      getOwnPropertyDescriptor(value, key) {
+        return Reflect.getOwnPropertyDescriptor(value, key);
+      },
+      get() {
+        throw new Error("caller object reread");
+      },
+    });
+
+    const html = renderIndexPage(plan, copyOutcomes(), CREATED_AT);
+    const document = new DOMParser().parseFromString(html, "text/html");
+    expect(
+      [...document.querySelectorAll("a")].some(
+        (anchor) =>
+          anchor.getAttribute("href") === "https://reference.example/reading",
+      ),
+    ).toBe(true);
+  });
 });
