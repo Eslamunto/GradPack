@@ -1,9 +1,15 @@
 import { vi, type Mock } from "vitest";
+import { strToU8 } from "fflate";
+import type { ArchiveInput } from "../../src/archive/build-zip";
 import {
   CanvasCourseIndexUnavailableError,
   type CanvasHttp,
 } from "../../src/canvas/http";
-import type { CoursePlan, CourseSummary } from "../../src/shared/model";
+import type {
+  CoursePlan,
+  CourseSummary,
+  ResourceOutcome,
+} from "../../src/shared/model";
 
 export const syntheticCourse: CourseSummary = {
   id: 101,
@@ -143,3 +149,134 @@ export function planWithOneFile(size: number | null): CoursePlan {
     ],
   };
 }
+
+export const syntheticArchivePlan: CoursePlan = {
+  course: syntheticCourse,
+  advertisedBytes: 19,
+  resources: [
+    {
+      key: "file:301",
+      kind: "file",
+      title: "slides.pdf",
+      sourceId: "301",
+      archivePath: "files/slides.pdf",
+      advertisedBytes: 19,
+      sourceUrl:
+        "https://frankfurtschool.instructure.com/files/301/download?verifier=synthetic-secret",
+    },
+    {
+      key: "page:welcome",
+      kind: "page",
+      title: "Welcome",
+      sourceId: "welcome",
+      archivePath: "pages/welcome.html",
+      advertisedBytes: 0,
+      sourceUrl: null,
+    },
+    {
+      key: "external:401",
+      kind: "external",
+      title: "Public reference",
+      sourceId: "401",
+      archivePath: null,
+      advertisedBytes: 0,
+      sourceUrl: "https://reference.example/reading",
+    },
+    {
+      key: "unsupported:501",
+      kind: "unsupported",
+      title: "Synthetic unsupported item",
+      sourceId: "501",
+      archivePath: null,
+      advertisedBytes: 0,
+      sourceUrl: null,
+    },
+  ],
+  modules: [
+    {
+      id: 201,
+      name: "Module One",
+      position: 1,
+      items: [
+        {
+          id: 301,
+          title: "Slides",
+          position: 1,
+          resourceKey: "file:301",
+          type: "File",
+        },
+        {
+          id: 302,
+          title: "Public reference",
+          position: 2,
+          resourceKey: "external:401",
+          type: "ExternalUrl",
+        },
+      ],
+    },
+  ],
+};
+
+export const syntheticArchiveOutcomes: ResourceOutcome[] = [
+  {
+    ...syntheticArchivePlan.resources[0]!,
+    status: "success",
+    actualBytes: 19,
+    failureCategory: null,
+  },
+  {
+    ...syntheticArchivePlan.resources[1]!,
+    status: "success",
+    actualBytes: 29,
+    failureCategory: null,
+  },
+  {
+    ...syntheticArchivePlan.resources[2]!,
+    status: "external",
+    actualBytes: 0,
+    failureCategory: null,
+  },
+  {
+    ...syntheticArchivePlan.resources[3]!,
+    status: "unsupported",
+    actualBytes: 0,
+    failureCategory: null,
+  },
+];
+
+export const syntheticArchiveInput: ArchiveInput = {
+  indexHtml:
+    '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
+  archiveCss: "body{font-family:system-ui}",
+  manifest: {
+    schemaVersion: 1,
+    gradPackVersion: "0.1.0-alpha.1",
+    createdAt: "2026-08-16T12:00:00.000Z",
+    canvasHost: "frankfurtschool.instructure.com",
+    course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+    totals: {
+      success: 2,
+      failed: 0,
+      unavailable: 0,
+      unsupported: 1,
+      external: 1,
+      advertisedBytes: 19,
+      archivedBytes: 48,
+    },
+    resources: syntheticArchiveOutcomes.map((outcome) => ({
+      key: outcome.key,
+      kind: outcome.kind,
+      title: outcome.title,
+      sourceId: outcome.sourceId,
+      archivePath: outcome.archivePath,
+      advertisedBytes: outcome.advertisedBytes,
+      status: outcome.status,
+      actualBytes: outcome.actualBytes,
+      failureCategory: outcome.failureCategory,
+    })),
+  },
+  entries: new Map([
+    ["files/slides.pdf", strToU8("synthetic PDF bytes")],
+    ["pages/welcome.html", strToU8("<!doctype html><p>Welcome</p>")],
+  ]),
+};

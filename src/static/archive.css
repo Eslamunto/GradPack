@@ -1,10 +1,141 @@
 :root {
   color-scheme: light;
-  font-family: system-ui, sans-serif;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+  line-height: 1.55;
+  color: #17213b;
+  background: #f5f6fb;
 }
 
 body {
-  margin: 2rem;
-  color: #1f2a44;
+  margin: 0;
+}
+
+main {
+  width: min(70rem, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: 2rem 0 4rem;
+}
+
+a {
+  color: #3448a4;
+  text-decoration-thickness: 0.1em;
+  text-underline-offset: 0.18em;
+}
+
+a:hover,
+a:focus-visible {
+  color: #172b82;
+}
+
+.archive-header,
+.summary,
+.module,
+.all-resources,
+.responsibility-notice {
+  margin: 0 0 1.25rem;
+  padding: 1.25rem;
+  border: 1px solid #d9dcec;
+  border-radius: 0.75rem;
   background: #ffffff;
+}
+
+.eyebrow {
+  margin: 0;
+  color: #53608c;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+h1,
+h2 {
+  line-height: 1.2;
+}
+
+h1 {
+  margin: 0.35rem 0 1rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+}
+
+.metadata {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+  margin: 0;
+}
+
+.metadata div {
+  min-width: 0;
+}
+
+.metadata dt {
+  color: #53608c;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.metadata dd {
+  margin: 0.2rem 0 0;
+  overflow-wrap: anywhere;
+}
+
+.summary ul,
+.all-resources,
+.module ol {
+  margin-top: 0;
+}
+
+.summary ul {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+  gap: 0.4rem 1rem;
+  padding-left: 1.25rem;
+}
+
+.module li,
+.all-resources li {
+  margin: 0.45rem 0;
+}
+
+.resource-status {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0.08rem 0.45rem;
+  border-radius: 999px;
+  color: #3f496d;
+  background: #eceefa;
+  font-size: 0.78rem;
+}
+
+.responsibility-notice {
+  border-color: #d9c98d;
+  background: #fffbee;
+}
+
+.responsibility-notice p {
+  margin-bottom: 0;
+}
+
+@media (max-width: 40rem) {
+  main {
+    width: min(100% - 1rem, 70rem);
+    padding-top: 0.5rem;
+  }
+
+  .archive-header,
+  .summary,
+  .module,
+  .all-resources,
+  .responsibility-notice {
+    padding: 1rem;
+  }
 }
