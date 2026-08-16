@@ -11,7 +11,7 @@ The project is currently in its product-definition and feasibility phase.
 
 Licensed under the [Apache License 2.0](LICENSE).
 
-## Pilot development
+## Development
 
 Prerequisites: Node.js 22.22.2 and pnpm 11.17.0.
 
@@ -24,3 +24,7 @@ pnpm build
 To inspect the local build, open `chrome://extensions`, enable Developer mode,
 select **Load unpacked**, and choose this repository's `dist/` directory. Keep a
 signed-in Frankfurt School Canvas tab open while GradPack is running.
+
+Contributors can use the development-only [live Canvas smoke-test
+workflow](docs/development/live-canvas-smoke-test.md) to verify an authorized
+local session. It is not an end-user feature.
