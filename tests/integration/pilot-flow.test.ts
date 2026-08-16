@@ -237,5 +237,29 @@ describe("production pilot vertical flow", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(anchorClick).toHaveBeenCalledOnce();
+
+    for (let index = 0; index < 128; index += 1) {
+      await tabsSendMessage(tabId, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_COURSE",
+        runId: `run-evict${index.toString().padStart(4, "0")}`,
+        courseId: 999,
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await tabsSendMessage(tabId, {
+      channel: EXTENSION_CHANNEL,
+      type: "LIST_COURSES",
+      runId: "run-12345678-1234-1234-1234-123456789abc",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await tabsSendMessage(tabId, {
+      channel: EXTENSION_CHANNEL,
+      type: "START_COURSE",
+      runId: "run-12345678-1234-1234-1234-123456789abc",
+      courseId: 101,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(anchorClick).toHaveBeenCalledOnce();
   });
 });

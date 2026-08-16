@@ -534,4 +534,66 @@ describe("production page runner", () => {
     );
     postMessage.mockRestore();
   });
+
+  it("never reuses a completed run ID after more than 128 later terminal IDs", async () => {
+    const replayedRunId = "run-replay0001";
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+    list(replayedRunId);
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) =>
+            eventType(value) === "COURSES" &&
+            (value as { payload?: { runId?: unknown } }).payload?.runId ===
+              replayedRunId,
+        ),
+      ).toBe(true),
+    );
+    start(replayedRunId);
+    await vi.waitFor(() => expect(mocks.runCourse).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.filter(
+          ([value]) =>
+            eventType(value) === "COMPLETE" &&
+            (value as { payload?: { runId?: unknown } }).payload?.runId ===
+              replayedRunId,
+        ),
+      ).toHaveLength(1),
+    );
+
+    for (let index = 0; index < 128; index += 1) {
+      start(`run-evict${index.toString().padStart(4, "0")}`, 999);
+    }
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.filter(
+          ([value]) =>
+            eventType(value) === "FAILED" &&
+            String(
+              (value as { payload?: { runId?: unknown } }).payload?.runId,
+            ).startsWith("run-evict"),
+        ),
+      ).toHaveLength(128),
+    );
+
+    list(replayedRunId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    start(replayedRunId);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce();
+    expect(mocks.runCourse).toHaveBeenCalledOnce();
+    expect(
+      postMessage.mock.calls.filter(
+        ([value]) =>
+          eventType(value) === "COMPLETE" &&
+          (value as { payload?: { runId?: unknown } }).payload?.runId ===
+            replayedRunId,
+      ),
+    ).toHaveLength(1);
+    postMessage.mockRestore();
+  });
 });

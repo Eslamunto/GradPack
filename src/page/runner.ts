@@ -94,8 +94,6 @@ type ActiveRun = {
   cause: "cancelled" | "navigation" | null;
 };
 
-const TERMINAL_ID_LIMIT = 128;
-
 if (scope[marker] !== true) {
   scope[marker] = true;
   let listed: { runId: string; courses: readonly CourseSummary[] } | null =
@@ -103,15 +101,10 @@ if (scope[marker] !== true) {
   let listing: ActiveRun | null = null;
   let active: ActiveRun | null = null;
   const terminalizedIds = new Set<string>();
-  const terminalizedOrder: string[] = [];
 
   const markTerminal = (runId: string): boolean => {
     if (terminalizedIds.has(runId)) return false;
     terminalizedIds.add(runId);
-    terminalizedOrder.push(runId);
-    if (terminalizedOrder.length > TERMINAL_ID_LIMIT) {
-      terminalizedIds.delete(terminalizedOrder.shift()!);
-    }
     return true;
   };
 
