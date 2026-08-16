@@ -9,6 +9,7 @@ const MAX_COURSES = 8;
 const MAX_MODULES_PER_COURSE = 8;
 const MAX_ITEMS_PER_COURSE = 100;
 const MAX_FILE_BYTES = 5_242_880;
+const MAX_FILE_CANDIDATES = 8;
 const MAX_CONCURRENCY = 2;
 
 type CanvasModuleItem = {
@@ -25,8 +26,14 @@ type FileMetadata = {
 type Representative = {
   courseId: number;
   pageUrl: string;
-  fileId: number;
+  fileIds: number[];
 };
+
+type FileCandidateResult =
+  | { status: "selected"; url: URL }
+  | { status: "too-large" }
+  | { status: "unavailable" }
+  | { status: "unsafe" };
 
 type Failure = Exclude<DevResult["failure"], "none" | "busy" | "timeout">;
 type PartialResult = Partial<
@@ -100,11 +107,11 @@ const pageToken = (value: unknown): value is string =>
 
 const moduleAvailability = (
   pageUrl: string | undefined,
-  fileId: number | undefined,
+  hasFile: boolean,
 ): DevResult["modules"] => {
-  if (pageUrl !== undefined && fileId !== undefined) return "page-and-file";
+  if (pageUrl !== undefined && hasFile) return "page-and-file";
   if (pageUrl !== undefined) return "page-only";
-  if (fileId !== undefined) return "file-only";
+  if (hasFile) return "file-only";
   return "empty";
 };
 
@@ -185,7 +192,8 @@ async function discoverRepresentative(
   for (const entry of loaded) moduleItems.set(entry.index, entry.items);
 
   let pageUrl: string | undefined;
-  let fileId: number | undefined;
+  const fileIds: number[] = [];
+  const seenFileIds = new Set<number>();
   let consumed = 0;
   for (let index = 0; index < modules.length; index += 1) {
     const items = moduleItems.get(index) ?? [];
@@ -202,21 +210,23 @@ async function discoverRepresentative(
         pageUrl = item.page_url;
       }
       if (
-        fileId === undefined &&
+        fileIds.length < MAX_FILE_CANDIDATES &&
         item.type === "File" &&
-        positiveId(item.content_id)
+        positiveId(item.content_id) &&
+        !seenFileIds.has(item.content_id)
       ) {
-        fileId = item.content_id;
+        seenFileIds.add(item.content_id);
+        fileIds.push(item.content_id);
       }
     }
     if (consumed >= MAX_ITEMS_PER_COURSE) break;
   }
 
-  const availability = moduleAvailability(pageUrl, fileId);
+  const availability = moduleAvailability(pageUrl, fileIds.length > 0);
   return {
     modules: availability,
     ...(availability === "page-and-file"
-      ? { representative: { courseId, pageUrl: pageUrl!, fileId: fileId! } }
+      ? { representative: { courseId, pageUrl: pageUrl!, fileIds } }
       : {}),
   };
 }
@@ -240,6 +250,34 @@ function strictFileUrl(value: unknown): URL | null {
     return null;
   }
   return url;
+}
+
+async function selectFileCandidate(
+  http: CanvasHttp,
+  representative: Representative,
+): Promise<FileCandidateResult> {
+  let foundOversized = false;
+  for (const fileId of representative.fileIds) {
+    const detail = await http.json<unknown>(
+      canvasEndpoint({
+        type: "courseFile",
+        courseId: representative.courseId,
+        fileId,
+      }),
+    );
+    const metadata = detail.value;
+    if (!isRecord(metadata)) return { status: "unavailable" };
+    const file = metadata as FileMetadata;
+    const url = strictFileUrl(file.url);
+    if (!url) return { status: "unsafe" };
+    if (!positiveId(file.size)) return { status: "unavailable" };
+    if (file.size > MAX_FILE_BYTES) {
+      foundOversized = true;
+      continue;
+    }
+    return { status: "selected", url };
+  }
+  return { status: foundOversized ? "too-large" : "unavailable" };
 }
 
 function finalUrl(response: Response): {
@@ -373,7 +411,7 @@ export async function runLiveSmokeTest(
     });
   }
 
-  const [pageDetail, fileDetail] = await Promise.allSettled([
+  const [pageDetail, fileCandidate] = await Promise.allSettled([
     http.json<unknown>(
       canvasEndpoint({
         type: "coursePage",
@@ -381,13 +419,7 @@ export async function runLiveSmokeTest(
         pageUrl: representative.pageUrl,
       }),
     ),
-    http.json<unknown>(
-      canvasEndpoint({
-        type: "courseFile",
-        courseId: representative.courseId,
-        fileId: representative.fileId,
-      }),
-    ),
+    selectFileCandidate(http, representative),
   ]);
 
   if (pageDetail.status === "rejected") {
@@ -396,10 +428,10 @@ export async function runLiveSmokeTest(
       courses: "available",
       modules: "page-and-file",
       page: "unavailable",
-      ...(fileDetail.status === "rejected" ? { file: "unavailable" } : {}),
+      ...(fileCandidate.status === "rejected" ? { file: "unavailable" } : {}),
     });
   }
-  if (fileDetail.status === "rejected") {
+  if (fileCandidate.status === "rejected") {
     return failureResult(runId, "file", {
       session: "available",
       courses: "available",
@@ -408,20 +440,7 @@ export async function runLiveSmokeTest(
       file: "unavailable",
     });
   }
-
-  const metadata = fileDetail.value.value;
-  if (!isRecord(metadata)) {
-    return failureResult(runId, "file", {
-      session: "available",
-      courses: "available",
-      modules: "page-and-file",
-      page: "available",
-      file: "unavailable",
-    });
-  }
-  const file = metadata as FileMetadata;
-  const fileUrl = strictFileUrl(file.url);
-  if (!fileUrl) {
+  if (fileCandidate.value.status === "unsafe") {
     return failureResult(runId, "safety", {
       session: "available",
       courses: "available",
@@ -431,7 +450,7 @@ export async function runLiveSmokeTest(
       redirect: "unsafe",
     });
   }
-  if (!positiveId(file.size)) {
+  if (fileCandidate.value.status === "unavailable") {
     return failureResult(runId, "file", {
       session: "available",
       courses: "available",
@@ -440,7 +459,7 @@ export async function runLiveSmokeTest(
       file: "unavailable",
     });
   }
-  if (file.size > MAX_FILE_BYTES) {
+  if (fileCandidate.value.status === "too-large") {
     return failureResult(runId, "safety", {
       session: "available",
       courses: "available",
@@ -449,6 +468,7 @@ export async function runLiveSmokeTest(
       file: "too-large",
     });
   }
+  const fileUrl = fileCandidate.value.url;
 
   const downloadController = new AbortController();
   const signal = dependencies.signal

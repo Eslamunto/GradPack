@@ -622,6 +622,170 @@ describe("runLiveSmokeTest", () => {
     expectClosed(result);
   });
 
+  it("continues to a safe file candidate after an oversized candidate", async () => {
+    const oversizedUrl = `${CANVAS_ORIGIN}/files/oversized/download`;
+    const safeUrl = `${CANVAS_ORIGIN}/files/safe/download`;
+    let activeDetails = 0;
+    let peakDetails = 0;
+    const http = syntheticHttp(async (url) => {
+      const isDetail =
+        url.pathname.includes("/pages/") || /\/files\/\d+$/.test(url.pathname);
+      if (isDetail) {
+        activeDetails += 1;
+        peakDetails = Math.max(peakDetails, activeDetails);
+        await Promise.resolve();
+      }
+      try {
+        if (url.pathname === "/api/v1/users/self/profile") {
+          return apiResponse({ id: 1 });
+        }
+        if (url.pathname === "/api/v1/courses/11/modules") {
+          return apiResponse([
+            {
+              id: 21,
+              items: [
+                { type: "Page", page_url: "synthetic-page" },
+                {
+                  type: "File",
+                  content_id: 31,
+                  url: "https://synthetic.invalid/arbitrary-first",
+                },
+                { type: "File", content_id: 31 },
+                {
+                  type: "File",
+                  content_id: 32,
+                  url: "https://synthetic.invalid/arbitrary-second",
+                },
+              ],
+            },
+          ]);
+        }
+        if (url.pathname === "/api/v1/courses/11/pages/synthetic-page") {
+          return apiResponse({ page_id: 41 });
+        }
+        if (url.pathname === "/api/v1/courses/11/files/31") {
+          return apiResponse({ url: oversizedUrl, size: 5_242_881 });
+        }
+        if (url.pathname === "/api/v1/courses/11/files/32") {
+          return apiResponse({ url: safeUrl, size: 3 });
+        }
+        throw new Error("unexpected synthetic endpoint");
+      } finally {
+        if (isDetail) activeDetails -= 1;
+      }
+    });
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(downloadResponse({ body: "pdf", url: safeUrl }));
+
+    const result = await runLiveSmokeTest(RUN_ID, {
+      http: http as unknown as CanvasHttp,
+      fetcher,
+    });
+
+    const fileMetadataPaths = http.json.mock.calls
+      .map(([url]) => url.pathname)
+      .filter((path) => /\/files\/\d+$/.test(path));
+    expect(fileMetadataPaths).toEqual([
+      "/api/v1/courses/11/files/31",
+      "/api/v1/courses/11/files/32",
+    ]);
+    const directDetailPaths = http.json.mock.calls
+      .map(([url]) => url.pathname)
+      .filter((path) => path.includes("/pages/") || /\/files\/\d+$/.test(path));
+    expect(directDetailPaths).toContain(
+      "/api/v1/courses/11/pages/synthetic-page",
+    );
+    expect(
+      directDetailPaths.every((path) => path.startsWith("/api/v1/courses/11/")),
+    ).toBe(true);
+    expect(
+      http.json.mock.calls.every(
+        ([url]) =>
+          url.origin === CANVAS_ORIGIN && url.hostname !== "synthetic.invalid",
+      ),
+    ).toBe(true);
+    expect(peakDetails).toBeLessThanOrEqual(2);
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0]?.[0]).toEqual(new URL(safeUrl));
+    expect(fetcher.mock.calls[0]?.[0]).not.toEqual(new URL(oversizedUrl));
+    expect(
+      [
+        ...http.json.mock.calls.map(([url]) => url.href),
+        ...fetcher.mock.calls.map(([url]) =>
+          url instanceof URL
+            ? url.href
+            : typeof url === "string"
+              ? url
+              : url.url,
+        ),
+      ].some((href) => href.includes("arbitrary")),
+    ).toBe(false);
+    expect(result).toMatchObject({
+      outcome: "pass",
+      failure: "none",
+      modules: "page-and-file",
+      page: "available",
+      file: "available",
+    });
+    expectClosed(result);
+  });
+
+  it("tries at most eight distinct file metadata candidates", async () => {
+    const fileIds = Array.from({ length: 9 }, (_, index) => index + 31);
+    const http = syntheticHttp((url) => {
+      if (url.pathname === "/api/v1/users/self/profile") {
+        return Promise.resolve(apiResponse({ id: 1 }));
+      }
+      if (url.pathname === "/api/v1/courses/11/modules") {
+        return Promise.resolve(
+          apiResponse([
+            {
+              id: 21,
+              items: [
+                { type: "Page", page_url: "synthetic-page" },
+                ...fileIds.map((content_id) => ({ type: "File", content_id })),
+              ],
+            },
+          ]),
+        );
+      }
+      if (url.pathname === "/api/v1/courses/11/pages/synthetic-page") {
+        return Promise.resolve(apiResponse({ page_id: 41 }));
+      }
+      if (/\/api\/v1\/courses\/11\/files\/\d+$/.test(url.pathname)) {
+        return Promise.resolve(
+          apiResponse({
+            url: `${CANVAS_ORIGIN}/files/oversized/download`,
+            size: 5_242_881,
+          }),
+        );
+      }
+      return Promise.reject(new Error("unexpected synthetic endpoint"));
+    });
+    const fetcher = vi.fn<typeof fetch>();
+
+    const result = await runLiveSmokeTest(RUN_ID, {
+      http: http as unknown as CanvasHttp,
+      fetcher,
+    });
+
+    const fileMetadataPaths = http.json.mock.calls
+      .map(([url]) => url.pathname)
+      .filter((path) => /\/files\/\d+$/.test(path));
+    expect(fileMetadataPaths).toHaveLength(8);
+    expect(fileMetadataPaths).not.toContain("/api/v1/courses/11/files/39");
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      outcome: "fail",
+      failure: "safety",
+      modules: "page-and-file",
+      page: "available",
+      file: "too-large",
+    });
+    expectClosed(result);
+  });
+
   it.each([
     {
       name: "same-origin PDF",
