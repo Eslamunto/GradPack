@@ -6,6 +6,7 @@ type Endpoint =
   | { type: "courseModules"; courseId: number }
   | { type: "moduleItems"; courseId: number; moduleId: number }
   | { type: "courseFiles"; courseId: number }
+  | { type: "courseFile"; courseId: number; fileId: number }
   | { type: "courseFolders"; courseId: number }
   | { type: "coursePages"; courseId: number }
   | { type: "coursePage"; courseId: number; pageUrl: string };
@@ -50,6 +51,9 @@ export function canvasEndpoint(endpoint: Endpoint): URL {
     case "courseFiles":
       url.pathname = `/api/v1/courses/${positiveId(endpoint.courseId)}/files`;
       url.searchParams.set("per_page", "100");
+      return url;
+    case "courseFile":
+      url.pathname = `/api/v1/courses/${positiveId(endpoint.courseId)}/files/${positiveId(endpoint.fileId)}`;
       return url;
     case "courseFolders":
       url.pathname = `/api/v1/courses/${positiveId(endpoint.courseId)}/folders`;

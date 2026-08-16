@@ -9,12 +9,20 @@ describe("canvasEndpoint", () => {
     expect(canvasEndpoint({ type: "courseFiles", courseId: 42 }).pathname).toBe(
       "/api/v1/courses/42/files",
     );
+    expect(
+      canvasEndpoint({ type: "courseFile", courseId: 42, fileId: 99 }).pathname,
+    ).toBe("/api/v1/courses/42/files/99");
   });
 
   it("rejects invalid identifiers", () => {
     expect(() =>
       canvasEndpoint({ type: "courseFiles", courseId: -1 }),
     ).toThrow();
+    for (const fileId of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        canvasEndpoint({ type: "courseFile", courseId: 42, fileId }),
+      ).toThrow();
+    }
   });
 
   it("allows only fixed Canvas paths and query parameters", () => {
