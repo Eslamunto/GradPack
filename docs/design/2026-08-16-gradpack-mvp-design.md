@@ -1,6 +1,6 @@
 # GradPack MVP Design
 
-- **Status:** Draft for maintainer review
+- **Status:** Approved for implementation planning
 - **Date:** 2026-08-16
 - **Linear:** [COG-55](https://linear.app/cognita-reply-de/issue/COG-55/document-the-approved-gradpack-mvp-design)
 - **Target:** Desktop Chrome on macOS and Windows
