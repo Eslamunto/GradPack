@@ -1,0 +1,42 @@
+:root {
+  color: #1f2a44;
+  background: #f7f8fb;
+  font-family:
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+body {
+  margin: 0;
+  min-width: 280px;
+}
+
+main {
+  display: grid;
+  gap: 1rem;
+  padding: 1rem;
+}
+
+label,
+button {
+  display: block;
+  margin-block: 0.5rem;
+}
+
+button {
+  border: 0;
+  border-radius: 0.5rem;
+  padding: 0.65rem 0.9rem;
+  color: #ffffff;
+  background: #1f2a44;
+  font: inherit;
+  font-weight: 650;
+}
+
+:focus-visible {
+  outline: 3px solid #2f6fed;
+  outline-offset: 3px;
+}
