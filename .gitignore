@@ -3,6 +3,7 @@ node_modules/
 
 # Build output
 dist/
+dist-dev/
 coverage/
 
 # Environment and secrets
@@ -12,8 +13,11 @@ coverage/
 
 # Local tooling and temporary artifacts
 .superpowers/
+.worktrees/
 *.log
 *.tmp
+artifacts/
+.playwright/
 
 # Editors and operating systems
 .DS_Store

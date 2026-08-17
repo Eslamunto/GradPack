@@ -1,0 +1,752 @@
+import { assertArchivePathSet, isCanonicalArchivePath } from "./paths";
+import type {
+  CoursePlan,
+  OutcomeStatus,
+  PlannedResource,
+  ResourceKind,
+  ResourceOutcome,
+} from "../shared/model";
+import { MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES } from "../shared/constants";
+
+const GRADPACK_VERSION = "0.1.0-alpha.1";
+const CANVAS_HOST = "frankfurtschool.instructure.com";
+const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
+const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
+// Classic ZIP stores at most 65,535 entries. Three are reserved for GradPack's
+// core files, so this pilot stops rather than silently omitting resources.
+export const MAX_ARCHIVE_RESOURCES = SHARED_MAX_ARCHIVE_RESOURCES;
+export const MAX_ZIP_PAYLOAD_ENTRIES = SHARED_MAX_ARCHIVE_RESOURCES;
+const MAX_TEXT_LENGTH = 4096;
+const CANONICAL_ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
+const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
+const FAILURE_CATEGORIES = new Set([
+  "access-denied",
+  "network-exhausted",
+  "not-found",
+  "page-too-large",
+  "transient-exhausted",
+]);
+const RESOURCE_KINDS = new Set<ResourceKind>([
+  "file",
+  "page",
+  "external",
+  "unsupported",
+]);
+const OUTCOME_STATUSES = new Set<OutcomeStatus>([
+  "success",
+  "failed",
+  "unavailable",
+  "unsupported",
+  "external",
+]);
+
+export type ArchiveManifestResource = Omit<PlannedResource, "sourceUrl"> & {
+  status: OutcomeStatus;
+  actualBytes: number | null;
+  failureCategory: string | null;
+};
+
+export type ArchiveManifest = {
+  schemaVersion: 1;
+  gradPackVersion: typeof GRADPACK_VERSION;
+  createdAt: string;
+  canvasHost: typeof CANVAS_HOST;
+  course: { id: number; name: string; courseCode: string };
+  totals: Record<OutcomeStatus, number> & {
+    advertisedBytes: number;
+    archivedBytes: number;
+  };
+  resources: ArchiveManifestResource[];
+};
+
+export class ArchiveSafetyError extends TypeError {
+  override readonly name = "ArchiveSafetyError";
+}
+
+export type ArchiveSnapshot = Readonly<{
+  plan: CoursePlan;
+  outcomes: ResourceOutcome[];
+  createdAt: string;
+}>;
+
+const isPlainRecord = (
+  value: unknown,
+): value is Record<PropertyKey, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null;
+  } catch {
+    return false;
+  }
+  return prototype === Object.prototype || prototype === null;
+};
+
+const ownKeys = (value: object): PropertyKey[] => {
+  try {
+    return Reflect.ownKeys(value);
+  } catch {
+    throw new TypeError("Invalid archive data");
+  }
+};
+
+const exactRecord = (
+  value: unknown,
+  expectedKeys: readonly string[],
+): Record<string, unknown> => {
+  if (!isPlainRecord(value)) throw new TypeError("Invalid archive data");
+  const keys = ownKeys(value);
+  if (
+    keys.length !== expectedKeys.length ||
+    keys.some((key) => typeof key !== "string" || !expectedKeys.includes(key))
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const snapshot: Record<string, unknown> = Object.create(null) as Record<
+    string,
+    unknown
+  >;
+  for (const key of expectedKeys) {
+    let descriptor: PropertyDescriptor | undefined;
+    try {
+      descriptor = Object.getOwnPropertyDescriptor(value, key);
+    } catch {
+      throw new TypeError("Invalid archive data");
+    }
+    if (!descriptor || !("value" in descriptor)) {
+      throw new TypeError("Invalid archive data");
+    }
+    snapshot[key] = descriptor.value;
+  }
+  return snapshot;
+};
+
+const valueOf = (record: Record<string, unknown>, key: string): unknown => {
+  return record[key];
+};
+
+const exactArray = (value: unknown): unknown[] => {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const keys = ownKeys(value);
+  if (
+    keys.some(
+      (key) =>
+        typeof key !== "string" ||
+        (key !== "length" && !/^(?:0|[1-9]\d*)$/u.test(key)),
+    )
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
+  if (!lengthDescriptor || !("value" in lengthDescriptor)) {
+    throw new TypeError("Invalid archive data");
+  }
+  const length = lengthDescriptor.value as unknown;
+  if (
+    typeof length !== "number" ||
+    !Number.isSafeInteger(length) ||
+    length < 0
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const output: unknown[] = [];
+  for (let index = 0; index < length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (!descriptor || !("value" in descriptor)) {
+      throw new TypeError("Invalid archive data");
+    }
+    output.push(descriptor.value);
+  }
+  return output;
+};
+
+const text = (value: unknown, allowEmpty = false): string => {
+  if (
+    typeof value !== "string" ||
+    value.length > MAX_TEXT_LENGTH ||
+    (!allowEmpty && value.length === 0) ||
+    CONTROL.test(value)
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  return value;
+};
+
+const safeInteger = (value: unknown, minimum = 0): number => {
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < minimum
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  return value;
+};
+
+const nullableBytes = (value: unknown): number | null =>
+  value === null ? null : safeInteger(value);
+
+const canonicalTimestamp = (value: unknown): string => {
+  if (typeof value !== "string" || !CANONICAL_ISO.test(value)) {
+    throw new TypeError("Invalid archive timestamp");
+  }
+  try {
+    if (new Date(value).toISOString() !== value) {
+      throw new TypeError("Invalid archive timestamp");
+    }
+  } catch {
+    throw new TypeError("Invalid archive timestamp");
+  }
+  return value;
+};
+
+const validateSourceUrl = (
+  value: unknown,
+  kind: ResourceKind,
+  sourceId: string,
+): string | null => {
+  if (value === null) {
+    if (kind === "file" || kind === "external") {
+      throw new TypeError("Invalid archive data");
+    }
+    return null;
+  }
+  if (
+    typeof value !== "string" ||
+    value !== value.trim() ||
+    CONTROL.test(value) ||
+    ENCODED_CONTROL.test(value)
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new TypeError("Invalid archive data");
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username !== "" ||
+    url.password !== "" ||
+    (kind === "file" && url.hash !== "")
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  if (
+    kind === "file" &&
+    (url.origin !== CANVAS_ORIGIN ||
+      url.pathname !== `/files/${sourceId}/download`)
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  if (kind === "page" || kind === "unsupported") {
+    throw new TypeError("Invalid archive data");
+  }
+  return value;
+};
+
+type ValidatedResource = PlannedResource;
+
+const resourceKeys = [
+  "key",
+  "kind",
+  "title",
+  "sourceId",
+  "archivePath",
+  "advertisedBytes",
+  "sourceUrl",
+] as const;
+
+const validateResource = (value: unknown): ValidatedResource => {
+  const record = exactRecord(value, resourceKeys);
+  const key = text(valueOf(record, "key"));
+  const rawKind = valueOf(record, "kind");
+  if (
+    typeof rawKind !== "string" ||
+    !RESOURCE_KINDS.has(rawKind as ResourceKind)
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const kind = rawKind as ResourceKind;
+  const title = text(valueOf(record, "title"), true);
+  const sourceId = text(valueOf(record, "sourceId"));
+  const rawArchivePath = valueOf(record, "archivePath");
+  const archivePath =
+    rawArchivePath === null
+      ? null
+      : isCanonicalArchivePath(rawArchivePath)
+        ? rawArchivePath
+        : (() => {
+            throw new TypeError("Invalid archive data");
+          })();
+  const advertisedBytes = nullableBytes(valueOf(record, "advertisedBytes"));
+  const sourceUrl = validateSourceUrl(
+    valueOf(record, "sourceUrl"),
+    kind,
+    sourceId,
+  );
+
+  if (
+    (kind === "file" &&
+      (archivePath === null ||
+        !archivePath.startsWith("files/") ||
+        advertisedBytes === null)) ||
+    (kind === "page" &&
+      (archivePath === null ||
+        !archivePath.startsWith("pages/") ||
+        advertisedBytes !== 0)) ||
+    ((kind === "external" || kind === "unsupported") &&
+      (archivePath !== null || advertisedBytes !== 0))
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  return {
+    key,
+    kind,
+    title,
+    sourceId,
+    archivePath,
+    advertisedBytes,
+    sourceUrl,
+  };
+};
+
+const outcomeKeys = [
+  ...resourceKeys,
+  "status",
+  "actualBytes",
+  "failureCategory",
+];
+
+const validateOutcome = (value: unknown): ResourceOutcome => {
+  const record = exactRecord(value, outcomeKeys);
+  const resource = validateResource(
+    Object.fromEntries(resourceKeys.map((key) => [key, valueOf(record, key)])),
+  );
+  const rawStatus = valueOf(record, "status");
+  if (
+    typeof rawStatus !== "string" ||
+    !OUTCOME_STATUSES.has(rawStatus as OutcomeStatus)
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  const status = rawStatus as OutcomeStatus;
+  const actualBytes = nullableBytes(valueOf(record, "actualBytes"));
+  const rawFailure = valueOf(record, "failureCategory");
+  const failureCategory =
+    rawFailure === null
+      ? null
+      : typeof rawFailure === "string" && FAILURE_CATEGORIES.has(rawFailure)
+        ? rawFailure
+        : (() => {
+            throw new TypeError("Invalid archive data");
+          })();
+
+  if (
+    (status === "success" &&
+      ((resource.kind !== "file" && resource.kind !== "page") ||
+        resource.archivePath === null ||
+        actualBytes === null ||
+        failureCategory !== null)) ||
+    ((status === "failed" || status === "unavailable") &&
+      ((resource.kind !== "file" && resource.kind !== "page") ||
+        actualBytes !== null ||
+        failureCategory === null)) ||
+    (status === "external" &&
+      (resource.kind !== "external" ||
+        actualBytes !== 0 ||
+        failureCategory !== null)) ||
+    (status === "unsupported" &&
+      (resource.kind !== "unsupported" ||
+        actualBytes !== 0 ||
+        failureCategory !== null))
+  ) {
+    throw new TypeError("Invalid archive data");
+  }
+  return { ...resource, status, actualBytes, failureCategory };
+};
+
+const addSafe = (left: number, right: number): number => {
+  if (right > Number.MAX_SAFE_INTEGER - left) {
+    throw new TypeError("Archive byte total overflow");
+  }
+  return left + right;
+};
+
+const validateCourse = (value: unknown): CoursePlan["course"] => {
+  const record = exactRecord(value, [
+    "id",
+    "name",
+    "courseCode",
+    "workflowState",
+    "concluded",
+  ]);
+  const concluded = valueOf(record, "concluded");
+  if (typeof concluded !== "boolean")
+    throw new TypeError("Invalid archive data");
+  return {
+    id: safeInteger(valueOf(record, "id"), 1),
+    name: text(valueOf(record, "name"), true),
+    courseCode: text(valueOf(record, "courseCode"), true),
+    workflowState: text(valueOf(record, "workflowState"), true),
+    concluded,
+  };
+};
+
+const validateModules = (value: unknown): CoursePlan["modules"] =>
+  exactArray(value).map((rawModule) => {
+    const module = exactRecord(rawModule, ["id", "name", "position", "items"]);
+    const items = exactArray(valueOf(module, "items")).map((rawItem) => {
+      const item = exactRecord(rawItem, [
+        "id",
+        "title",
+        "position",
+        "resourceKey",
+        "type",
+      ]);
+      const resourceKey = valueOf(item, "resourceKey");
+      if (resourceKey !== null && typeof resourceKey !== "string") {
+        throw new TypeError("Invalid archive data");
+      }
+      return {
+        id: safeInteger(valueOf(item, "id"), 1),
+        title: text(valueOf(item, "title"), true),
+        position: safeInteger(valueOf(item, "position")),
+        resourceKey: resourceKey === null ? null : text(resourceKey),
+        type: text(valueOf(item, "type"), true),
+      };
+    });
+    return {
+      id: safeInteger(valueOf(module, "id"), 1),
+      name: text(valueOf(module, "name"), true),
+      position: safeInteger(valueOf(module, "position")),
+      items,
+    };
+  });
+
+const validatePlan = (value: unknown): CoursePlan => {
+  const record = exactRecord(value, [
+    "course",
+    "modules",
+    "resources",
+    "advertisedBytes",
+  ]);
+  const rawResources = exactArray(valueOf(record, "resources"));
+  if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const resources = rawResources.map(validateResource);
+  const keys = new Set<string>();
+  let advertisedBytes = 0;
+  for (const resource of resources) {
+    if (keys.has(resource.key))
+      throw new TypeError("Duplicate planned resource");
+    keys.add(resource.key);
+    advertisedBytes = addSafe(advertisedBytes, resource.advertisedBytes ?? 0);
+  }
+  assertArchivePathSet(resources);
+  const declared = safeInteger(valueOf(record, "advertisedBytes"));
+  if (declared !== advertisedBytes || declared > MAX_ADVERTISED_BYTES) {
+    throw new TypeError("Invalid advertised byte total");
+  }
+  const modules = validateModules(valueOf(record, "modules"));
+  for (const module of modules) {
+    for (const item of module.items) {
+      if (item.resourceKey !== null && !keys.has(item.resourceKey)) {
+        throw new TypeError("Unknown module resource");
+      }
+    }
+  }
+  return {
+    course: validateCourse(valueOf(record, "course")),
+    modules,
+    resources,
+    advertisedBytes: declared,
+  };
+};
+
+const sameResource = (
+  planned: PlannedResource,
+  outcome: ResourceOutcome,
+): boolean =>
+  planned.key === outcome.key &&
+  planned.kind === outcome.kind &&
+  planned.title === outcome.title &&
+  planned.sourceId === outcome.sourceId &&
+  planned.archivePath === outcome.archivePath &&
+  planned.advertisedBytes === outcome.advertisedBytes &&
+  planned.sourceUrl === outcome.sourceUrl;
+
+const freezePlan = (plan: CoursePlan): CoursePlan => {
+  Object.freeze(plan.course);
+  for (const module of plan.modules) {
+    for (const item of module.items) Object.freeze(item);
+    Object.freeze(module.items);
+    Object.freeze(module);
+  }
+  Object.freeze(plan.modules);
+  for (const resource of plan.resources) Object.freeze(resource);
+  Object.freeze(plan.resources);
+  return Object.freeze(plan);
+};
+
+const freezeOutcomes = (outcomes: ResourceOutcome[]): ResourceOutcome[] => {
+  for (const outcome of outcomes) Object.freeze(outcome);
+  return Object.freeze(outcomes) as ResourceOutcome[];
+};
+
+const freezeManifest = (manifest: ArchiveManifest): ArchiveManifest => {
+  for (const resource of manifest.resources) Object.freeze(resource);
+  Object.freeze(manifest.resources);
+  Object.freeze(manifest.totals);
+  Object.freeze(manifest.course);
+  return Object.freeze(manifest);
+};
+
+export function snapshotArchiveData(
+  plan: unknown,
+  outcomes: unknown,
+  createdAt: unknown,
+): ArchiveSnapshot {
+  const validatedPlan = validatePlan(plan);
+  const rawOutcomes = exactArray(outcomes);
+  if (rawOutcomes.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const validatedOutcomes = rawOutcomes.map(validateOutcome);
+  if (validatedOutcomes.length !== validatedPlan.resources.length) {
+    throw new TypeError("Incomplete resource outcomes");
+  }
+  const byKey = new Map<string, ResourceOutcome>();
+  for (const outcome of validatedOutcomes) {
+    if (byKey.has(outcome.key))
+      throw new TypeError("Duplicate resource outcome");
+    byKey.set(outcome.key, outcome);
+  }
+
+  const orderedOutcomes = validatedPlan.resources.map((planned) => {
+    const outcome = byKey.get(planned.key);
+    if (!outcome || !sameResource(planned, outcome)) {
+      throw new TypeError("Mismatched resource outcome");
+    }
+    return outcome;
+  });
+  const snapshot = {
+    plan: freezePlan(validatedPlan),
+    outcomes: freezeOutcomes(orderedOutcomes),
+    createdAt: canonicalTimestamp(createdAt),
+  };
+  return Object.freeze(snapshot);
+}
+
+export function buildManifestFromSnapshot(
+  snapshot: ArchiveSnapshot,
+): ArchiveManifest {
+  const validatedPlan = snapshot.plan;
+  const validatedOutcomes = snapshot.outcomes;
+
+  const totals: ArchiveManifest["totals"] = {
+    success: 0,
+    failed: 0,
+    unavailable: 0,
+    unsupported: 0,
+    external: 0,
+    advertisedBytes: validatedPlan.advertisedBytes,
+    archivedBytes: 0,
+  };
+  const resources = validatedOutcomes.map((outcome) => {
+    totals[outcome.status] += 1;
+    if (outcome.status === "success") {
+      totals.archivedBytes = addSafe(
+        totals.archivedBytes,
+        outcome.actualBytes!,
+      );
+    }
+    const { key, kind, title, sourceId, archivePath, advertisedBytes } =
+      outcome;
+    return {
+      key,
+      kind,
+      title,
+      sourceId,
+      archivePath,
+      advertisedBytes,
+      status: outcome.status,
+      actualBytes: outcome.actualBytes,
+      failureCategory: outcome.failureCategory,
+    };
+  });
+
+  return freezeManifest({
+    schemaVersion: 1,
+    gradPackVersion: GRADPACK_VERSION,
+    createdAt: snapshot.createdAt,
+    canvasHost: CANVAS_HOST,
+    course: {
+      id: validatedPlan.course.id,
+      name: validatedPlan.course.name,
+      courseCode: validatedPlan.course.courseCode,
+    },
+    totals,
+    resources,
+  });
+}
+
+export function buildManifest(
+  plan: unknown,
+  outcomes: unknown,
+  createdAt: unknown,
+): ArchiveManifest {
+  return buildManifestFromSnapshot(
+    snapshotArchiveData(plan, outcomes, createdAt),
+  );
+}
+
+export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
+  const record = exactRecord(value, [
+    "schemaVersion",
+    "gradPackVersion",
+    "createdAt",
+    "canvasHost",
+    "course",
+    "totals",
+    "resources",
+  ]);
+  if (
+    valueOf(record, "schemaVersion") !== 1 ||
+    valueOf(record, "gradPackVersion") !== GRADPACK_VERSION ||
+    valueOf(record, "canvasHost") !== CANVAS_HOST
+  ) {
+    throw new TypeError("Invalid archive manifest");
+  }
+  const courseRecord = exactRecord(valueOf(record, "course"), [
+    "id",
+    "name",
+    "courseCode",
+  ]);
+  const rawResources = exactArray(valueOf(record, "resources"));
+  if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  const resources = rawResources.map((value) => {
+    const resourceRecord = exactRecord(value, [
+      "key",
+      "kind",
+      "title",
+      "sourceId",
+      "archivePath",
+      "advertisedBytes",
+      "status",
+      "actualBytes",
+      "failureCategory",
+    ]);
+    return validateOutcome({
+      ...Object.fromEntries(
+        [
+          "key",
+          "kind",
+          "title",
+          "sourceId",
+          "archivePath",
+          "advertisedBytes",
+          "status",
+          "actualBytes",
+          "failureCategory",
+        ].map((key) => [key, valueOf(resourceRecord, key)]),
+      ),
+      sourceUrl:
+        valueOf(resourceRecord, "kind") === "file"
+          ? `${CANVAS_ORIGIN}/files/${String(valueOf(resourceRecord, "sourceId"))}/download`
+          : valueOf(resourceRecord, "kind") === "external"
+            ? "https://reference.invalid/"
+            : null,
+    });
+  });
+  assertArchivePathSet(resources);
+  const totalsRecord = exactRecord(valueOf(record, "totals"), [
+    "success",
+    "failed",
+    "unavailable",
+    "unsupported",
+    "external",
+    "advertisedBytes",
+    "archivedBytes",
+  ]);
+  const totals: ArchiveManifest["totals"] = {
+    success: safeInteger(valueOf(totalsRecord, "success")),
+    failed: safeInteger(valueOf(totalsRecord, "failed")),
+    unavailable: safeInteger(valueOf(totalsRecord, "unavailable")),
+    unsupported: safeInteger(valueOf(totalsRecord, "unsupported")),
+    external: safeInteger(valueOf(totalsRecord, "external")),
+    advertisedBytes: safeInteger(valueOf(totalsRecord, "advertisedBytes")),
+    archivedBytes: safeInteger(valueOf(totalsRecord, "archivedBytes")),
+  };
+  const calculated: ArchiveManifest["totals"] = {
+    success: 0,
+    failed: 0,
+    unavailable: 0,
+    unsupported: 0,
+    external: 0,
+    advertisedBytes: 0,
+    archivedBytes: 0,
+  };
+  const keys = new Set<string>();
+  for (const resource of resources) {
+    if (keys.has(resource.key))
+      throw new TypeError("Duplicate manifest resource");
+    keys.add(resource.key);
+    calculated[resource.status] += 1;
+    calculated.advertisedBytes = addSafe(
+      calculated.advertisedBytes,
+      resource.advertisedBytes ?? 0,
+    );
+    if (resource.status === "success") {
+      calculated.archivedBytes = addSafe(
+        calculated.archivedBytes,
+        resource.actualBytes!,
+      );
+    }
+  }
+  if (
+    totals.advertisedBytes > MAX_ADVERTISED_BYTES ||
+    Object.keys(calculated).some(
+      (key) =>
+        calculated[key as keyof typeof calculated] !==
+        totals[key as keyof typeof totals],
+    )
+  ) {
+    throw new TypeError("Invalid manifest totals");
+  }
+  return freezeManifest({
+    schemaVersion: 1,
+    gradPackVersion: GRADPACK_VERSION,
+    createdAt: canonicalTimestamp(valueOf(record, "createdAt")),
+    canvasHost: CANVAS_HOST,
+    course: {
+      id: safeInteger(valueOf(courseRecord, "id"), 1),
+      name: text(valueOf(courseRecord, "name"), true),
+      courseCode: text(valueOf(courseRecord, "courseCode"), true),
+    },
+    totals,
+    resources: resources.map((resource) => ({
+      key: resource.key,
+      kind: resource.kind,
+      title: resource.title,
+      sourceId: resource.sourceId,
+      archivePath: resource.archivePath,
+      advertisedBytes: resource.advertisedBytes,
+      status: resource.status,
+      actualBytes: resource.actualBytes,
+      failureCategory: resource.failureCategory,
+    })),
+  });
+}
