@@ -1,6 +1,7 @@
+/* eslint-disable @typescript-eslint/require-await, @typescript-eslint/no-unsafe-call */
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasSessionError } from "../../src/canvas/http";
-import { EXTENSION_CHANNEL, RUNNER_CHANNEL } from "../../src/shared/constants";
+import { EXTENSION_CHANNEL } from "../../src/shared/constants";
 import { syntheticCourse } from "../fixtures/course-plan";
 
 const mocks = vi.hoisted(() => ({
@@ -65,7 +66,9 @@ const confirm = (runId: string): void =>
 const cancel = (runId: string): void =>
   dispatch({ channel: EXTENSION_CHANNEL, type: "CANCEL", runId });
 
-const plan = (effectivePackaging: "combined" | "per-course" = "per-course") => ({
+const plan = (
+  effectivePackaging: "combined" | "per-course" = "per-course",
+) => ({
   courses: [
     {
       course: syntheticCourse,
@@ -75,27 +78,53 @@ const plan = (effectivePackaging: "combined" | "per-course" = "per-course") => (
     },
   ],
   summary: {
-    selected: [{ courseId: syntheticCourse.id, advertisedBytes: 0, resourceCount: 0 }],
+    selected: [
+      { courseId: syntheticCourse.id, advertisedBytes: 0, resourceCount: 0 },
+    ],
     requestedPackaging: "combined" as const,
     effectivePackaging,
     advertisedBytes: 0,
     resourceCount: 0,
     fallbackReason:
-      effectivePackaging === "per-course" ? ("combined-size-exceeded" as const) : null,
+      effectivePackaging === "per-course"
+        ? ("combined-size-exceeded" as const)
+        : null,
   },
 });
 
 const successfulResult = {
   effectivePackaging: "per-course" as const,
   combined: null,
-  completed: [{ course: syntheticCourse, fileName: "course.zip", manifest: { totals: { success: 1, failed: 0, unavailable: 0, unsupported: 0, external: 0 } }, zipBytes: new Uint8Array() }],
+  completed: [
+    {
+      course: syntheticCourse,
+      fileName: "course.zip",
+      manifest: {
+        totals: {
+          success: 1,
+          failed: 0,
+          unavailable: 0,
+          unsupported: 0,
+          external: 0,
+        },
+      },
+      zipBytes: new Uint8Array(),
+    },
+  ],
   failedCourseIds: [],
-  counts: { success: 1, failed: 0, unavailable: 0, unsupported: 0, external: 0 },
+  counts: {
+    success: 1,
+    failed: 0,
+    unavailable: 0,
+    unsupported: 0,
+    external: 0,
+  },
 };
 
 let runnerImported = false;
 beforeAll(async () => {
-  delete (window as unknown as Window & Record<string, unknown>).__gradPackRunnerV1;
+  delete (window as unknown as Window & Record<string, unknown>)
+    .__gradPackRunnerV1;
   await import("../../src/page/runner");
   runnerImported = true;
 });
@@ -123,16 +152,23 @@ beforeEach(() => {
 
 describe("production page runner", () => {
   it("emits PLAN_READY before retrieval and completes only after confirmation", async () => {
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0001");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-plan0001");
     await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
     expect(mocks.runCourses).not.toHaveBeenCalled();
     expect(postMessage).toHaveBeenCalledWith(
       expect.objectContaining({
         source: "gradpack-runner",
-        payload: expect.objectContaining({ type: "PLAN_READY", runId: "run-plan0001" }),
+        payload: expect.objectContaining({
+          type: "PLAN_READY",
+          runId: "run-plan0001",
+        }),
       }),
       location.origin,
     );
@@ -141,7 +177,10 @@ describe("production page runner", () => {
     await vi.waitFor(() =>
       expect(postMessage).toHaveBeenCalledWith(
         expect.objectContaining({
-          payload: expect.objectContaining({ type: "COMPLETE", outputCount: 1 }),
+          payload: expect.objectContaining({
+            type: "COMPLETE",
+            outputCount: 1,
+          }),
         }),
         location.origin,
       ),
@@ -151,9 +190,13 @@ describe("production page runner", () => {
 
   it("emits the combined fallback explanation in PLAN_READY", async () => {
     mocks.createRunPlan.mockResolvedValueOnce(plan("per-course"));
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0002");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-plan0002", [syntheticCourse.id], "combined");
     await vi.waitFor(() =>
       expect(postMessage).toHaveBeenCalledWith(
@@ -174,9 +217,13 @@ describe("production page runner", () => {
   });
 
   it("rejects stale confirmations and unlisted starts without running", async () => {
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0003");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-stale0003");
     start("run-plan0003", [999]);
     await vi.waitFor(() =>
@@ -191,10 +238,16 @@ describe("production page runner", () => {
   });
 
   it("maps session loss to fixed failure text", async () => {
-    mocks.createRunPlan.mockRejectedValueOnce(new CanvasSessionError("private"));
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    mocks.createRunPlan.mockRejectedValueOnce(
+      new CanvasSessionError("private"),
+    );
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0004");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-plan0004");
     await vi.waitFor(() =>
       expect(postMessage).toHaveBeenCalledWith(
@@ -221,9 +274,13 @@ describe("production page runner", () => {
           ),
         ),
     );
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0005");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-plan0005");
     await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
     confirm("run-plan0005");
@@ -241,9 +298,13 @@ describe("production page runner", () => {
   });
 
   it("cancels a pending plan without starting retrieval", async () => {
-    const postMessage = vi.spyOn(window, "postMessage").mockImplementation(() => {});
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
     list("run-plan0006");
-    await vi.waitFor(() => expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce());
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
     start("run-plan0006");
     await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
     cancel("run-plan0006");

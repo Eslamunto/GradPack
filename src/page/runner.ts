@@ -15,7 +15,6 @@ import {
   fetchPageResource,
   RunSafetyError,
   buildCourseArchive,
-  type RunDependencies,
 } from "./run-course";
 import {
   createRunPlan,
@@ -58,7 +57,9 @@ const fixedFailure = (error: unknown): string => {
   return FIXED.unexpected;
 };
 
-const productionDependencies = (signal: AbortSignal): MultiCourseDependencies => {
+const productionDependencies = (
+  signal: AbortSignal,
+): MultiCourseDependencies => {
   return {
     discover: async (course) => {
       const controller = new AbortController();
@@ -338,7 +339,9 @@ if (scope[marker] !== true) {
       const selected = command.courseIds.map((id) =>
         listedCourses.find((course) => course.id === id),
       );
-      if (selected.some((course): course is undefined => course === undefined)) {
+      if (
+        selected.some((course): course is undefined => course === undefined)
+      ) {
         listed = null;
         postFailure(command.runId, FIXED.unlisted);
         return;

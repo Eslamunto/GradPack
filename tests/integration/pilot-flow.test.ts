@@ -79,14 +79,24 @@ describe("production pilot vertical flow", () => {
                   workflow_state: "available",
                   concluded: false,
                 },
+                {
+                  id: 102,
+                  name: "Second Synthetic Course",
+                  course_code: "SYN-102",
+                  workflow_state: "available",
+                  concluded: false,
+                },
               ]
             : [],
         );
       }
-      if (url.pathname === "/api/v1/courses/101/modules") {
+      const courseMatch = /\/api\/v1\/courses\/(101|102)\//u.exec(url.pathname);
+      const courseId = courseMatch ? Number(courseMatch[1]) : null;
+      const fileId = courseId === 102 ? 302 : 301;
+      if (url.pathname === `/api/v1/courses/${courseId}/modules`) {
         return json([
           {
-            id: 201,
+            id: courseId === 102 ? 202 : 201,
             name: "Module One",
             position: 1,
             items: [
@@ -95,7 +105,7 @@ describe("production pilot vertical flow", () => {
                 title: "slides.pdf",
                 position: 1,
                 type: "File",
-                content_id: 301,
+                content_id: fileId,
               },
               {
                 id: 2,
@@ -108,31 +118,36 @@ describe("production pilot vertical flow", () => {
           },
         ]);
       }
-      if (url.pathname === "/api/v1/courses/101/files") {
+      if (url.pathname === `/api/v1/courses/${courseId}/files`) {
         return json([
           {
-            id: 301,
-            folder_id: 401,
+            id: fileId,
+            folder_id: courseId === 102 ? 402 : 401,
             display_name: "slides.pdf",
             filename: "slides.pdf",
             size: 19,
-            url: "https://frankfurtschool.instructure.com/files/301/download",
+            url: `https://frankfurtschool.instructure.com/files/${fileId}/download`,
           },
         ]);
       }
-      if (url.pathname === "/api/v1/courses/101/folders") {
-        return json([{ id: 401, full_name: "course" }]);
+      if (url.pathname === `/api/v1/courses/${courseId}/folders`) {
+        return json([
+          {
+            id: courseId === 102 ? 402 : 401,
+            full_name: "course",
+          },
+        ]);
       }
-      if (url.pathname === "/api/v1/courses/101/pages") {
+      if (url.pathname === `/api/v1/courses/${courseId}/pages`) {
         return json([{ page_id: 501, url: "welcome", title: "Welcome" }]);
       }
-      if (url.pathname === "/api/v1/courses/101/pages/welcome") {
+      if (url.pathname === `/api/v1/courses/${courseId}/pages/welcome`) {
         return json({
           title: "Welcome",
-          body: '<p>Read <a href="/courses/101/files/301/download">slides</a>.</p>',
+          body: `<p>Read <a href="/courses/${courseId}/files/${fileId}/download">slides</a>.</p>`,
         });
       }
-      if (url.pathname === "/files/301/download") {
+      if (url.pathname === `/files/${fileId}/download`) {
         return response(
           strToU8("synthetic-file-data"),
           "https://cdn.synthetic.test/slides.pdf",
@@ -213,27 +228,52 @@ describe("production pilot vertical flow", () => {
 
     document.querySelector<HTMLButtonElement>("button")!.click();
     await vi.waitFor(() =>
-      expect(document.querySelector("h1")?.textContent).toBe(
-        "Choose one course",
-      ),
+      expect(document.querySelector("h1")?.textContent).toBe("Choose courses"),
     );
-    const radio = document.querySelector<HTMLInputElement>("input")!;
-    radio.checked = true;
-    radio.dispatchEvent(new Event("change"));
-    document.querySelector<HTMLButtonElement>("button")!.click();
+    for (const checkbox of document.querySelectorAll<HTMLInputElement>(
+      'input[name="course"]',
+    )) {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event("change"));
+    }
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((candidate) => candidate.textContent === "Continue")!
+      .click();
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe(
-        "Archive downloaded",
+        "Configure archives",
+      ),
+    );
+    const combined = document.querySelector<HTMLInputElement>(
+      'input[value="combined"]',
+    )!;
+    combined.checked = true;
+    combined.dispatchEvent(new Event("change"));
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(
+        (candidate) => candidate.textContent === "Discover selected courses",
+      )!
+      .click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("h1")?.textContent).toBe("Review plan"),
+    );
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find((candidate) => candidate.textContent === "Continue to packing")!
+      .click();
+    await vi.waitFor(() =>
+      expect(document.querySelector("h1")?.textContent).toBe(
+        "Archives downloaded",
       ),
     );
     expect(anchorClick).toHaveBeenCalledOnce();
-    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(8);
+    expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(14);
 
     await tabsSendMessage(tabId, {
       channel: EXTENSION_CHANNEL,
-      type: "START_COURSE",
+      type: "START_RUN",
       runId: "run-12345678-1234-1234-1234-123456789abc",
-      courseId: 101,
+      courseIds: [101],
+      packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(anchorClick).toHaveBeenCalledOnce();
@@ -241,9 +281,10 @@ describe("production pilot vertical flow", () => {
     for (let index = 0; index < 128; index += 1) {
       await tabsSendMessage(tabId, {
         channel: EXTENSION_CHANNEL,
-        type: "START_COURSE",
+        type: "START_RUN",
         runId: `run-evict${index.toString().padStart(4, "0")}`,
-        courseId: 999,
+        courseIds: [999],
+        packaging: "per-course",
       });
     }
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -255,9 +296,10 @@ describe("production pilot vertical flow", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await tabsSendMessage(tabId, {
       channel: EXTENSION_CHANNEL,
-      type: "START_COURSE",
+      type: "START_RUN",
       runId: "run-12345678-1234-1234-1234-123456789abc",
-      courseId: 101,
+      courseIds: [101],
+      packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(anchorClick).toHaveBeenCalledOnce();

@@ -67,7 +67,10 @@ export type RunDependencies = {
   maxArchiveBytes?: number;
 };
 
-export type CourseArchiveDependencies = Omit<RunDependencies, "discover" | "download">;
+export type CourseArchiveDependencies = Omit<
+  RunDependencies,
+  "discover" | "download"
+>;
 
 export type RunResult = { manifest: ArchiveManifest; zipBytes: Uint8Array };
 
@@ -136,7 +139,7 @@ export async function buildCourseArchive(options: {
 
   try {
     throwIfAborted(controller.signal);
-  const immutablePlan = freezeCoursePlan(plan);
+    const immutablePlan = freezeCoursePlan(plan);
     if (immutablePlan.course.id !== course.id) {
       throw new RunSafetyError("Discovered course does not match selection");
     }

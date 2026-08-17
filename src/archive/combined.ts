@@ -1,4 +1,10 @@
-import { strToU8, unzipSync, zipSync, type Zippable } from "fflate";
+import {
+  strToU8,
+  unzipSync,
+  zipSync,
+  type Unzipped,
+  type Zippable,
+} from "fflate";
 import { MAX_ARCHIVE_RESOURCES } from "./manifest";
 import { isCanonicalArchivePath, safeArchivePath } from "./paths";
 import type { ArchiveManifest } from "./manifest";
@@ -81,7 +87,6 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   manifest: CombinedArchiveManifest;
 } {
   if (
-    !Array.isArray(input.archives) ||
     input.archives.length === 0 ||
     typeof input.archiveCss !== "string" ||
     typeof input.now !== "function" ||
@@ -97,11 +102,13 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
     schemaVersion: 1,
     kind: "combined",
     createdAt: input.now(),
-    courses: input.archives.map(({ course, fileName, manifest: courseManifest }) => ({
-      courseId: course.id,
-      fileName,
-      manifest: courseManifest,
-    })),
+    courses: input.archives.map(
+      ({ course, fileName, manifest: courseManifest }) => ({
+        courseId: course.id,
+        fileName,
+        manifest: courseManifest,
+      }),
+    ),
     totals: input.archives.reduce(
       (totals, archive) => ({
         success: totals.success + archive.manifest.totals.success,
@@ -116,11 +123,14 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   const sources = new Map<string, Uint8Array>();
   sources.set("assets/archive.css", strToU8(input.archiveCss));
   sources.set("index.html", strToU8(rootIndex(input.archives, roots)));
-  sources.set("manifest.json", strToU8(`${JSON.stringify(manifest, null, 2)}\n`));
+  sources.set(
+    "manifest.json",
+    strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
+  );
 
   input.archives.forEach((archive, index) => {
     const root = roots[index]!;
-    const entries = unzipSync(archive.zipBytes);
+    const entries: Unzipped = unzipSync(archive.zipBytes);
     for (const [path, bytes] of Object.entries(entries)) {
       if (!isCanonicalArchivePath(path)) {
         throw new TypeError("Invalid nested archive path");

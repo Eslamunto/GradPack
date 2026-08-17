@@ -10,7 +10,9 @@ const command = (value: Record<string, unknown>): Record<string, unknown> => ({
   ...value,
 });
 
-const progress = (value: Record<string, unknown> = {}): Record<string, unknown> => ({
+const progress = (
+  value: Record<string, unknown> = {},
+): Record<string, unknown> => ({
   channel: "gradpack/runner/v1",
   type: "PROGRESS",
   runId: "run-12345678",
@@ -25,7 +27,9 @@ const progress = (value: Record<string, unknown> = {}): Record<string, unknown> 
   ...value,
 });
 
-const complete = (value: Record<string, unknown> = {}): Record<string, unknown> => ({
+const complete = (
+  value: Record<string, unknown> = {},
+): Record<string, unknown> => ({
   channel: "gradpack/runner/v1",
   type: "COMPLETE",
   runId: "run-12345678",
@@ -60,9 +64,9 @@ describe("parseExtensionCommand", () => {
     expect(
       parseExtensionCommand(command({ type: "CONFIRM_PLAN" })),
     ).toMatchObject({ type: "CONFIRM_PLAN" });
-    expect(
-      parseExtensionCommand(command({ type: "CANCEL" })),
-    ).toMatchObject({ type: "CANCEL" });
+    expect(parseExtensionCommand(command({ type: "CANCEL" }))).toMatchObject({
+      type: "CANCEL",
+    });
   });
 
   it.each([
@@ -71,7 +75,12 @@ describe("parseExtensionCommand", () => {
     { type: "START_RUN", courseIds: [42], packaging: "unsafe" },
     { type: "START_RUN", courseIds: [-1], packaging: "per-course" },
     { type: "START_RUN", courseIds: [42.5], packaging: "per-course" },
-    { type: "START_RUN", courseIds: [42], packaging: "per-course", url: "https://evil.test" },
+    {
+      type: "START_RUN",
+      courseIds: [42],
+      packaging: "per-course",
+      url: "https://evil.test",
+    },
     { type: "FETCH_URL", url: "https://evil.test" },
   ])("rejects unsafe input %#", (value) => {
     expect(() => parseExtensionCommand(command(value))).toThrow();
@@ -176,7 +185,9 @@ describe("parseRunnerEvent", () => {
   });
 
   it("rejects an extra top-level or nested field", () => {
-    expect(() => parseRunnerEvent({ ...complete(), headers: "secret" })).toThrow();
+    expect(() =>
+      parseRunnerEvent({ ...complete(), headers: "secret" }),
+    ).toThrow();
     expect(() =>
       parseRunnerEvent({
         channel: "gradpack/runner/v1",
@@ -197,8 +208,12 @@ describe("parseRunnerEvent", () => {
   });
 
   it("rejects unsupported, accessor-backed, and private terminal messages", () => {
-    expect(() => parseRunnerEvent({ ...complete(), message: "private" })).toThrow();
-    expect(() => parseRunnerEvent({ ...progress(), stage: "upload" })).toThrow();
+    expect(() =>
+      parseRunnerEvent({ ...complete(), message: "private" }),
+    ).toThrow();
+    expect(() =>
+      parseRunnerEvent({ ...progress(), stage: "upload" }),
+    ).toThrow();
     const getter = complete();
     let invoked = false;
     Object.defineProperty(getter, "message", {

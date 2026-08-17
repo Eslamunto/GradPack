@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unnecessary-type-assertion, @typescript-eslint/require-await, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-call */
 import { describe, expect, it, vi } from "vitest";
 import type { ArchiveManifest } from "../../src/archive/manifest";
 import {
@@ -79,27 +80,41 @@ const baseDependencies = (
   })),
   buildCourseArchive: vi.fn(async ({ course, progress }) => {
     progress({ stage: "package", completed: 1, total: 1, failed: 0 });
-    return { manifest: manifest(course), zipBytes: new Uint8Array([course.id % 256]) };
+    return {
+      manifest: manifest(course),
+      zipBytes: new Uint8Array([course.id % 256]),
+    };
   }),
-  buildCombinedZip: vi.fn((input: Parameters<MultiCourseDependencies["buildCombinedZip"]>[0]) => ({
-    ...(() => {
-      const { archives } = input;
-      return {
-    manifest: {
-      schemaVersion: 1 as const,
-      kind: "combined" as const,
-      createdAt: "2026-08-17T12:00:00.000Z",
-      courses: archives.map(({ course, fileName, manifest: value }) => ({
-        courseId: course.id,
-        fileName,
-        manifest: value,
-      })),
-      totals: { success: archives.length, failed: 0, unavailable: 0, unsupported: 0, external: 0 },
-    },
-    zipBytes: new Uint8Array([9]),
-      };
-    })(),
-  } as ReturnType<MultiCourseDependencies["buildCombinedZip"]>)),
+  buildCombinedZip: vi.fn(
+    (input: Parameters<MultiCourseDependencies["buildCombinedZip"]>[0]) =>
+      ({
+        ...(() => {
+          const { archives } = input;
+          return {
+            manifest: {
+              schemaVersion: 1 as const,
+              kind: "combined" as const,
+              createdAt: "2026-08-17T12:00:00.000Z",
+              courses: archives.map(
+                ({ course, fileName, manifest: value }) => ({
+                  courseId: course.id,
+                  fileName,
+                  manifest: value,
+                }),
+              ),
+              totals: {
+                success: archives.length,
+                failed: 0,
+                unavailable: 0,
+                unsupported: 0,
+                external: 0,
+              },
+            },
+            zipBytes: new Uint8Array([9]),
+          };
+        })(),
+      }) as ReturnType<MultiCourseDependencies["buildCombinedZip"]>,
+  ),
   archiveCss: "body{}",
   now: () => "2026-08-17T12:00:00.000Z",
   fileName: (course) => `gradpack-${course.id}.zip`,
@@ -110,7 +125,9 @@ const baseDependencies = (
 describe("createRunPlan", () => {
   it("discovers every selected course before retrieval and freezes copied plans", async () => {
     const calls: string[] = [];
-    const sourcePlans = new Map(courses.map((course) => [course.id, planFor(course)]));
+    const sourcePlans = new Map(
+      courses.map((course) => [course.id, planFor(course)]),
+    );
     const deps = baseDependencies(
       vi.fn(async (course) => {
         calls.push(`discover:${course.id}`);
@@ -154,7 +171,9 @@ describe("createRunPlan", () => {
 
   it("stops before retrieval when one individual course exceeds the limit", async () => {
     const deps = baseDependencies(
-      vi.fn(async (course) => planFor(course, course.id === 202 ? MAX_ARCHIVE_BYTES + 1 : 10)),
+      vi.fn(async (course) =>
+        planFor(course, course.id === 202 ? MAX_ARCHIVE_BYTES + 1 : 10),
+      ),
     );
     await expect(
       createRunPlan({
@@ -171,14 +190,15 @@ describe("createRunPlan", () => {
 describe("runCourses", () => {
   it("runs courses sequentially, aggregates progress, and preserves a successful course after a local failure", async () => {
     const order: number[] = [];
-    const deps = baseDependencies(
-      vi.fn(async (course) => planFor(course)),
-    );
+    const deps = baseDependencies(vi.fn(async (course) => planFor(course)));
     deps.buildCourseArchive = vi.fn(async ({ course, progress }) => {
       order.push(course.id);
       progress({ stage: "package", completed: 1, total: 1, failed: 0 });
       if (course.id === 202) throw new RunSafetyError("course-local");
-      return { manifest: manifest(course), zipBytes: new Uint8Array([course.id % 256]) };
+      return {
+        manifest: manifest(course),
+        zipBytes: new Uint8Array([course.id % 256]),
+      };
     });
     const plan = await createRunPlan({
       courses: courses.slice(0, 2),
@@ -197,9 +217,16 @@ describe("runCourses", () => {
     expect(order).toEqual([101, 202]);
     expect(result.completed.map(({ course }) => course.id)).toEqual([101]);
     expect(result.failedCourseIds).toEqual([202]);
-    expect(deps.download).toHaveBeenCalledWith("gradpack-101.zip", expect.any(Uint8Array));
+    expect(deps.download).toHaveBeenCalledWith(
+      "gradpack-101.zip",
+      expect.any(Uint8Array),
+    );
     expect(progress).toHaveBeenCalledWith(
-      expect.objectContaining({ currentCourseId: 202, currentCourseIndex: 1, totalCourses: 2 }),
+      expect.objectContaining({
+        currentCourseId: 202,
+        currentCourseIndex: 1,
+        totalCourses: 2,
+      }),
     );
   });
 
@@ -219,6 +246,9 @@ describe("runCourses", () => {
     });
     expect(result.combined?.fileName).toBe("gradpack-combined.zip");
     expect(deps.buildCombinedZip).toHaveBeenCalledOnce();
-    expect(deps.download).toHaveBeenCalledWith("gradpack-combined.zip", expect.any(Uint8Array));
+    expect(deps.download).toHaveBeenCalledWith(
+      "gradpack-combined.zip",
+      expect.any(Uint8Array),
+    );
   });
 });

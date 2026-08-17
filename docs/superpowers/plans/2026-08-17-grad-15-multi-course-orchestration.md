@@ -25,6 +25,7 @@
 ### Task 1: Define the multi-course models and strict relay protocol
 
 **Files:**
+
 - Modify: `src/shared/model.ts`
 - Modify: `src/shared/messages.ts`
 - Modify: `src/shared/constants.ts` to add any named aggregate protocol limit required by the parser
@@ -79,6 +80,7 @@ git commit -m "feat: add multi-course run protocol"
 ### Task 2: Extract a reusable one-course archive builder and build combined ZIPs
 
 **Files:**
+
 - Modify: `src/page/run-course.ts`
 - Modify: `src/archive/build-zip.ts`
 - Modify: `src/archive/manifest.ts`
@@ -163,6 +165,7 @@ git commit -m "feat: separate course archives and combined packaging"
 ### Task 3: Implement immutable multi-course planning and run coordination
 
 **Files:**
+
 - Create: `src/page/run-courses.ts`
 - Test: `tests/page/run-courses.test.ts`
 - Modify: `src/page/run-course.ts` only for exported shared types or helper boundaries discovered in Task 2
@@ -241,6 +244,7 @@ git commit -m "feat: orchestrate multi-course archive runs"
 ### Task 4: Integrate planning, confirmation, cancellation, and session loss in the page runner
 
 **Files:**
+
 - Modify: `src/page/runner.ts`
 - Test: `tests/page/runner.test.ts`
 
@@ -290,6 +294,7 @@ git commit -m "feat: connect the page runner to multi-course plans"
 ### Task 5: Expand the Side Panel to multi-course configuration and aggregate states
 
 **Files:**
+
 - Modify: `src/sidepanel/state.ts`
 - Modify: `src/sidepanel/main.ts`
 - Modify: `src/static/sidepanel.css` if the multi-select/review layout needs styling
@@ -345,6 +350,7 @@ git commit -m "feat: add multi-course Side Panel flow"
 ### Task 6: Add synthetic multi-course browser-flow coverage
 
 **Files:**
+
 - Create: `tests/integration/multi-course-flow.test.ts`
 - Modify: `tests/fixtures/course-plan.ts` with three synthetic course plans and a course-plan factory
 - Modify: `tests/fixtures/canvas/active-courses.json` with active, completed, and concluded course fixtures
@@ -401,6 +407,7 @@ git commit -m "test: cover multi-course browser flows"
 ### Task 7: Run the complete verification gate and update Linear
 
 **Files:**
+
 - Create: `docs/development/multi-course-runs.md` with the implemented synthetic command and user-visible output behavior
 - No production-code changes are allowed in this task unless a verification failure identifies a concrete regression
 

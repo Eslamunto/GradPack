@@ -50,7 +50,10 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
 describe("buildCombinedZip", () => {
   it("namespaces colliding course entries and aggregates the manifest", () => {
     const result = buildCombinedZip({
-      archives: [courseArchive(101, "First Course"), courseArchive(202, "Second Course")],
+      archives: [
+        courseArchive(101, "First Course"),
+        courseArchive(202, "Second Course"),
+      ],
       archiveCss: "body{font-family:system-ui}",
       now: () => "2026-08-17T12:00:00.000Z",
       fileName: () => "gradpack-combined.zip",
@@ -76,7 +79,9 @@ describe("buildCombinedZip", () => {
       courses: Array<{ courseId: number }>;
     };
     expect(manifest.kind).toBe("combined");
-    expect(manifest.courses.map(({ courseId }) => courseId)).toEqual([101, 202]);
+    expect(manifest.courses.map(({ courseId }) => courseId)).toEqual([
+      101, 202,
+    ]);
     expect(entries["courses/First Course-101/files/slides.pdf"]).toBeDefined();
   });
 

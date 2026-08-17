@@ -16,8 +16,7 @@ export type Progress = {
 
 export type PackagingMode = "combined" | "per-course";
 export type PlanFallbackReason =
-  | "combined-size-exceeded"
-  | "combined-resource-limit-exceeded";
+  "combined-size-exceeded" | "combined-resource-limit-exceeded";
 
 export type CoursePlanSummary = {
   courseId: number;

@@ -4,8 +4,13 @@ import {
   parseRunnerEvent,
   RUNNER_TERMINAL_MESSAGES,
 } from "../shared/messages";
-import type { CourseSummary } from "../shared/model";
+import type {
+  AggregateProgress,
+  CourseSummary,
+  PackagingMode,
+} from "../shared/model";
 import {
+  coursesForState,
   initialState,
   reduceState,
   type OutcomeCounts,
@@ -61,9 +66,9 @@ const notices = (): HTMLElement => {
   heading.textContent = "Before you pack";
   const list = document.createElement("ul");
   for (const text of [
-    "Pack one course at a time. Files must have known sizes and the course must fit the 250 MB pilot limit.",
+    "Select one or more courses. Combined archives fall back to separate ZIPs when the 250 MB or resource safety limit would be exceeded.",
     "Everything is processed locally. GradPack has no storage, analytics, or backend.",
-    "Keep this Canvas tab open and signed in until the ZIP download finishes.",
+    "Keep this Canvas tab open and signed in until the ZIP downloads finish.",
     "Only currently accessible material is retrieved. Some resources may be unavailable, fail, remain external, or be unsupported.",
     "You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.",
   ]) {
@@ -75,10 +80,11 @@ const notices = (): HTMLElement => {
   return section;
 };
 
-const progressText = (
-  progress: Extract<ViewState, { name: "packing" }>["progress"],
-): string =>
-  `${progress.stage}: ${progress.completed} of ${progress.total}; ${progress.failed} failed`;
+const progressText = (progress: AggregateProgress): string =>
+  `${progress.stage}: course ${progress.currentCourseIndex + 1} of ${progress.totalCourses}; ${progress.completed} of ${progress.total}; ${progress.failed} failed`;
+
+const packagingLabel = (packaging: PackagingMode): string =>
+  packaging === "combined" ? "one combined ZIP" : "one ZIP per course";
 
 const render = (): void => {
   app.replaceChildren();
@@ -97,61 +103,126 @@ const render = (): void => {
       }),
     );
   } else if (state.name === "choose") {
-    heading.textContent = "Choose one course";
+    heading.textContent = "Choose courses";
     const fieldset = document.createElement("fieldset");
     const legend = document.createElement("legend");
     legend.textContent = "Accessible courses";
     fieldset.append(legend);
     for (const course of state.courses) {
       const label = document.createElement("label");
-      const radio = document.createElement("input");
-      radio.type = "radio";
-      radio.name = "course";
-      radio.value = String(course.id);
-      radio.checked = state.selectedId === course.id;
-      radio.addEventListener("change", () =>
+      const checkbox = document.createElement("input");
+      checkbox.type = "checkbox";
+      checkbox.name = "course";
+      checkbox.value = String(course.id);
+      checkbox.checked = state.selectedIds.includes(course.id);
+      checkbox.addEventListener("change", () =>
         update({ type: "SELECT", courseId: course.id }),
       );
-      label.append(radio, document.createTextNode(courseLabel(course)));
+      label.append(checkbox, document.createTextNode(courseLabel(course)));
       fieldset.append(label);
     }
-    body.append(paragraph("Select exactly one accessible course."), fieldset);
-  } else if (state.name === "ready") {
-    const course = state.course;
-    heading.textContent = "Ready to pack";
     body.append(
-      paragraph(courseLabel(course), "selected-course"),
+      paragraph("Select one or more accessible courses."),
+      fieldset,
+      button("Continue", () => update({ type: "CONFIGURE" }), {
+        disabled: state.selectedIds.length === 0,
+      }),
+    );
+  } else if (state.name === "configure") {
+    heading.textContent = "Configure archives";
+    const fieldset = document.createElement("fieldset");
+    const legend = document.createElement("legend");
+    legend.textContent = "Packaging";
+    fieldset.append(legend);
+    for (const [value, labelText] of [
+      ["per-course", "One ZIP per course"],
+      ["combined", "One combined ZIP"],
+    ] as const) {
+      const label = document.createElement("label");
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = "packaging";
+      radio.value = value;
+      radio.checked = state.packaging === value;
+      radio.disabled = state.busy || cancelRequested;
+      radio.addEventListener("change", () =>
+        update({ type: "SET_PACKAGING", packaging: value }),
+      );
+      label.append(radio, document.createTextNode(labelText));
+      fieldset.append(label);
+    }
+    body.append(
+      paragraph(`${state.selectedIds.length} course(s) selected.`),
+      fieldset,
       notices(),
-      button("Pack this course", () => void startCourse(course.id)),
+      button(
+        state.busy ? "Discovering…" : "Discover selected courses",
+        () => void startRun(),
+        { disabled: state.busy || cancelRequested, busy: state.busy },
+      ),
+      button(
+        cancelRequested ? "Cancelling…" : "Cancel",
+        () => void cancelRun(),
+        { disabled: cancelRequested, busy: cancelRequested },
+      ),
+    );
+  } else if (state.name === "review") {
+    heading.textContent = "Review plan";
+    const names = coursesForState(state).map(courseLabel).join("; ");
+    body.append(
+      paragraph(names, "selected-courses"),
+      paragraph(
+        `Requested packaging: ${packagingLabel(state.plan.requestedPackaging)}.`,
+      ),
+      paragraph(
+        `Effective packaging: ${packagingLabel(state.plan.effectivePackaging)}.`,
+      ),
+      paragraph(
+        `Advertised material: ${state.plan.advertisedBytes} bytes across ${state.plan.resourceCount} resource(s).`,
+      ),
+      state.plan.fallbackReason
+        ? paragraph(
+            "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+            "fallback-notice",
+          )
+        : paragraph("Discovery is complete. Confirm to begin local retrieval."),
+      button("Continue to packing", () => void confirmPlan()),
+      button(
+        cancelRequested ? "Cancelling…" : "Cancel",
+        () => void cancelRun(),
+        { disabled: cancelRequested, busy: cancelRequested },
+      ),
     );
   } else if (state.name === "packing") {
-    heading.textContent = "Packing course";
+    heading.textContent = "Packing courses";
     const status = paragraph(progressText(state.progress), "progress");
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
     body.setAttribute("aria-busy", "true");
     body.append(
       status,
+      paragraph(`Output: ${packagingLabel(state.packaging)}.`),
       paragraph("Keep the connected Canvas tab open and signed in."),
       button(
         cancelRequested ? "Cancelling…" : "Cancel",
         () => void cancelRun(),
-        {
-          disabled: cancelRequested,
-          busy: cancelRequested,
-        },
+        { disabled: cancelRequested, busy: cancelRequested },
       ),
     );
   } else if (state.name === "complete") {
-    heading.textContent = "Archive downloaded";
+    heading.textContent = "Archives downloaded";
     body.append(
-      paragraph("Your course ZIP was downloaded."),
+      paragraph("Your GradPack archives were downloaded."),
+      paragraph(
+        `${state.outputCount} archive(s) downloaded; ${state.completedCourses} course(s) completed; ${state.failedCourses} course(s) failed.`,
+        "archive-summary",
+      ),
       paragraph(
         `${state.counts.success} successful; ${state.counts.failed} failed; ${state.counts.unavailable} unavailable; ${state.counts.unsupported} unsupported; ${state.counts.external} external.`,
         "outcome-summary",
       ),
       paragraph(
-        "Review manifest.json in the ZIP for the resource outcome list.",
+        "Review manifest.json in each ZIP for the resource outcome list.",
       ),
       button("Start again", () => void connect()),
     );
@@ -233,24 +304,46 @@ async function connect(): Promise<void> {
   }
 }
 
-async function startCourse(courseId: number): Promise<void> {
+async function startRun(): Promise<void> {
   const tabId = activeTabId;
   const runId = activeRunId;
-  if (tabId === null || state.name !== "ready" || state.course.id !== courseId)
-    return;
+  if (tabId === null || state.name !== "configure" || state.busy) return;
   cancelRequested = false;
-  update({
-    type: "PROGRESS",
-    progress: { stage: "discovery", completed: 0, total: 0, failed: 0 },
-  });
+  const courseIds = [...state.selectedIds];
+  const packaging = state.packaging;
+  update({ type: "DISCOVERING" });
   try {
     await chrome.tabs.sendMessage(
       tabId,
       parseExtensionCommand({
         channel: EXTENSION_CHANNEL,
-        type: "START_COURSE",
+        type: "START_RUN",
         runId,
-        courseId,
+        courseIds,
+        packaging,
+      }),
+    );
+  } catch {
+    if (activeRunId === runId && !terminalReceived) {
+      terminalReceived = true;
+      update({ type: "FAILED", message: RUNNER_TERMINAL_MESSAGES.tab });
+    }
+  }
+}
+
+async function confirmPlan(): Promise<void> {
+  const tabId = activeTabId;
+  const runId = activeRunId;
+  if (tabId === null || state.name !== "review" || cancelRequested) return;
+  cancelRequested = false;
+  update({ type: "CONFIRM" });
+  try {
+    await chrome.tabs.sendMessage(
+      tabId,
+      parseExtensionCommand({
+        channel: EXTENSION_CHANNEL,
+        type: "CONFIRM_PLAN",
+        runId,
       }),
     );
   } catch {
@@ -266,9 +359,11 @@ async function cancelRun(): Promise<void> {
   const runId = activeRunId;
   if (
     tabId === null ||
-    state.name !== "packing" ||
     terminalReceived ||
-    cancelRequested
+    cancelRequested ||
+    (state.name !== "configure" &&
+      state.name !== "review" &&
+      state.name !== "packing")
   )
     return;
   cancelRequested = true;
@@ -283,12 +378,7 @@ async function cancelRun(): Promise<void> {
       }),
     );
   } catch {
-    if (
-      activeRunId === runId &&
-      activeTabId === tabId &&
-      state.name === "packing" &&
-      !terminalReceived
-    ) {
+    if (activeRunId === runId && activeTabId === tabId && !terminalReceived) {
       terminalReceived = true;
       update({ type: "FAILED", message: RUNNER_TERMINAL_MESSAGES.tab });
     }
@@ -309,21 +399,16 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
     return;
   }
   if (event.runId !== activeRunId || terminalReceived) return;
-  if (event.type === "COURSES")
+  if (event.type === "COURSES") {
     update({ type: "COURSES", courses: event.courses });
-  else if (event.type === "PROGRESS") {
-    if (state.name !== "ready" && state.name !== "packing") return;
-    if (
-      lastProgressTotal !== null &&
-      lastProgressTotal !== 0 &&
-      event.total !== lastProgressTotal
-    )
-      return;
-    if (lastProgressTotal === null || event.total > 0)
-      lastProgressTotal = event.total;
+  } else if (event.type === "PLAN_READY") {
+    lastProgressTotal = event.resourceCount;
+    update({ type: "PLAN_READY", plan: event });
+  } else if (event.type === "PROGRESS") {
+    if (state.name !== "packing") return;
+    if (lastProgressTotal !== null && event.total !== lastProgressTotal) return;
     update({ type: "PROGRESS", progress: event });
   } else if (event.type === "COMPLETE") {
-    const previous = state;
     const counts: OutcomeCounts = {
       success: event.success,
       failed: event.failed,
@@ -333,7 +418,15 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
     if (lastProgressTotal === null || total !== lastProgressTotal) return;
-    update({ type: "COMPLETE", counts });
+    const previous = state;
+    update({
+      type: "COMPLETE",
+      packaging: event.packaging,
+      completedCourses: event.completedCourses,
+      failedCourses: event.failedCourses,
+      outputCount: event.outputCount,
+      counts,
+    });
     terminalReceived = state !== previous;
   } else {
     const previous = state;

@@ -64,12 +64,12 @@ this complete immutable plan exists.
 
 The coordinator then calculates the effective packaging mode:
 
-| Requested mode | Discovered plan | Effective behavior |
-| --- | --- | --- |
-| `per-course` | every course fits | one ZIP per successful course |
-| `combined` | combined total fits | one combined ZIP after all courses finish |
-| `combined` | combined total exceeds the limit, every course fits | emit a warning; require confirmation; use per-course ZIPs |
-| either mode | any course has unknown size or exceeds the limit | stop before retrieval and report the exact course limitation |
+| Requested mode | Discovered plan                                     | Effective behavior                                           |
+| -------------- | --------------------------------------------------- | ------------------------------------------------------------ |
+| `per-course`   | every course fits                                   | one ZIP per successful course                                |
+| `combined`     | combined total fits                                 | one combined ZIP after all courses finish                    |
+| `combined`     | combined total exceeds the limit, every course fits | emit a warning; require confirmation; use per-course ZIPs    |
+| either mode    | any course has unknown size or exceeds the limit    | stop before retrieval and report the exact course limitation |
 
 The review/confirmation step is part of the run protocol. This ensures an
 automatic packaging change is visible before any retrieval begins.
