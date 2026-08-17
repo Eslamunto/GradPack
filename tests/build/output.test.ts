@@ -1,7 +1,9 @@
 // @vitest-environment node
 import { access, readFile, readdir, rm } from "node:fs/promises";
 import { execFile as execFileCallback } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
+import { ESLint } from "eslint";
 import { describe, expect, it } from "vitest";
 
 const execFile = promisify(execFileCallback);
@@ -21,10 +23,6 @@ const requiredFiles = [
 
 function runBuild(args: string[] = []) {
   return execFile(process.execPath, ["scripts/build.mjs", ...args]);
-}
-
-function runLint() {
-  return execFile("pnpm", ["exec", "eslint", ".", "--max-warnings=0"]);
 }
 
 describe("production build output", () => {
@@ -76,8 +74,18 @@ describe("production build output", () => {
   it("keeps generated development output out of linting", async () => {
     await runBuild(["--dev"]);
 
-    await expect(runLint()).resolves.toBeDefined();
-  }, 10_000);
+    const eslint = new ESLint();
+    const files = await readdir(developmentDistDirectory);
+    const ignored = await Promise.all(
+      files.map((file) =>
+        eslint.isPathIgnored(
+          fileURLToPath(new URL(file, developmentDistDirectory)),
+        ),
+      ),
+    );
+
+    expect(ignored).toEqual(files.map(() => true));
+  });
 
   it("excludes development-only identifiers from production bundles", async () => {
     await runBuild();
