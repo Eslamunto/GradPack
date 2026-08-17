@@ -3,6 +3,7 @@ import { unzipSync, strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
+  buildCourseArchive,
   RunSafetyError,
   runCourse,
   type Retrieval,
@@ -74,6 +75,27 @@ const dependencies = (
 };
 
 describe("runCourse", () => {
+  it("builds a discovered course plan without handing off a download", async () => {
+    const deps = dependencies(plan([file(1)]), async () => ({
+      status: "success",
+      bytes: strToU8("data"),
+    }));
+
+    const result = await buildCourseArchive({
+      course: syntheticCourse,
+      plan: plan([file(1)]),
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(result.manifest.course.id).toBe(syntheticCourse.id);
+    expect(Array.from(unzipSync(result.zipBytes)["files/file-1.bin"]!)).toEqual(
+      Array.from(strToU8("data")),
+    );
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
   it("builds a complete synthetic ZIP and reports exact scalar progress", async () => {
     const fileBytes = strToU8("data");
     const pageBytes = strToU8(

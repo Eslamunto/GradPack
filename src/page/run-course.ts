@@ -28,6 +28,7 @@ import type {
   CoursePlan,
   CourseSummary,
   PlannedResource,
+  Progress,
   ResourceOutcome,
 } from "../shared/model";
 
@@ -38,14 +39,6 @@ const PAGE_TITLE_MAX_CHARACTERS = 500;
 export class RunSafetyError extends TypeError {
   override readonly name = "RunSafetyError";
 }
-
-export type RunStage = "discovery" | "download" | "sanitize" | "package";
-export type Progress = {
-  stage: RunStage;
-  completed: number;
-  total: number;
-  failed: number;
-};
 
 export type Retrieval =
   | { status: "success"; bytes: Uint8Array }
@@ -73,6 +66,8 @@ export type RunDependencies = {
   beforePackage?: () => void;
   maxArchiveBytes?: number;
 };
+
+export type CourseArchiveDependencies = Omit<RunDependencies, "discover" | "download">;
 
 export type RunResult = { manifest: ArchiveManifest; zipBytes: Uint8Array };
 
@@ -121,13 +116,14 @@ const terminalOutcome = (
   failureCategory: null,
 });
 
-export async function runCourse(options: {
+export async function buildCourseArchive(options: {
   course: CourseSummary;
+  plan: CoursePlan;
   signal: AbortSignal;
   progress: (progress: Progress) => void;
-  dependencies: RunDependencies;
+  dependencies: CourseArchiveDependencies;
 }): Promise<RunResult> {
-  const { course, signal, progress, dependencies } = options;
+  const { course, plan, signal, progress, dependencies } = options;
   const controller = new AbortController();
   const onCallerAbort = (): void => controller.abort(abortError(signal));
   signal.addEventListener("abort", onCallerAbort, { once: true });
@@ -140,10 +136,7 @@ export async function runCourse(options: {
 
   try {
     throwIfAborted(controller.signal);
-    progress({ stage: "discovery", completed: 0, total: 0, failed: 0 });
-    const immutablePlan = clonePlan(
-      await dependencies.discover({ ...course }, controller.signal),
-    );
+    const immutablePlan = clonePlan(plan);
     if (immutablePlan.course.id !== course.id) {
       throw new RunSafetyError("Discovered course does not match selection");
     }
@@ -278,11 +271,6 @@ export async function runCourse(options: {
       entries,
     });
     throwIfAborted(controller.signal);
-    dependencies.download(
-      dependencies.fileName(immutablePlan.course),
-      zipBytes,
-    );
-    throwIfAborted(controller.signal);
     succeeded = true;
     return { manifest, zipBytes };
   } finally {
@@ -292,6 +280,28 @@ export async function runCourse(options: {
     if (!succeeded) zipBytes?.fill(0);
     retained.clear();
   }
+}
+
+export async function runCourse(options: {
+  course: CourseSummary;
+  signal: AbortSignal;
+  progress: (progress: Progress) => void;
+  dependencies: RunDependencies;
+}): Promise<RunResult> {
+  const { course, signal, progress, dependencies } = options;
+  progress({ stage: "discovery", completed: 0, total: 0, failed: 0 });
+  const plan = await dependencies.discover({ ...course }, signal);
+  const result = await buildCourseArchive({
+    course,
+    plan,
+    signal,
+    progress,
+    dependencies,
+  });
+  throwIfAborted(signal);
+  dependencies.download(dependencies.fileName(course), result.zipBytes);
+  throwIfAborted(signal);
+  return result;
 }
 
 type FileTransport = {
