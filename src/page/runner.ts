@@ -2,6 +2,7 @@ import { downloadCourseZip } from "../archive/build-zip";
 import { ArchiveSafetyError } from "../archive/manifest";
 import { safeArchivePath } from "../archive/paths";
 import { ARCHIVE_CSS } from "../archive/style";
+import { buildCombinedZip } from "../archive/combined";
 import { discoverCoursePlan, PilotSizeError } from "../canvas/discovery";
 import {
   CanvasHttp,
@@ -13,9 +14,15 @@ import {
   fetchFileResource,
   fetchPageResource,
   RunSafetyError,
-  runCourse,
+  buildCourseArchive,
   type RunDependencies,
 } from "./run-course";
+import {
+  createRunPlan,
+  runCourses,
+  type ImmutableRunPlan,
+  type MultiCourseDependencies,
+} from "./run-courses";
 import { RUNNER_CHANNEL } from "../shared/constants";
 import {
   parseExtensionCommand,
@@ -51,7 +58,7 @@ const fixedFailure = (error: unknown): string => {
   return FIXED.unexpected;
 };
 
-const productionDependencies = (signal: AbortSignal): RunDependencies => {
+const productionDependencies = (signal: AbortSignal): MultiCourseDependencies => {
   return {
     discover: async (course) => {
       const controller = new AbortController();
@@ -83,6 +90,9 @@ const productionDependencies = (signal: AbortSignal): RunDependencies => {
     archiveCss: ARCHIVE_CSS,
     now: () => new Date().toISOString(),
     fileName: (course) => safeArchivePath(`gradpack-${course.name}.zip`),
+    combinedFileName: () => safeArchivePath("gradpack-combined.zip"),
+    buildCourseArchive,
+    buildCombinedZip,
     download: downloadCourseZip,
   };
 };
@@ -99,6 +109,8 @@ if (scope[marker] !== true) {
   let listed: { runId: string; courses: readonly CourseSummary[] } | null =
     null;
   let listing: ActiveRun | null = null;
+  let planning: ActiveRun | null = null;
+  let pendingPlan: { owned: ActiveRun; plan: ImmutableRunPlan } | null = null;
   let active: ActiveRun | null = null;
   const terminalizedIds = new Set<string>();
 
@@ -127,58 +139,61 @@ if (scope[marker] !== true) {
     );
   };
 
-  const runSelectedCourse = async (
-    command: Extract<ExtensionCommand, { type: "START_COURSE" }>,
-    course: CourseSummary,
+  const runSelectedCourses = async (
+    runId: string,
+    plan: ImmutableRunPlan,
+    owned: ActiveRun,
   ): Promise<void> => {
-    const controller = new AbortController();
-    const owned: ActiveRun = {
-      runId: command.runId,
-      controller,
-      terminal: false,
-      cause: null,
-    };
     active = owned;
     try {
-      const result = await runCourse({
-        course,
-        signal: controller.signal,
-        dependencies: productionDependencies(controller.signal),
+      const result = await runCourses({
+        plan,
+        signal: owned.controller.signal,
+        dependencies: productionDependencies(owned.controller.signal),
         progress: (value) => {
           if (
             active === owned &&
             !owned.terminal &&
-            !controller.signal.aborted
+            !owned.controller.signal.aborted
           ) {
             post({
               channel: RUNNER_CHANNEL,
               type: "PROGRESS",
-              runId: command.runId,
+              runId,
               ...value,
             });
           }
         },
       });
-      if (active !== owned || owned.terminal || controller.signal.aborted)
+      if (active !== owned || owned.terminal || owned.controller.signal.aborted)
         return;
       owned.terminal = true;
-      if (!markTerminal(command.runId)) return;
-      const totals = result.manifest.totals;
+      if (!markTerminal(runId)) return;
+      const outputCount = result.combined ? 1 : result.completed.length;
+      if (outputCount === 0) {
+        post({
+          channel: RUNNER_CHANNEL,
+          type: "FAILED",
+          runId,
+          message: FIXED.safety,
+        });
+        return;
+      }
       post({
         channel: RUNNER_CHANNEL,
         type: "COMPLETE",
-        runId: command.runId,
+        runId,
         message: FIXED.complete,
-        success: totals.success,
-        failed: totals.failed,
-        unavailable: totals.unavailable,
-        unsupported: totals.unsupported,
-        external: totals.external,
+        packaging: result.effectivePackaging,
+        completedCourses: result.completed.length,
+        failedCourses: result.failedCourseIds.length,
+        outputCount,
+        ...result.counts,
       });
     } catch (error) {
       if (owned.terminal) return;
       owned.terminal = true;
-      if (!markTerminal(command.runId)) return;
+      if (!markTerminal(runId)) return;
       if (
         error instanceof DOMException &&
         error.name === "AbortError" &&
@@ -187,7 +202,7 @@ if (scope[marker] !== true) {
         post({
           channel: RUNNER_CHANNEL,
           type: "CANCELLED",
-          runId: command.runId,
+          runId,
           message:
             owned.cause === "navigation" ? FIXED.navigation : FIXED.cancelled,
         });
@@ -195,7 +210,7 @@ if (scope[marker] !== true) {
         post({
           channel: RUNNER_CHANNEL,
           type: "FAILED",
-          runId: command.runId,
+          runId,
           message: fixedFailure(error),
         });
       }
@@ -210,17 +225,33 @@ if (scope[marker] !== true) {
       if (active?.runId === command.runId) abortOwned(active, "cancelled");
       else if (listing?.runId === command.runId)
         abortOwned(listing, "cancelled");
+      else if (planning?.runId === command.runId)
+        abortOwned(planning, "cancelled");
+      else if (pendingPlan?.owned.runId === command.runId) {
+        pendingPlan.owned.terminal = true;
+        pendingPlan = null;
+        if (markTerminal(command.runId)) {
+          post({
+            channel: RUNNER_CHANNEL,
+            type: "CANCELLED",
+            runId: command.runId,
+            message: FIXED.cancelled,
+          });
+        }
+      }
       return;
     }
     if (command.type === "LIST_COURSES") {
       if (
         listing?.runId === command.runId ||
+        planning?.runId === command.runId ||
+        pendingPlan?.owned.runId === command.runId ||
         active?.runId === command.runId ||
         listed?.runId === command.runId
       ) {
         return;
       }
-      if (listing || active) {
+      if (listing || planning || pendingPlan || active) {
         postFailure(command.runId, FIXED.active);
         return;
       }
@@ -283,30 +314,109 @@ if (scope[marker] !== true) {
       }
       return;
     }
-    if (listing?.runId === command.runId || active?.runId === command.runId) {
+    if (
+      listing?.runId === command.runId ||
+      planning?.runId === command.runId ||
+      active?.runId === command.runId
+    ) {
       return;
     }
-    if (listing || active) {
+    if (listing || planning || active) {
       postFailure(command.runId, FIXED.active);
       return;
     }
-    if (command.runId !== listed?.runId) {
-      postFailure(command.runId, FIXED.unlisted);
-      return;
-    }
-    const course = listed.courses.find(({ id }) => id === command.courseId);
-    if (!course) {
+    if (command.type === "START_RUN") {
+      if (pendingPlan) {
+        postFailure(command.runId, FIXED.active);
+        return;
+      }
+      if (command.runId !== listed?.runId) {
+        postFailure(command.runId, FIXED.unlisted);
+        return;
+      }
+      const listedCourses = listed.courses;
+      const selected = command.courseIds.map((id) =>
+        listedCourses.find((course) => course.id === id),
+      );
+      if (selected.some((course): course is undefined => course === undefined)) {
+        listed = null;
+        postFailure(command.runId, FIXED.unlisted);
+        return;
+      }
+      const selectedCourses = selected.filter(
+        (course): course is CourseSummary => course !== undefined,
+      );
       listed = null;
+      const controller = new AbortController();
+      const owned: ActiveRun = {
+        runId: command.runId,
+        controller,
+        terminal: false,
+        cause: null,
+      };
+      planning = owned;
+      try {
+        const plan = await createRunPlan({
+          courses: selectedCourses,
+          requestedPackaging: command.packaging,
+          signal: controller.signal,
+          dependencies: productionDependencies(controller.signal),
+        });
+        if (planning !== owned || owned.terminal || controller.signal.aborted)
+          return;
+        pendingPlan = { owned, plan };
+        post({
+          channel: RUNNER_CHANNEL,
+          type: "PLAN_READY",
+          runId: command.runId,
+          ...plan.summary,
+        });
+      } catch (error) {
+        if (owned.terminal) return;
+        owned.terminal = true;
+        if (!markTerminal(command.runId)) return;
+        if (
+          error instanceof DOMException &&
+          error.name === "AbortError" &&
+          owned.cause !== null
+        ) {
+          post({
+            channel: RUNNER_CHANNEL,
+            type: "CANCELLED",
+            runId: command.runId,
+            message:
+              owned.cause === "navigation" ? FIXED.navigation : FIXED.cancelled,
+          });
+        } else {
+          post({
+            channel: RUNNER_CHANNEL,
+            type: "FAILED",
+            runId: command.runId,
+            message: fixedFailure(error),
+          });
+        }
+      } finally {
+        if (planning === owned) planning = null;
+      }
+      return;
+    }
+    if (pendingPlan?.owned.runId !== command.runId) {
       postFailure(command.runId, FIXED.unlisted);
       return;
     }
-    listed = null;
-    await runSelectedCourse(command, course);
+    const pending = pendingPlan;
+    pendingPlan = null;
+    await runSelectedCourses(command.runId, pending.plan, pending.owned);
   };
 
   const stopForNavigation = (): void => {
     if (listing) abortOwned(listing, "navigation");
+    if (planning) abortOwned(planning, "navigation");
     if (active) abortOwned(active, "navigation");
+    if (pendingPlan) {
+      pendingPlan.owned.terminal = true;
+      pendingPlan = null;
+    }
     if (listed) {
       markTerminal(listed.runId);
       listed = null;
