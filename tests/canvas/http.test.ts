@@ -179,19 +179,19 @@ describe("CanvasHttp", () => {
     expect(fetcher).toHaveBeenCalledOnce();
   });
 
-  it.each([403, 404])(
-    "classifies only exact same-origin JSON course index status %i as unavailable",
-    async (status) => {
+  it.each([
+    { status: 403, body: { errors: [{ message: "Unavailable" }] } },
+    {
+      status: 404,
+      body: { errors: [{ message: "Unavailable" }], status: "not_found" },
+    },
+  ])(
+    "classifies only exact same-origin JSON course index status $status as unavailable",
+    async ({ status, body }) => {
       const courseIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
       const fetcher = vi
         .fn<typeof fetch>()
-        .mockResolvedValue(
-          jsonResponse(
-            status,
-            { errors: [{ message: "Unavailable" }] },
-            { url: courseIndexUrl },
-          ),
-        );
+        .mockResolvedValue(jsonResponse(status, body, { url: courseIndexUrl }));
 
       await expect(
         new CanvasHttp(fetcher).fetchAll(new URL(courseIndexUrl)),
@@ -224,6 +224,50 @@ describe("CanvasHttp", () => {
     },
   );
 
+  it("hard-fails optional index errors with invalid status or property shapes", async () => {
+    const courseIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
+    const invalidBodies: unknown[] = [
+      { errors: [{ message: "Unavailable" }], status: "Not-Found" },
+      { errors: [{ message: "Unavailable" }], status: "" },
+      { errors: [{ message: "Unavailable" }], status: "a".repeat(101) },
+      { errors: [{ message: "Unavailable" }], status: 404 },
+      {
+        errors: [{ message: "Unavailable" }],
+        status: "not_found",
+        extra: true,
+      },
+      { errors: [], status: "not_found" },
+    ];
+    const accessor = { errors: [{ message: "Unavailable" }] } as Record<
+      string,
+      unknown
+    >;
+    Object.defineProperty(accessor, "status", {
+      enumerable: true,
+      get: () => "not_found",
+    });
+    invalidBodies.push(accessor);
+    const symbolKeyedErrors = [{ message: "Unavailable" }] as Array<{
+      message: string;
+    }> &
+      Record<PropertyKey, unknown>;
+    symbolKeyedErrors[Symbol("extra")] = true;
+    invalidBodies.push({ errors: symbolKeyedErrors, status: "not_found" });
+
+    for (const body of invalidBodies) {
+      const response = jsonResponse(403, {}, { url: courseIndexUrl });
+      vi.spyOn(response, "json").mockResolvedValue(body);
+      const request = new CanvasHttp(
+        vi.fn<typeof fetch>().mockResolvedValue(response),
+      ).fetchAll(new URL(courseIndexUrl));
+
+      await expect(request).rejects.toBeInstanceOf(CanvasResponseError);
+      await expect(request).rejects.not.toBeInstanceOf(
+        CanvasCourseIndexUnavailableError,
+      );
+    }
+  });
+
   it.each([403, 404])(
     "hard-fails a continuation status %i instead of discarding the first page",
     async (status) => {
@@ -237,7 +281,7 @@ describe("CanvasHttp", () => {
         .mockResolvedValueOnce(
           jsonResponse(
             status,
-            { errors: [{ message: "Unavailable" }] },
+            { errors: [{ message: "Unavailable" }], status: "not_found" },
             { url: second },
           ),
         );
@@ -299,7 +343,13 @@ describe("CanvasHttp", () => {
       const requested = `${CANVAS_ORIGIN}/api/v1/courses/101/files`;
       const fetcher = vi
         .fn<typeof fetch>()
-        .mockResolvedValue(jsonResponse(status, {}, { url, contentType }));
+        .mockResolvedValue(
+          jsonResponse(
+            status,
+            { errors: [{ message: "Unavailable" }], status: "not_found" },
+            { url, contentType },
+          ),
+        );
 
       const request = new CanvasHttp(fetcher).json(new URL(requested));
       await expect(request).rejects.toBeInstanceOf(error);

@@ -75,30 +75,71 @@ const isCourseCollectionIndex = (url: URL): boolean =>
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const missingDataValue = Symbol("missingDataValue");
+
+const ownDataValue = (value: object, key: PropertyKey): unknown => {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor && "value" in descriptor
+      ? descriptor.value
+      : missingDataValue;
+  } catch {
+    return missingDataValue;
+  }
+};
+
+const ownKeys = (value: object): PropertyKey[] | null => {
+  try {
+    return Reflect.ownKeys(value);
+  } catch {
+    return null;
+  }
+};
+
+const hasConservativeCanvasErrorEntry = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const keys = ownKeys(value);
+  if (!keys || keys.some((key) => key !== "message" && key !== "error_code")) {
+    return false;
+  }
+  const message = ownDataValue(value, "message");
+  const errorCode = ownDataValue(value, "error_code");
+  return (
+    typeof message === "string" &&
+    message.trim().length > 0 &&
+    message.length <= 1_000 &&
+    (errorCode === missingDataValue ||
+      (typeof errorCode === "string" && errorCode.length <= 200))
+  );
+};
+
 const hasConservativeCanvasErrorShape = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
-  const keys = Reflect.ownKeys(value);
-  if (keys.length !== 1 || keys[0] !== "errors") return false;
-  const errors = value.errors;
+  const keys = ownKeys(value);
+  if (
+    !keys ||
+    keys.length < 1 ||
+    keys.length > 2 ||
+    keys.some((key) => key !== "errors" && key !== "status")
+  ) {
+    return false;
+  }
+  const errors = ownDataValue(value, "errors");
   if (!Array.isArray(errors) || errors.length === 0 || errors.length > 20) {
     return false;
   }
-  return errors.every((entry) => {
-    if (!isRecord(entry)) return false;
-    const entryKeys = Reflect.ownKeys(entry);
-    if (entryKeys.some((key) => key !== "message" && key !== "error_code")) {
-      return false;
-    }
-    return (
-      Object.hasOwn(entry, "message") &&
-      typeof entry.message === "string" &&
-      entry.message.trim().length > 0 &&
-      entry.message.length <= 1_000 &&
-      (!Object.hasOwn(entry, "error_code") ||
-        (typeof entry.error_code === "string" &&
-          entry.error_code.length <= 200))
-    );
-  });
+  const errorKeys = ownKeys(errors);
+  if (!errorKeys || errorKeys.length !== errors.length + 1) return false;
+  if (
+    !Array.from({ length: errors.length }, (_, index) =>
+      hasConservativeCanvasErrorEntry(ownDataValue(errors, String(index))),
+    ).every(Boolean)
+  ) {
+    return false;
+  }
+  if (!keys.includes("status")) return true;
+  const status = ownDataValue(value, "status");
+  return typeof status === "string" && /^[a-z][a-z0-9_-]{0,99}$/u.test(status);
 };
 
 const sameSearch = (left: URL, right: URL): boolean => {

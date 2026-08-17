@@ -4,7 +4,12 @@ import {
   discoverCoursePlan,
   PilotSizeError,
 } from "../../src/canvas/discovery";
-import { CanvasResponseError, CanvasSessionError } from "../../src/canvas/http";
+import {
+  CanvasHttp,
+  CanvasResponseError,
+  CanvasSessionError,
+} from "../../src/canvas/http";
+import { CANVAS_ORIGIN } from "../../src/shared/constants";
 import {
   planWithOneFile,
   syntheticCanvasHttp,
@@ -36,6 +41,75 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("discoverCoursePlan", () => {
+  it("falls back to module-linked files when the broad index has an accepted optional error", async () => {
+    const response = (body: unknown, url: URL, status = 200): Response => {
+      const value = new Response(JSON.stringify(body), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+      Object.defineProperty(value, "url", { value: url.href });
+      return value;
+    };
+    const fetcher = vi.fn<typeof fetch>((input) => {
+      const url =
+        input instanceof URL
+          ? input
+          : new URL(input instanceof Request ? input.url : input);
+      if (url.pathname.endsWith("/modules")) {
+        return Promise.resolve(
+          response(
+            [
+              {
+                id: 201,
+                name: "Module One",
+                position: 1,
+                items: [moduleItem(1, "File", { content_id: 301 })],
+              },
+            ],
+            url,
+          ),
+        );
+      }
+      if (url.pathname.endsWith("/files")) {
+        return Promise.resolve(
+          response(
+            { errors: [{ message: "Unavailable" }], status: "forbidden" },
+            url,
+            403,
+          ),
+        );
+      }
+      if (url.pathname.endsWith("/folders")) {
+        return Promise.resolve(
+          response([{ id: 401, full_name: "course files" }], url),
+        );
+      }
+      if (url.pathname.endsWith("/pages")) {
+        return Promise.resolve(response([], url));
+      }
+      if (url.pathname.endsWith("/files/301")) {
+        return Promise.resolve(response(file(301, "fallback.pdf", 7), url));
+      }
+      return Promise.reject(
+        new TypeError(`Unexpected synthetic request: ${url.pathname}`),
+      );
+    });
+
+    const plan = await discoverCoursePlan(
+      new CanvasHttp(fetcher),
+      syntheticCourse,
+    );
+
+    expect(plan.resources.map(({ key }) => key)).toEqual(["file:301"]);
+    expect(plan.resources[0]?.archivePath).toBe("files/fallback.pdf");
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        href: `${CANVAS_ORIGIN}/api/v1/courses/101/files/301`,
+      }),
+      expect.anything(),
+    );
+  });
+
   it("unions broad indexes with module-linked resources and deduplicates canonically", async () => {
     const http = syntheticCanvasHttp({
       modules: [
