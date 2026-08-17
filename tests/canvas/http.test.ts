@@ -204,6 +204,27 @@ describe("CanvasHttp", () => {
     },
   );
 
+  it("classifies a course-disabled pages index as optional", async () => {
+    const pagesIndexUrl = `${CANVAS_ORIGIN}/api/v1/courses/101/pages`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse(
+          404,
+          { message: "That page has been disabled for this course" },
+          { url: pagesIndexUrl },
+        ),
+      );
+
+    await expect(
+      new CanvasHttp(fetcher).fetchAll(new URL(pagesIndexUrl)),
+    ).rejects.toMatchObject({
+      name: "CanvasCourseIndexUnavailableError",
+      status: 404,
+    });
+    expect(fetcher).toHaveBeenCalledOnce();
+  });
+
   it.each([
     { status: 403, body: "{" },
     { status: 403, body: JSON.stringify([]) },

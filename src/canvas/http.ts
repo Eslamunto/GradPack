@@ -72,6 +72,9 @@ const isJsonContentType = (value: string): boolean => {
 const isCourseCollectionIndex = (url: URL): boolean =>
   /^\/api\/v1\/courses\/[1-9]\d*\/(?:files|folders|pages)$/.test(url.pathname);
 
+const isCoursePagesIndex = (url: URL): boolean =>
+  /^\/api\/v1\/courses\/[1-9]\d*\/pages$/.test(url.pathname);
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -143,6 +146,16 @@ const hasConservativeCanvasErrorShape = (value: unknown): boolean => {
   if (!keys.includes("status")) return true;
   const status = ownDataValue(value, "status");
   return typeof status === "string" && /^[a-z][a-z0-9_-]{0,99}$/u.test(status);
+};
+
+const hasConservativeDisabledPagesShape = (value: unknown): boolean => {
+  if (!isRecord(value)) return false;
+  const keys = ownKeys(value);
+  if (!keys || keys.length !== 1 || keys[0] !== "message") return false;
+  return (
+    ownDataValue(value, "message") ===
+    "That page has been disabled for this course"
+  );
 };
 
 const sameSearch = (left: URL, right: URL): boolean => {
@@ -292,7 +305,13 @@ export class CanvasHttp {
           if (isAbortError(error)) throw error;
           throw new CanvasResponseError("Canvas returned invalid JSON");
         }
-        if (!hasConservativeCanvasErrorShape(errorValue)) {
+        if (
+          !hasConservativeCanvasErrorShape(errorValue) &&
+          !(
+            isCoursePagesIndex(url) &&
+            hasConservativeDisabledPagesShape(errorValue)
+          )
+        ) {
           throw new CanvasResponseError(
             "Canvas returned an invalid error response",
           );
