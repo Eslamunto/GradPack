@@ -261,6 +261,11 @@ deterministically.
 - A course above the limit stops before resource retrieval.
 - GradPack explains the limit and does not omit resources to make the archive
   fit.
+- The pilot accepts at most 65,532 planned resources and ZIP payload entries.
+  Together with the three required core entries, this stays within the 65,535
+  entry limit of the deterministic classic-ZIP format; GradPack stops instead
+  of omitting resources. This is a pilot packaging cap, not a permanent MVP
+  product limit.
 
 The limit bounds the first in-memory packaging mechanism. It is not presented
 as a permanent product limit.

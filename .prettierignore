@@ -1,0 +1,6 @@
+dist/
+artifacts/
+coverage/
+pnpm-lock.yaml
+.superpowers/
+docs/design/

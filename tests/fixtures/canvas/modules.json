@@ -1,0 +1,23 @@
+[
+  {
+    "id": 201,
+    "name": "Module One",
+    "position": 1,
+    "items": [
+      {
+        "id": 301,
+        "title": "Welcome Page",
+        "position": 1,
+        "type": "Page",
+        "page_url": "welcome"
+      },
+      {
+        "id": 302,
+        "title": "slides.pdf",
+        "position": 2,
+        "type": "File",
+        "content_id": 301
+      }
+    ]
+  }
+]

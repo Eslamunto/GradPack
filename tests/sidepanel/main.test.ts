@@ -1,0 +1,281 @@
+import { beforeAll, describe, expect, it, vi } from "vitest";
+import { EXTENSION_CHANNEL, RUNNER_CHANNEL } from "../../src/shared/constants";
+import { syntheticCourse } from "../fixtures/course-plan";
+
+type RuntimeListener = Parameters<
+  typeof chrome.runtime.onMessage.addListener
+>[0];
+let listener!: RuntimeListener;
+let tabUpdatedListener!: Parameters<
+  typeof chrome.tabs.onUpdated.addListener
+>[0];
+const runtimeSendMessage = vi.fn().mockResolvedValue({ tabId: 17 });
+const tabsSendMessage = vi.fn().mockResolvedValue(undefined);
+const randomUuidValues: Array<ReturnType<Crypto["randomUUID"]>> = [
+  "12345678-1234-1234-1234-123456789abc",
+  "87654321-4321-4321-4321-cba987654321",
+  "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+];
+const secondCourse = {
+  ...syntheticCourse,
+  id: 102,
+  name: "Second Course",
+  courseCode: "SYN-102",
+};
+const sender = (
+  id = "gradpack-extension",
+  tabId = 17,
+): chrome.runtime.MessageSender =>
+  ({ id, tab: { id: tabId } }) as chrome.runtime.MessageSender;
+const clickButton = (label: string): void => {
+  const button = [...document.querySelectorAll("button")].find(
+    (candidate) => candidate.textContent === label,
+  );
+  expect(button).toBeInstanceOf(HTMLButtonElement);
+  (button as HTMLButtonElement).click();
+};
+
+beforeAll(async () => {
+  document.body.innerHTML = '<main id="app"></main>';
+  vi.spyOn(crypto, "randomUUID").mockImplementation(
+    () => randomUuidValues.shift() ?? "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+  );
+  vi.stubGlobal("chrome", {
+    runtime: {
+      id: "gradpack-extension",
+      onMessage: {
+        addListener: vi.fn((value: RuntimeListener) => (listener = value)),
+      },
+      sendMessage: runtimeSendMessage,
+    },
+    tabs: {
+      sendMessage: tabsSendMessage,
+      onRemoved: { addListener: vi.fn() },
+      onUpdated: {
+        addListener: vi.fn((value) => {
+          tabUpdatedListener = value;
+        }),
+      },
+    },
+  });
+  await import("../../src/sidepanel/main");
+});
+
+describe("accessible Side Panel flow", () => {
+  it("selects multiple courses, reviews fallback packaging, and reports aggregate completion", async () => {
+    expect(document.querySelector("h1")?.textContent).toBe("Connect to Canvas");
+    expect(document.body.textContent).toContain("250 MB");
+    expect(document.body.textContent).toContain("processed locally");
+    clickButton("Connect");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "LIST_COURSES",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+      }),
+    );
+
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "COURSES",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        courses: [syntheticCourse, secondCourse],
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("Choose courses");
+    const checkboxes = document.querySelectorAll<HTMLInputElement>(
+      'input[name="course"]',
+    );
+    expect(checkboxes).toHaveLength(2);
+    checkboxes.forEach((checkbox) => {
+      checkbox.checked = true;
+      checkbox.dispatchEvent(new Event("change"));
+    });
+    clickButton("Continue");
+    expect(document.querySelector("h1")?.textContent).toBe(
+      "Configure archives",
+    );
+    const combined = document.querySelector<HTMLInputElement>(
+      'input[value="combined"]',
+    )!;
+    combined.checked = true;
+    combined.dispatchEvent(new Event("change"));
+    clickButton("Discover selected courses");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_RUN",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        courseIds: [101, 102],
+        packaging: "combined",
+      }),
+    );
+
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "PLAN_READY",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        selected: [
+          { courseId: 101, advertisedBytes: 19, resourceCount: 1 },
+          { courseId: 102, advertisedBytes: 20, resourceCount: 1 },
+        ],
+        advertisedBytes: 39,
+        resourceCount: 2,
+        requestedPackaging: "combined",
+        effectivePackaging: "per-course",
+        fallbackReason: "combined-size-exceeded",
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("Review plan");
+    expect(document.body.textContent).toContain("fall back");
+    clickButton("Continue to packing");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "CONFIRM_PLAN",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+      }),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    const cancel = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Cancel",
+    ) as HTMLButtonElement;
+    cancel.focus();
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "PROGRESS",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        stage: "download",
+        currentCourseId: 102,
+        currentCourseIndex: 1,
+        totalCourses: 2,
+        completedCourses: 1,
+        completed: 1,
+        total: 2,
+        failed: 0,
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.activeElement).toBe(cancel);
+    expect(document.querySelector('[role="status"]')?.textContent).toContain(
+      "course 2 of 2",
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "COMPLETE",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        message: "Your GradPack archives were downloaded.",
+        packaging: "per-course",
+        completedCourses: 2,
+        failedCourses: 0,
+        outputCount: 2,
+        success: 2,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe(
+      "Archives downloaded",
+    );
+    expect(document.querySelector(".archive-summary")?.textContent).toContain(
+      "2 archive(s) downloaded",
+    );
+  });
+
+  it("sends one cancellation command and rejects stale or mismatched events", async () => {
+    clickButton("Start again");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "LIST_COURSES",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+      }),
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "COURSES",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+        courses: [syntheticCourse],
+      },
+      sender(),
+      vi.fn(),
+    );
+    const checkbox = document.querySelector<HTMLInputElement>(
+      'input[name="course"]',
+    )!;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event("change"));
+    clickButton("Continue");
+    clickButton("Cancel");
+    await vi.waitFor(() =>
+      expect(
+        tabsSendMessage.mock.calls.filter(
+          ([, command]) => (command as { type?: unknown }).type === "CANCEL",
+        ),
+      ).toHaveLength(1),
+    );
+    expect(document.body.textContent).toContain("Cancelling…");
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "CANCELLED",
+        runId: "run-other123",
+        message: "Packing was cancelled.",
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe(
+      "Configure archives",
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "CANCELLED",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+        message: "Packing was cancelled.",
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("GradPack stopped");
+  });
+
+  it("stops on navigation and ignores events from another tab", async () => {
+    clickButton("Try again");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "LIST_COURSES",
+        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      }),
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "COURSES",
+        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        courses: [syntheticCourse],
+      },
+      sender("other"),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("Connect to Canvas");
+    tabUpdatedListener(17, { status: "loading" }, {} as chrome.tabs.Tab);
+    expect(document.querySelector("h1")?.textContent).toBe("GradPack stopped");
+  });
+});
