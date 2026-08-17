@@ -80,7 +80,7 @@ const throwIfAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw abortError(signal);
 };
 
-const clonePlan = (plan: CoursePlan): CoursePlan => {
+export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
   const clone: CoursePlan = {
     course: { ...plan.course },
     modules: plan.modules.map((module) => ({
@@ -136,7 +136,7 @@ export async function buildCourseArchive(options: {
 
   try {
     throwIfAborted(controller.signal);
-    const immutablePlan = clonePlan(plan);
+  const immutablePlan = freezeCoursePlan(plan);
     if (immutablePlan.course.id !== course.id) {
       throw new RunSafetyError("Discovered course does not match selection");
     }

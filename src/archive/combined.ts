@@ -29,6 +29,12 @@ export type CombinedArchiveManifest = {
   };
 };
 
+export type CombinedArchiveOutput = {
+  fileName: string;
+  manifest: CombinedArchiveManifest;
+  zipBytes: Uint8Array;
+};
+
 export type CombinedArchiveInput = {
   archives: readonly CourseArchiveOutput[];
   archiveCss: string;
