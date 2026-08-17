@@ -3,18 +3,27 @@ import {
   MAX_ARCHIVE_RESOURCES,
   RUNNER_CHANNEL,
 } from "./constants";
-import type { CourseSummary } from "./model";
+import type {
+  AggregateProgress,
+  CoursePlanSummary,
+  CourseSummary,
+  PackagingMode,
+  PlanFallbackReason,
+  Progress,
+  RunPlanSummary,
+  RunStage,
+} from "./model";
 
 export const RUNNER_TERMINAL_MESSAGES = Object.freeze({
   active: "Another GradPack operation is already active in this tab.",
   cancelled: "Packing was cancelled.",
-  complete: "Your course ZIP was downloaded.",
+  complete: "Your GradPack archives were downloaded.",
   connection: "Open a signed-in Frankfurt School Canvas tab and try again.",
   navigation: "The Canvas tab navigated or closed. Reopen it and try again.",
   response: "Canvas returned an unavailable or invalid response.",
   safety: "GradPack stopped because a safety check failed.",
   session: "Your Canvas session ended. Sign in and try again.",
-  size: "This course does not fit the 250 MB pilot safety policy.",
+  size: "This course does not fit the 250 MB safety policy.",
   tab: "The connected Canvas tab is no longer available. Reopen it and try again.",
   unexpected: "GradPack stopped because of an unexpected local error.",
   unlisted: "The selected course is no longer available.",
@@ -24,10 +33,12 @@ export type ExtensionCommand =
   | { channel: typeof EXTENSION_CHANNEL; type: "LIST_COURSES"; runId: string }
   | {
       channel: typeof EXTENSION_CHANNEL;
-      type: "START_COURSE";
+      type: "START_RUN";
       runId: string;
-      courseId: number;
+      courseIds: number[];
+      packaging: PackagingMode;
     }
+  | { channel: typeof EXTENSION_CHANNEL; type: "CONFIRM_PLAN"; runId: string }
   | { channel: typeof EXTENSION_CHANNEL; type: "CANCEL"; runId: string };
 
 export type RunnerEvent =
@@ -37,20 +48,25 @@ export type RunnerEvent =
       runId: string;
       courses: CourseSummary[];
     }
-  | {
+  | ({
+      channel: typeof RUNNER_CHANNEL;
+      type: "PLAN_READY";
+      runId: string;
+    } & RunPlanSummary)
+  | ({
       channel: typeof RUNNER_CHANNEL;
       type: "PROGRESS";
       runId: string;
-      stage: "discovery" | "download" | "sanitize" | "package";
-      completed: number;
-      total: number;
-      failed: number;
-    }
+    } & AggregateProgress)
   | {
       channel: typeof RUNNER_CHANNEL;
       type: "COMPLETE";
       runId: string;
       message: string;
+      packaging: PackagingMode;
+      completedCourses: number;
+      failedCourses: number;
+      outputCount: number;
       success: number;
       failed: number;
       unavailable: number;
@@ -110,12 +126,16 @@ const nonNegativeInteger = (value: unknown): number => {
   return Number(value);
 };
 
+const positiveInteger = (value: unknown, message: string): number => {
+  const result = nonNegativeInteger(value);
+  if (result <= 0) throw new TypeError(message);
+  return result;
+};
+
 const courseSummary = (value: unknown): CourseSummary => {
   const input = record(value);
   exactKeys(input, ["id", "name", "courseCode", "workflowState", "concluded"]);
-  if (!Number.isSafeInteger(input.id) || Number(input.id) <= 0) {
-    throw new TypeError("Invalid course ID");
-  }
+  const id = positiveInteger(input.id, "Invalid course ID");
   if (
     typeof input.name !== "string" ||
     typeof input.courseCode !== "string" ||
@@ -125,7 +145,7 @@ const courseSummary = (value: unknown): CourseSummary => {
     throw new TypeError("Invalid course summary");
   }
   return {
-    id: Number(input.id),
+    id,
     name: input.name.slice(0, 500),
     courseCode: input.courseCode.slice(0, 200),
     workflowState: input.workflowState.slice(0, 100),
@@ -133,22 +153,20 @@ const courseSummary = (value: unknown): CourseSummary => {
   };
 };
 
-const courseArray = (value: unknown): CourseSummary[] => {
-  if (
-    !Array.isArray(value) ||
-    Object.getPrototypeOf(value) !== Array.prototype
-  ) {
-    throw new TypeError("Invalid course list");
+const denseArray = (value: unknown, max: number): unknown[] => {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype) {
+    throw new TypeError("Invalid array");
   }
   const length = Object.getOwnPropertyDescriptor(value, "length")?.value as
-    number | undefined;
+    | number
+    | undefined;
   if (
-    !Number.isSafeInteger(length) ||
     length === undefined ||
+    !Number.isSafeInteger(length) ||
     length < 0 ||
-    length > 10_000
+    length > max
   ) {
-    throw new TypeError("Invalid course list");
+    throw new TypeError("Invalid array");
   }
   const keys = Reflect.ownKeys(value);
   if (
@@ -158,23 +176,157 @@ const courseArray = (value: unknown): CourseSummary[] => {
         (key !== "length" && !/^(?:0|[1-9]\d*)$/u.test(key)),
     )
   ) {
-    throw new TypeError("Invalid course list");
+    throw new TypeError("Invalid array");
   }
-  const courses: CourseSummary[] = [];
+  const result: unknown[] = [];
   for (let index = 0; index < length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-    if (!descriptor || !("value" in descriptor)) {
-      throw new TypeError("Invalid course list");
-    }
-    courses.push(courseSummary(descriptor.value));
+    if (!descriptor || !("value" in descriptor)) throw new TypeError("Invalid array");
+    result.push(descriptor.value);
   }
-  return courses;
+  return result;
 };
 
-const terminalMessage = (
-  value: unknown,
-  allowed: readonly string[],
-): string => {
+const courseArray = (value: unknown): CourseSummary[] =>
+  denseArray(value, 10_000).map(courseSummary);
+
+const courseIds = (value: unknown): number[] => {
+  const values = denseArray(value, 10_000);
+  if (values.length === 0) throw new TypeError("At least one course is required");
+  const ids = values.map((candidate) => positiveInteger(candidate, "Invalid course ID"));
+  if (new Set(ids).size !== ids.length) throw new TypeError("Duplicate course ID");
+  return ids;
+};
+
+const packaging = (value: unknown): PackagingMode => {
+  if (value !== "combined" && value !== "per-course") {
+    throw new TypeError("Invalid packaging mode");
+  }
+  return value;
+};
+
+const fallbackReason = (value: unknown): PlanFallbackReason | null => {
+  if (
+    value !== null &&
+    value !== "combined-size-exceeded" &&
+    value !== "combined-resource-limit-exceeded"
+  ) {
+    throw new TypeError("Invalid fallback reason");
+  }
+  return value;
+};
+
+const planSummary = (value: unknown): CoursePlanSummary => {
+  const input = record(value);
+  exactKeys(input, ["courseId", "advertisedBytes", "resourceCount"]);
+  return {
+    courseId: positiveInteger(input.courseId, "Invalid course ID"),
+    advertisedBytes: nonNegativeInteger(input.advertisedBytes),
+    resourceCount: nonNegativeInteger(input.resourceCount),
+  };
+};
+
+const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
+  exactKeys(input, [
+    "channel",
+    "type",
+    "runId",
+    "selected",
+    "advertisedBytes",
+    "resourceCount",
+    "requestedPackaging",
+    "effectivePackaging",
+    "fallbackReason",
+  ]);
+  const selected = denseArray(input.selected, 10_000).map(planSummary);
+  if (selected.length === 0) throw new TypeError("Invalid plan");
+  const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
+  const resourceCount = nonNegativeInteger(input.resourceCount);
+  if (resourceCount > MAX_ARCHIVE_RESOURCES) throw new TypeError("Invalid plan");
+  if (
+    selected.reduce((total, item) => total + item.advertisedBytes, 0) !==
+      advertisedBytes ||
+    selected.reduce((total, item) => total + item.resourceCount, 0) !== resourceCount
+  ) {
+    throw new TypeError("Invalid plan totals");
+  }
+  const requestedPackaging = packaging(input.requestedPackaging);
+  const effectivePackaging = packaging(input.effectivePackaging);
+  const reason = fallbackReason(input.fallbackReason);
+  if (
+    (requestedPackaging === effectivePackaging && reason !== null) ||
+    (requestedPackaging !== effectivePackaging && reason === null) ||
+    (effectivePackaging === "combined" && reason !== null)
+  ) {
+    throw new TypeError("Invalid packaging fallback");
+  }
+  return {
+    channel: RUNNER_CHANNEL,
+    type: "PLAN_READY",
+    runId: id,
+    selected,
+    advertisedBytes,
+    resourceCount,
+    requestedPackaging,
+    effectivePackaging,
+    fallbackReason: reason,
+  };
+};
+
+const aggregateProgress = (
+  input: Record<string, unknown>,
+  id: string,
+): RunnerEvent => {
+  exactKeys(input, [
+    "channel",
+    "type",
+    "runId",
+    "stage",
+    "currentCourseId",
+    "currentCourseIndex",
+    "totalCourses",
+    "completedCourses",
+    "completed",
+    "total",
+    "failed",
+  ]);
+  const stage = input.stage;
+  if (
+    typeof stage !== "string" ||
+    !["discovery", "download", "sanitize", "package"].includes(stage)
+  ) {
+    throw new TypeError("Unsupported runner event");
+  }
+  const currentCourseId = positiveInteger(input.currentCourseId, "Invalid course ID");
+  const currentCourseIndex = nonNegativeInteger(input.currentCourseIndex);
+  const totalCourses = positiveInteger(input.totalCourses, "Invalid course count");
+  const completedCourses = nonNegativeInteger(input.completedCourses);
+  const completed = nonNegativeInteger(input.completed);
+  const total = nonNegativeInteger(input.total);
+  const failed = nonNegativeInteger(input.failed);
+  if (
+    currentCourseIndex >= totalCourses ||
+    completedCourses > currentCourseIndex ||
+    total > MAX_ARCHIVE_RESOURCES ||
+    completed > total ||
+    failed > completed
+  ) {
+    throw new TypeError("Invalid progress counts");
+  }
+  const value: AggregateProgress = {
+    stage: stage as RunStage,
+    currentCourseId,
+    currentCourseIndex,
+    totalCourses,
+    completedCourses,
+    completed,
+    total,
+    failed,
+  };
+  return { channel: RUNNER_CHANNEL, type: "PROGRESS", runId: id, ...value };
+};
+
+const terminalMessage = (value: unknown, allowed: readonly string[]): string => {
   if (typeof value !== "string" || !allowed.includes(value)) {
     throw new TypeError("Unsupported runner event");
   }
@@ -183,24 +335,20 @@ const terminalMessage = (
 
 export function parseExtensionCommand(value: unknown): ExtensionCommand {
   const input = record(value);
-  if (input.channel !== EXTENSION_CHANNEL)
-    throw new TypeError("Invalid channel");
-  if (input.type === "LIST_COURSES" || input.type === "CANCEL") {
+  if (input.channel !== EXTENSION_CHANNEL) throw new TypeError("Invalid channel");
+  const id = runId(input.runId);
+  if (input.type === "LIST_COURSES" || input.type === "CANCEL" || input.type === "CONFIRM_PLAN") {
     exactKeys(input, ["channel", "type", "runId"]);
-    const id = runId(input.runId);
     return { channel: EXTENSION_CHANNEL, type: input.type, runId: id };
   }
-  if (input.type === "START_COURSE") {
-    exactKeys(input, ["channel", "type", "runId", "courseId"]);
-    const id = runId(input.runId);
-    if (!Number.isSafeInteger(input.courseId) || Number(input.courseId) <= 0) {
-      throw new TypeError("Unsupported command");
-    }
+  if (input.type === "START_RUN") {
+    exactKeys(input, ["channel", "type", "runId", "courseIds", "packaging"]);
     return {
       channel: EXTENSION_CHANNEL,
-      type: "START_COURSE",
+      type: "START_RUN",
       runId: id,
-      courseId: Number(input.courseId),
+      courseIds: courseIds(input.courseIds),
+      packaging: packaging(input.packaging),
     };
   }
   throw new TypeError("Unsupported command");
@@ -209,70 +357,37 @@ export function parseExtensionCommand(value: unknown): ExtensionCommand {
 export function parseRunnerEvent(value: unknown): RunnerEvent {
   const input = record(value);
   if (input.channel !== RUNNER_CHANNEL) throw new TypeError("Invalid channel");
+  const id = runId(input.runId);
   if (input.type === "COURSES" && Array.isArray(input.courses)) {
     exactKeys(input, ["channel", "type", "runId", "courses"]);
-    const id = runId(input.runId);
-    return {
-      channel: RUNNER_CHANNEL,
-      type: "COURSES",
-      runId: id,
-      courses: courseArray(input.courses),
-    };
+    return { channel: RUNNER_CHANNEL, type: "COURSES", runId: id, courses: courseArray(input.courses) };
   }
-  if (input.type === "PROGRESS") {
-    exactKeys(input, [
-      "channel",
-      "type",
-      "runId",
-      "stage",
-      "completed",
-      "total",
-      "failed",
-    ]);
-    const id = runId(input.runId);
-    const stage = input.stage;
-    if (
-      typeof stage !== "string" ||
-      !["discovery", "download", "sanitize", "package"].includes(stage)
-    ) {
-      throw new TypeError("Unsupported runner event");
-    }
-    const completed = nonNegativeInteger(input.completed);
-    const total = nonNegativeInteger(input.total);
-    const failed = nonNegativeInteger(input.failed);
-    if (
-      total > MAX_ARCHIVE_RESOURCES ||
-      completed > total ||
-      failed > completed
-    ) {
-      throw new TypeError("Invalid progress counts");
-    }
-    return {
-      channel: RUNNER_CHANNEL,
-      type: "PROGRESS",
-      runId: id,
-      stage: stage as "discovery" | "download" | "sanitize" | "package",
-      completed,
-      total,
-      failed,
-    };
-  }
+  if (input.type === "PLAN_READY") return planEvent(input, id);
+  if (input.type === "PROGRESS") return aggregateProgress(input, id);
   if (input.type === "COMPLETE") {
     exactKeys(input, [
       "channel",
       "type",
       "runId",
       "message",
+      "packaging",
+      "completedCourses",
+      "failedCourses",
+      "outputCount",
       "success",
       "failed",
       "unavailable",
       "unsupported",
       "external",
     ]);
-    const id = runId(input.runId);
-    const message = terminalMessage(input.message, [
-      RUNNER_TERMINAL_MESSAGES.complete,
-    ]);
+    const message = terminalMessage(input.message, [RUNNER_TERMINAL_MESSAGES.complete]);
+    const packagingMode = packaging(input.packaging);
+    const completedCourses = nonNegativeInteger(input.completedCourses);
+    const failedCourses = nonNegativeInteger(input.failedCourses);
+    const outputCount = nonNegativeInteger(input.outputCount);
+    if (completedCourses === 0 || outputCount !== completedCourses) {
+      throw new TypeError("Invalid terminal course counts");
+    }
     const counts = {
       success: nonNegativeInteger(input.success),
       failed: nonNegativeInteger(input.failed),
@@ -289,19 +404,19 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       type: "COMPLETE",
       runId: id,
       message,
+      packaging: packagingMode,
+      completedCourses,
+      failedCourses,
+      outputCount,
       ...counts,
     };
   }
   if (input.type === "CANCELLED" || input.type === "FAILED") {
     exactKeys(input, ["channel", "type", "runId", "message"]);
-    const id = runId(input.runId);
     const message = terminalMessage(
       input.message,
       input.type === "CANCELLED"
-        ? [
-            RUNNER_TERMINAL_MESSAGES.cancelled,
-            RUNNER_TERMINAL_MESSAGES.navigation,
-          ]
+        ? [RUNNER_TERMINAL_MESSAGES.cancelled, RUNNER_TERMINAL_MESSAGES.navigation]
         : [
             RUNNER_TERMINAL_MESSAGES.active,
             RUNNER_TERMINAL_MESSAGES.response,
@@ -312,12 +427,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
             RUNNER_TERMINAL_MESSAGES.unlisted,
           ],
     );
-    return {
-      channel: RUNNER_CHANNEL,
-      type: input.type,
-      runId: id,
-      message,
-    };
+    return { channel: RUNNER_CHANNEL, type: input.type, runId: id, message };
   }
   throw new TypeError("Unsupported runner event");
 }
