@@ -181,6 +181,7 @@ describe("CanvasHttp", () => {
 
   it.each([
     { status: 403, body: { errors: [{ message: "Unavailable" }] } },
+    { status: 404, body: { errors: [{ message: "Unavailable" }] } },
     {
       status: 404,
       body: { errors: [{ message: "Unavailable" }], status: "not_found" },
@@ -247,6 +248,16 @@ describe("CanvasHttp", () => {
       get: () => "not_found",
     });
     invalidBodies.push(accessor);
+    const errorCodeGetter = vi.fn(() => "unavailable");
+    const errorCodeAccessor = { message: "Unavailable" } as Record<
+      string,
+      unknown
+    >;
+    Object.defineProperty(errorCodeAccessor, "error_code", {
+      enumerable: true,
+      get: errorCodeGetter,
+    });
+    invalidBodies.push({ errors: [errorCodeAccessor], status: "not_found" });
     const symbolKeyedErrors = [{ message: "Unavailable" }] as Array<{
       message: string;
     }> &
@@ -266,6 +277,7 @@ describe("CanvasHttp", () => {
         CanvasCourseIndexUnavailableError,
       );
     }
+    expect(errorCodeGetter).not.toHaveBeenCalled();
   });
 
   it.each([403, 404])(

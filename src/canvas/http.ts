@@ -104,6 +104,9 @@ const hasConservativeCanvasErrorEntry = (value: unknown): boolean => {
   }
   const message = ownDataValue(value, "message");
   const errorCode = ownDataValue(value, "error_code");
+  if (keys.includes("error_code") && errorCode === missingDataValue) {
+    return false;
+  }
   return (
     typeof message === "string" &&
     message.trim().length > 0 &&
