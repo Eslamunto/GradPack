@@ -310,7 +310,7 @@ describe("runCourse", () => {
   it("packages rich sanitized Canvas content under the final shell policy", async () => {
     const fragment = sanitizePageFragment({
       title: "Welcome",
-      body: '<h1>Source heading</h1><h3 aria-expanded="false">Details</h3><img src="https://remote.test/image.png" alt="Diagram"><a href="mailto:reader@example.test">Email</a>',
+      body: '<h1>Source heading</h1><h3 aria-expanded="false">Details</h3><img src="https://remote.test/image.png" alt="Diagram"><a href="https://reference.test/path?q=ok#part">Reference</a><a href="mailto:reader@example.test">Email</a>',
       resolveLocalHref: () => null,
     });
     const deps = dependencies(plan([page]), async () => ({
@@ -333,6 +333,9 @@ describe("runCourse", () => {
       "false",
     );
     expect(document.querySelector("img")?.hasAttribute("src")).toBe(false);
+    expect(
+      document.querySelector('a[href="https://reference.test/path?q=ok#part"]'),
+    ).not.toBeNull();
     expect(document.querySelector('a[href^="mailto:"]')).not.toBeNull();
   });
 

@@ -251,7 +251,7 @@ const archiveText = (value: unknown): string => {
 };
 
 const safeExternalHref = (value: string): boolean => {
-  if (/%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu.test(value)) return false;
+  if (CONTROL.test(value) || ENCODED_CONTROL.test(value)) return false;
   let url: URL;
   try {
     url = new URL(value);
@@ -259,11 +259,7 @@ const safeExternalHref = (value: string): boolean => {
     return false;
   }
   return (
-    url.protocol === "https:" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.search === "" &&
-    url.hash === ""
+    url.protocol === "https:" && url.username === "" && url.password === ""
   );
 };
 
