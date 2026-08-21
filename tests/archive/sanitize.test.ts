@@ -288,7 +288,7 @@ describe("sanitizePageHtml", () => {
     );
   });
 
-  it("preserves safe fragments, HTTPS, and mailto while hardening external anchors", () => {
+  it("removes fragment identity while preserving hardened HTTPS and mailto anchors", () => {
     const document = parse(
       sanitizePageHtml(
         input(`
@@ -301,7 +301,8 @@ describe("sanitizePageHtml", () => {
     );
     const anchors = [...document.body.querySelectorAll("a")];
 
-    expect(anchors[0]?.outerHTML).toBe('<a href="#section-1">Jump</a>');
+    expect(anchors[0]?.outerHTML).toBe("<a>Jump</a>");
+    expect(document.body.querySelector("[id]")).toBeNull();
     expect(anchors[1]?.getAttribute("href")).toBe(
       "https://reference.test/path?q=ok#part",
     );
@@ -430,7 +431,7 @@ describe("sanitizePageHtml", () => {
       ),
     );
 
-    expect(document.body.querySelector("article h1")?.textContent).toBe(
+    expect(document.body.querySelector("article h2")?.textContent).toBe(
       "Heading 🌍",
     );
     expect(document.body.querySelectorAll("li")).toHaveLength(3);

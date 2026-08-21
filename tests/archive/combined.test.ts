@@ -62,6 +62,7 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
   );
   const manifest = model.manifest;
   const zipBytes = buildCourseZip({
+    archiveRoot: root,
     pages: renderCoursePages(model, {
       combinedHomeHref: relativeArchiveHref(`${root}/index.html`, "index.html"),
     }),

@@ -208,6 +208,21 @@ const stripShellIdentity = (root: ParentNode): void => {
     element.removeAttribute("id");
     element.removeAttribute("role");
     element.removeAttribute("aria-describedby");
+    if (
+      element.localName === "a" &&
+      element.getAttribute("href")?.startsWith("#")
+    ) {
+      element.removeAttribute("href");
+      element.removeAttribute("rel");
+    }
+  }
+};
+
+const normalizeFragmentHeadings = (root: ParentNode): void => {
+  for (const heading of root.querySelectorAll("h1")) {
+    const replacement = document.createElement("h2");
+    for (const child of [...heading.childNodes]) replacement.append(child);
+    heading.replaceWith(replacement);
   }
 };
 
@@ -397,6 +412,7 @@ export function sanitizePageFragment(input: unknown): string {
   });
   const container = document.createElement("div");
   container.append(sanitized);
+  normalizeFragmentHeadings(container);
   stripShellIdentity(container);
   auditAttributes(container);
   rewriteAnchors(container, resolveLocalHref);

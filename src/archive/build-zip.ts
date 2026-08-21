@@ -35,6 +35,8 @@ export const MAX_CLASSIC_ZIP_ENTRIES = 65_535;
 const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_ZIP_NAME_LENGTH = 180;
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const INDEX_TAGS = new Set([
   "a",
   "aside",
@@ -94,7 +96,12 @@ const SHELL_TAGS = new Set([
   "figure",
   "footer",
   "hr",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
   "i",
+  "img",
   "kbd",
   "mark",
   "nav",
@@ -144,6 +151,7 @@ const SHELL_CLASSES = new Set([
 ]);
 const SHELL_ATTRIBUTES = new Set([
   "abbr",
+  "alt",
   "aria-current",
   "aria-hidden",
   "aria-label",
@@ -173,6 +181,7 @@ const SHELL_ATTRIBUTES = new Set([
 ]);
 
 export type ArchiveInput = {
+  archiveRoot: string | null;
   pages: ReadonlyMap<CourseHtmlPath, string>;
   archiveCss: string;
   manifest: ArchiveManifest;
@@ -203,7 +212,13 @@ const exactInput = (value: unknown): Record<string, unknown> => {
   } catch {
     throw new TypeError("Invalid archive input");
   }
-  const expected = ["pages", "archiveCss", "manifest", "entries"];
+  const expected = [
+    "archiveRoot",
+    "pages",
+    "archiveCss",
+    "manifest",
+    "entries",
+  ];
   if (
     keys.length !== expected.length ||
     keys.some((key) => typeof key !== "string" || !expected.includes(key))
@@ -252,6 +267,25 @@ const safeExternalHref = (value: string): boolean => {
   );
 };
 
+const safeMailtoHref = (value: string): boolean => {
+  if (CONTROL.test(value) || ENCODED_CONTROL.test(value)) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === "mailto:" &&
+    url.username === "" &&
+    url.password === "" &&
+    /^mailto:[^/\s]/iu.test(value)
+  );
+};
+
+const safeExternalAnchorHref = (value: string): boolean =>
+  safeExternalHref(value) || safeMailtoHref(value);
+
 const safeLocalHref = (value: string): boolean => {
   let path: string;
   try {
@@ -284,7 +318,7 @@ const exactAttributes = (
 
 const safeShellHref = (value: string): boolean => {
   if (value === "#archive-main") return true;
-  if (safeExternalHref(value)) return true;
+  if (safeExternalAnchorHref(value)) return true;
   if (
     value.includes("\\") ||
     value.includes(":") ||
@@ -342,6 +376,8 @@ const validateShellIndex = (
     !exactAttributes(head[2], {}) ||
     head[2].children.length !== 0 ||
     link?.localName !== "link" ||
+    link.parentElement !== document.head ||
+    document.querySelectorAll("link").length !== 1 ||
     !exactAttributes(link, {
       rel: "stylesheet",
       href: relativeArchiveHref(pagePath, "assets/archive.css"),
@@ -362,9 +398,12 @@ const validateShellIndex = (
       if (
         attribute.namespaceURI !== null ||
         attribute.name.startsWith("on") ||
-        !SHELL_ATTRIBUTES.has(attribute.name)
+        (!SHELL_ATTRIBUTES.has(attribute.name) &&
+          !/^aria-[a-z][a-z0-9-]*$/u.test(attribute.name))
       )
-        throw new TypeError("Invalid archive index");
+        throw new TypeError(
+          `Invalid archive index attribute ${element.localName}:${attribute.name}`,
+        );
     }
     const className = element.getAttribute("class");
     if (
@@ -395,7 +434,7 @@ const validateShellIndex = (
     if (href === null || !safeShellHref(href))
       throw new TypeError("Invalid archive index");
     if (
-      safeExternalHref(href) &&
+      safeExternalAnchorHref(href) &&
       anchor.getAttribute("rel") !== "noopener noreferrer"
     ) {
       throw new TypeError("Invalid archive index");
@@ -412,26 +451,31 @@ export const validateArchiveLinkTargets = (
   paths: ReadonlySet<string>,
 ): void => {
   const document = new DOMParser().parseFromString(html, "text/html");
-  const base = `https://archive.invalid/${pagePath
+  const archivePrefix = "/archive/";
+  const base = `https://archive.invalid${archivePrefix}${pagePath
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;
   for (const element of document.querySelectorAll("a[href], link[href]")) {
     const href = element.getAttribute("href");
-    if (href === null || href.startsWith("#") || safeExternalHref(href))
+    if (href === null || href.startsWith("#") || safeExternalAnchorHref(href))
       continue;
     let url: URL;
     let target: string;
     try {
       url = new URL(href, base);
-      target = decodeURIComponent(url.pathname.slice(1));
+      if (!url.pathname.startsWith(archivePrefix)) {
+        throw new TypeError("Invalid archive link target");
+      }
+      target = decodeURIComponent(url.pathname.slice(archivePrefix.length));
     } catch {
       throw new TypeError("Invalid archive link target");
     }
     if (
       url.origin !== "https://archive.invalid" ||
       !isCanonicalArchivePath(target) ||
-      !paths.has(target)
+      !paths.has(target) ||
+      href !== relativeArchiveHref(pagePath, target)
     ) {
       throw new TypeError("Invalid archive link target");
     }
@@ -827,6 +871,15 @@ export const buildDeterministicZip = (
 export function buildCourseZip(input: ArchiveInput): Uint8Array;
 export function buildCourseZip(input: unknown): Uint8Array {
   const record = exactInput(input);
+  const rawArchiveRoot = ownValue(record, "archiveRoot");
+  const archiveRoot =
+    rawArchiveRoot === null ||
+    (isCanonicalArchivePath(rawArchiveRoot) &&
+      rawArchiveRoot.startsWith("courses/"))
+      ? rawArchiveRoot
+      : (() => {
+          throw new TypeError("Invalid archive root");
+        })();
   const pages = collectGeneratedPages(ownValue(record, "pages"));
   const archiveCss = validateArchiveCss(ownValue(record, "archiveCss"));
   const manifest = normalizeArchiveManifest(ownValue(record, "manifest"));
@@ -840,8 +893,17 @@ export function buildCourseZip(input: unknown): Uint8Array {
     ),
   ]);
   const paths = new Set(sources.keys());
+  const targetPaths =
+    archiveRoot === null
+      ? paths
+      : new Set([
+          "index.html",
+          ...[...paths].map((path) => `${archiveRoot}/${path}`),
+        ]);
+  const targetPagePath = (path: string): string =>
+    archiveRoot === null ? path : `${archiveRoot}/${path}`;
   for (const [path, html] of pages)
-    validateArchiveLinkTargets(path, html, paths);
+    validateArchiveLinkTargets(targetPagePath(path), html, targetPaths);
   for (const resource of manifest.resources) {
     if (
       resource.kind === "page" &&
@@ -854,7 +916,11 @@ export function buildCourseZip(input: unknown): Uint8Array {
         resource.archivePath,
         new TextDecoder().decode(bytes),
       );
-      validateArchiveLinkTargets(resource.archivePath, html, paths);
+      validateArchiveLinkTargets(
+        targetPagePath(resource.archivePath),
+        html,
+        targetPaths,
+      );
     }
   }
   return buildDeterministicZip(sources);

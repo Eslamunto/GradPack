@@ -261,6 +261,7 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
 ];
 
 export const syntheticArchiveInput: ArchiveInput = {
+  archiveRoot: null,
   pages: new Map(
     [
       "files.html",

@@ -369,6 +369,7 @@ export async function buildCourseArchive(options: {
           },
     );
     zipBytes = buildCourseZip({
+      archiveRoot: combinedRoot,
       pages,
       archiveCss: dependencies.archiveCss,
       manifest,

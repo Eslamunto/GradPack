@@ -19,6 +19,7 @@ import {
 } from "../fixtures/course-plan";
 
 const copyInput = (): ArchiveInput => ({
+  archiveRoot: syntheticArchiveInput.archiveRoot,
   pages: new Map(syntheticArchiveInput.pages),
   archiveCss: TRUSTED_ARCHIVE_CSS,
   manifest: structuredClone(syntheticArchiveInput.manifest),
@@ -507,6 +508,18 @@ describe("buildCourseZip", () => {
       ),
     );
     expect(() => buildCourseZip(input)).toThrow(TypeError);
+  });
+
+  it("rejects local links that escape the archive root or use excess traversal", () => {
+    for (const href of ["../../../index.html", "files/../files/slides.pdf"]) {
+      const input = copyInput();
+      const trusted = input.pages.get("index.html")!;
+      (input.pages as Map<string, string>).set(
+        "index.html",
+        trusted.replace("<main>", `<main><a href="${href}">Unsafe</a>`),
+      );
+      expect(() => buildCourseZip(input)).toThrow(TypeError);
+    }
   });
 
   it("rejects a network-bearing background attribute on the actual body element", () => {

@@ -2,6 +2,7 @@
 import { unzipSync, strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
+import { sanitizePageFragment } from "../../src/archive/sanitize";
 import {
   buildCourseArchive,
   RunSafetyError,
@@ -304,6 +305,35 @@ describe("runCourse", () => {
     ).rejects.toThrow("Archive byte limit exceeded");
     expect(deps.download).not.toHaveBeenCalled();
     expect(fragment.every((value) => value === 0)).toBe(true);
+  });
+
+  it("packages rich sanitized Canvas content under the final shell policy", async () => {
+    const fragment = sanitizePageFragment({
+      title: "Welcome",
+      body: '<h1>Source heading</h1><h3 aria-expanded="false">Details</h3><img src="https://remote.test/image.png" alt="Diagram"><a href="mailto:reader@example.test">Email</a>',
+      resolveLocalHref: () => null,
+    });
+    const deps = dependencies(plan([page]), async () => ({
+      status: "success",
+      bytes: strToU8(fragment),
+    }));
+    const result = await runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+    const html = strFromU8(unzipSync(result.zipBytes)["pages/welcome.html"]!);
+    const document = new DOMParser().parseFromString(html, "text/html");
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
+    expect(document.querySelector(".saved-page-content h2")?.textContent).toBe(
+      "Source heading",
+    );
+    expect(document.querySelector("h3")?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(document.querySelector("img")?.hasAttribute("src")).toBe(false);
+    expect(document.querySelector('a[href^="mailto:"]')).not.toBeNull();
   });
 
   it("does not claim success when cancellation occurs during package or download", async () => {
