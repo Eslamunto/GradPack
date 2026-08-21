@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  renderSavedPageHtml,
+  sanitizePageFragment,
   sanitizePageHtml,
   type SanitizePageInput,
 } from "../../src/archive/sanitize";
@@ -69,6 +71,33 @@ function expectSafeOutputTree(document: Document): void {
 }
 
 describe("sanitizePageHtml", () => {
+  it("separates the sanitized fragment from the trusted saved-page shell", () => {
+    const fragment = sanitizePageFragment(
+      input('<p>Safe</p><script>alert(1)</script>'),
+    );
+    expect(fragment).toBe("<p>Safe</p>");
+    expect(fragment).not.toContain("<html");
+
+    const model = {
+      manifest: {
+        course: { name: "Synthetic Course", courseCode: "SYN-101" },
+      },
+    } as never;
+    const html = renderSavedPageHtml({
+      model,
+      pagePath: "pages/welcome.html",
+      title: "Welcome",
+      sanitizedFragment: fragment,
+      combinedHomeHref: null,
+    });
+    const document = parse(html);
+    expect(document.querySelector('[aria-current="page"]')?.textContent).toBe(
+      "Pages",
+    );
+    expect(document.querySelector('a[href="../modules.html"]')).not.toBeNull();
+    expect(document.querySelector("script, [style], [onclick]")).toBeNull();
+  });
+
   it("emits one complete deterministic offline document and escapes the title", () => {
     const page = {
       title: 'Research & <Practice> "Notes" 🌍',

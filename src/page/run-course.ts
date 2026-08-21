@@ -1,13 +1,13 @@
-import { strToU8 } from "fflate";
+import { strFromU8, strToU8 } from "fflate";
 import { buildCourseZip } from "../archive/build-zip";
 import { renderIndexPage } from "../archive/index-page";
+import { buildArchiveNavigationModel } from "../archive/navigation-model";
 import {
   MAX_ARCHIVE_RESOURCES,
-  buildManifest,
   type ArchiveManifest,
 } from "../archive/manifest";
 import { isCanonicalArchivePath } from "../archive/paths";
-import { sanitizePageHtml } from "../archive/sanitize";
+import { renderSavedPageHtml, sanitizePageFragment } from "../archive/sanitize";
 import { assertPilotSize } from "../canvas/discovery";
 import { canvasEndpoint } from "../canvas/endpoints";
 import {
@@ -265,7 +265,25 @@ export async function buildCourseArchive(options: {
     dependencies.beforePackage?.();
     throwIfAborted(controller.signal);
     const createdAt = dependencies.now();
-    const manifest = buildManifest(immutablePlan, outcomes, createdAt);
+    let model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
+    for (const [index, resource] of immutablePlan.resources.entries()) {
+      if (resource.kind !== "page" || outcomes[index]?.status !== "success" || resource.archivePath === null) continue;
+      const fragmentBytes = entries.get(resource.archivePath);
+      if (!fragmentBytes) throw new RunSafetyError("Missing sanitized page fragment");
+      const wrapped = strToU8(renderSavedPageHtml({
+        model,
+        pagePath: resource.archivePath,
+        title: resource.title,
+        sanitizedFragment: strFromU8(fragmentBytes),
+        combinedHomeHref: null,
+      }));
+      fragmentBytes.fill(0);
+      retained.add(wrapped);
+      entries.set(resource.archivePath, wrapped);
+      outcomes[index] = { ...outcomes[index]!, actualBytes: wrapped.byteLength };
+    }
+    model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
+    const manifest = model.manifest;
     const indexHtml = renderIndexPage(immutablePlan, outcomes, createdAt);
     zipBytes = buildCourseZip({
       indexHtml,
@@ -642,7 +660,7 @@ export async function fetchPageResource(
     );
     throwIfAborted(signal);
     const page = exactPage(response.value);
-    const html = sanitizePageHtml({
+    const html = sanitizePageFragment({
       title: page.title,
       body: page.body,
       resolveLocalHref: (href) => resolveLocalHref(href, plan),

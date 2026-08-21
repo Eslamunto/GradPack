@@ -175,9 +175,70 @@ const exactAttributes = (
   );
 };
 
+const safeShellHref = (value: string): boolean => {
+  if (value === "#archive-main") return true;
+  if (safeExternalHref(value)) return true;
+  if (
+    value.includes("\\") ||
+    value.includes(":") ||
+    value.includes("?") ||
+    value.includes("#") ||
+    value.startsWith("//")
+  ) return false;
+  let url: URL;
+  try {
+    url = new URL(value, "https://archive.invalid/index.html");
+  } catch {
+    return false;
+  }
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return false;
+  }
+  return url.origin === "https://archive.invalid" && isCanonicalArchivePath(path);
+};
+
+const validateShellIndex = (html: string, document: Document): string => {
+  if (
+    document.doctype?.name.toLowerCase() !== "html" ||
+    !exactAttributes(document.documentElement, { lang: "en" }) ||
+    !document.body.querySelector(":scope > .skip-link + .archive-layout") ||
+    document.querySelector("script, style, form, iframe, object, embed, input, button")
+  ) throw new TypeError("Invalid archive index");
+  const link = document.head.querySelector('link[rel="stylesheet"]');
+  if (link?.getAttribute("href") !== "assets/archive.css") {
+    throw new TypeError("Invalid archive index");
+  }
+  for (const element of document.querySelectorAll("*")) {
+    for (const attribute of [...element.attributes]) {
+      if (
+        attribute.namespaceURI !== null ||
+        attribute.name.startsWith("on") ||
+        attribute.name === "style" ||
+        attribute.name === "src"
+      ) throw new TypeError("Invalid archive index");
+    }
+  }
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href");
+    if (href === null || !safeShellHref(href)) throw new TypeError("Invalid archive index");
+    if (safeExternalHref(href) && anchor.getAttribute("rel") !== "noopener noreferrer") {
+      throw new TypeError("Invalid archive index");
+    }
+  }
+  const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+  if (walker.nextNode()) throw new TypeError("Invalid archive index");
+  return `<!doctype html>${document.documentElement.outerHTML}`;
+};
+
 const validateIndexHtml = (value: unknown): string => {
   const html = archiveText(value);
   const document = new DOMParser().parseFromString(html, "text/html");
+  if (document.body.querySelector(".archive-layout")) {
+    return validateShellIndex(html, document);
+  }
   const main = document.body.firstElementChild;
   if (
     document.doctype?.name.toLowerCase() !== "html" ||

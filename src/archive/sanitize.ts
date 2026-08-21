@@ -1,6 +1,8 @@
 import DOMPurify from "dompurify";
 import { isCanonicalArchivePath } from "./paths";
 import { CANVAS_ORIGIN } from "../shared/constants";
+import type { ArchiveNavigationModel } from "./navigation-model";
+import { escapeHtml as escapeShellHtml, renderArchiveShell } from "./shell";
 
 export type SanitizePageInput = {
   title: string;
@@ -349,9 +351,9 @@ const escapeHtml = (value: string): string =>
     }
   });
 
-export function sanitizePageHtml(input: SanitizePageInput): string;
-export function sanitizePageHtml(input: unknown): string {
-  const { title, body, resolveLocalHref } = validateInput(input);
+export function sanitizePageFragment(input: SanitizePageInput): string;
+export function sanitizePageFragment(input: unknown): string {
+  const { body, resolveLocalHref } = validateInput(input);
   const sanitized = DOMPurify.sanitize(body, {
     ALLOWED_TAGS: [...ALLOWED_TAGS],
     ALLOWED_ATTR: [...ALLOWED_ATTRIBUTES],
@@ -394,5 +396,30 @@ export function sanitizePageHtml(input: unknown): string {
   rewriteAnchors(container, resolveLocalHref);
   auditAttributes(container);
 
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)}</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main>${container.innerHTML}</main></body></html>`;
+  return container.innerHTML;
 }
+
+export function sanitizePageHtml(input: SanitizePageInput): string;
+export function sanitizePageHtml(input: unknown): string {
+  const validated = validateInput(input);
+  const fragment = sanitizePageFragment(validated);
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(validated.title)}</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main>${fragment}</main></body></html>`;
+}
+
+export type SavedPageRenderInput = Readonly<{
+  model: ArchiveNavigationModel;
+  pagePath: string;
+  title: string;
+  sanitizedFragment: string;
+  combinedHomeHref: string | null;
+}>;
+
+export const renderSavedPageHtml = (input: SavedPageRenderInput): string =>
+  renderArchiveShell({
+    pagePath: input.pagePath,
+    pageKind: "saved-page",
+    title: input.title,
+    course: input.model.manifest.course,
+    combinedHomeHref: input.combinedHomeHref,
+    contentHtml: `<article class="saved-page-content"><h1>${escapeShellHtml(input.title)}</h1>${input.sanitizedFragment}</article>`,
+  });

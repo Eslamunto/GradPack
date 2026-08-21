@@ -536,10 +536,10 @@ describe("buildCourseZip", () => {
     expect(() => buildCourseZip(input)).toThrowError(TypeError);
   });
 
-  it("rejects 65,533 total resources before ZIP construction", () => {
+  it("rejects 65,529 total resources before ZIP construction", () => {
     const input = copyInput();
     input.archiveCss = TRUSTED_ARCHIVE_CSS;
-    input.manifest = manifestWithResources(65_533, "unsupported");
+    input.manifest = manifestWithResources(65_529, "unsupported");
     input.entries = new Map();
 
     expect(() => buildCourseZip(input)).toThrowError(
@@ -550,13 +550,13 @@ describe("buildCourseZip", () => {
     );
   });
 
-  it("accepts exactly 65,532 payloads and writes the classic-ZIP EOCD maximum", () => {
-    const zip = buildCourseZip(inputAtPayloadCount(65_532));
+  it("accepts exactly 65,528 payloads under the reserved core-entry limit", () => {
+    const zip = buildCourseZip(inputAtPayloadCount(65_528));
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     const eocd = zip.byteLength - 22;
     expect(view.getUint32(eocd, true)).toBe(0x06054b50);
-    expect(view.getUint16(eocd + 8, true)).toBe(65_535);
-    expect(view.getUint16(eocd + 10, true)).toBe(65_535);
+    expect(view.getUint16(eocd + 8, true)).toBe(65_531);
+    expect(view.getUint16(eocd + 10, true)).toBe(65_531);
   }, 30_000);
 
   it("accepts only a manifest produced from a valid one-to-one plan", () => {
