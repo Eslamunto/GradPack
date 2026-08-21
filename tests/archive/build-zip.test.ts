@@ -113,11 +113,11 @@ const manifestWithResources = (
     const suffix = index.toString().padStart(5, "0");
     return status === "success"
       ? {
-          key: `page:${suffix}`,
-          kind: "page" as const,
-          title: "Synthetic page",
+          key: `file:${suffix}`,
+          kind: "file" as const,
+          title: "Synthetic file",
           sourceId: suffix,
-          archivePath: `pages/topic-${suffix}.html`,
+          archivePath: `files/item-${suffix}.bin`,
           advertisedBytes: 0,
           status: "success" as const,
           actualBytes: 0,
@@ -465,6 +465,10 @@ describe("buildCourseZip", () => {
         '<head><meta name="referrer" content="unsafe-url">',
       ),
       trusted.replace(
+        "<head>",
+        '<head><base href="https://tracking.example/">',
+      ),
+      trusted.replace(
         "<main>",
         '<main><blockquote cite="https://tracking.example/source">Text</blockquote>',
       ),
@@ -490,6 +494,19 @@ describe("buildCourseZip", () => {
       (input.pages as Map<string, string>).set("index.html", indexHtml);
       expect(() => buildCourseZip(input)).toThrowError(TypeError);
     }
+  });
+
+  it("rejects a generated link whose local target is absent", () => {
+    const input = copyInput();
+    const trusted = input.pages.get("index.html")!;
+    (input.pages as Map<string, string>).set(
+      "index.html",
+      trusted.replace(
+        "<main>",
+        '<main><a href="files/missing.bin">Missing</a>',
+      ),
+    );
+    expect(() => buildCourseZip(input)).toThrow(TypeError);
   });
 
   it("rejects a network-bearing background attribute on the actual body element", () => {
@@ -527,7 +544,8 @@ describe("buildCourseZip", () => {
       };
       input.manifest.totals.success -= 1;
       input.manifest.totals[status as "failed" | "unavailable"] += 1;
-      input.manifest.totals.archivedBytes -= 29;
+      input.manifest.totals.archivedBytes -=
+        syntheticArchiveOutcomes[1]?.actualBytes ?? 0;
       input.entries = new Map(
         [...input.entries].filter(([path]) => path !== "pages/welcome.html"),
       );
@@ -549,7 +567,8 @@ describe("buildCourseZip", () => {
     };
     input.manifest.totals.success -= 1;
     input.manifest.totals.failed += 1;
-    input.manifest.totals.archivedBytes -= 29;
+    input.manifest.totals.archivedBytes -=
+      syntheticArchiveOutcomes[1]?.actualBytes ?? 0;
     input.entries = new Map([
       ["files/folder/slides.pdf", strToU8("synthetic PDF bytes")],
     ]);

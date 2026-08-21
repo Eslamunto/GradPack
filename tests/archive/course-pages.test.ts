@@ -21,7 +21,11 @@ describe("course pages", () => {
     expect(pages.get("modules.html")).toContain("files/slides.pdf");
     expect(pages.get("pages.html")).toContain("Welcome");
     expect(pages.get("files.html")).toContain("slides.pdf");
+    expect(pages.get("files.html")).toContain("19 bytes");
+    expect(pages.get("files.html")).toContain("Modules: Module One");
     expect(pages.get("status.html")).toContain("Archive status");
+    expect(pages.get("status.html")).toContain("Resource outcomes");
+    expect(pages.get("status.html")).toContain("Unsupported");
     expect([...pages.values()].every((html) => !html.includes("<script"))).toBe(
       true,
     );

@@ -84,6 +84,10 @@ const emptyCounts = (): MultiCourseResult["counts"] => ({
   external: 0,
 });
 
+const CLASSIC_ZIP_ENTRY_LIMIT = 65_535;
+const COURSE_CORE_ENTRY_COUNT = 7;
+const COMBINED_CORE_ENTRY_COUNT = 4;
+
 const addCounts = (
   target: MultiCourseResult["counts"],
   source: RunResult["manifest"]["totals"],
@@ -181,7 +185,18 @@ export async function createRunPlan(options: {
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
-  if (summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES) {
+  const combinedEntryCount =
+    COMBINED_CORE_ENTRY_COUNT +
+    plans.reduce(
+      (total, plan) => total + COURSE_CORE_ENTRY_COUNT + plan.resources.length,
+      0,
+    );
+  if (
+    summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
+    (requestedPackaging === "combined" &&
+      (!Number.isSafeInteger(combinedEntryCount) ||
+        combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT))
+  ) {
     if (requestedPackaging === "combined") {
       const summary = planSummary(
         plans,
@@ -275,6 +290,11 @@ export async function runCourses(options: {
           course: coursePlan.course,
           fileName: dependencies.fileName(coursePlan.course),
           manifest: result.manifest,
+          moduleCount: coursePlan.modules.length,
+          itemCount: coursePlan.modules.reduce(
+            (total, module) => total + module.items.length,
+            0,
+          ),
           zipBytes: result.zipBytes,
         };
         completed.push(archive);

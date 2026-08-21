@@ -62,6 +62,11 @@ const buildCourse = async (
     course: selected,
     fileName: `gradpack-${selected.id}.zip`,
     manifest: result.manifest,
+    moduleCount: planFor(selected).modules.length,
+    itemCount: planFor(selected).modules.reduce(
+      (total, module) => total + module.items.length,
+      0,
+    ),
     zipBytes: result.zipBytes,
   };
 };

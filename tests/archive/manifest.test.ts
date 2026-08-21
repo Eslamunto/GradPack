@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildManifest } from "../../src/archive/manifest";
 import type { CoursePlan, ResourceOutcome } from "../../src/shared/model";
 import {
+  syntheticArchiveInput,
   syntheticArchiveOutcomes,
   syntheticArchivePlan,
 } from "../fixtures/course-plan";
@@ -29,7 +30,7 @@ describe("buildManifest", () => {
         unsupported: 1,
         external: 1,
         advertisedBytes: 19,
-        archivedBytes: 48,
+        archivedBytes: syntheticArchiveInput.manifest.totals.archivedBytes,
       },
       resources: expect.arrayContaining([
         expect.objectContaining({ key: "file:301", status: "success" }),

@@ -43,22 +43,18 @@ const ALLOWED_TAGS = [
   "em",
   "figcaption",
   "figure",
-  "footer",
   "h1",
   "h2",
   "h3",
   "h4",
   "h5",
   "h6",
-  "header",
   "hr",
   "i",
   "img",
   "kbd",
   "li",
-  "main",
   "mark",
-  "nav",
   "ol",
   "p",
   "pre",
@@ -203,6 +199,15 @@ const auditAttributes = (root: ParentNode): void => {
     for (const attribute of retained) {
       element.setAttribute(attribute.name.toLowerCase(), attribute.value);
     }
+  }
+};
+
+const stripShellIdentity = (root: ParentNode): void => {
+  for (const element of root.querySelectorAll("*")) {
+    element.removeAttribute("class");
+    element.removeAttribute("id");
+    element.removeAttribute("role");
+    element.removeAttribute("aria-describedby");
   }
 };
 
@@ -392,6 +397,7 @@ export function sanitizePageFragment(input: unknown): string {
   });
   const container = document.createElement("div");
   container.append(sanitized);
+  stripShellIdentity(container);
   auditAttributes(container);
   rewriteAnchors(container, resolveLocalHref);
   auditAttributes(container);

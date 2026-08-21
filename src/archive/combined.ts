@@ -1,21 +1,33 @@
-import {
-  strToU8,
-  unzipSync,
-  zipSync,
-  type Unzipped,
-  type Zippable,
-} from "fflate";
-import { MAX_ARCHIVE_RESOURCES } from "./manifest";
+import { strToU8, unzipSync, type Unzipped } from "fflate";
+import { normalizeArchiveManifest } from "./manifest";
 import { isCanonicalArchivePath, safeArchivePath } from "./paths";
 import type { ArchiveManifest } from "./manifest";
 import type { CourseSummary } from "../shared/model";
 import { COURSE_HTML_PATHS } from "./archive-links";
-import { validateArchiveHtml } from "./build-zip";
+import {
+  buildDeterministicZip,
+  MAX_CLASSIC_ZIP_ENTRIES,
+  validateArchiveHtml,
+  validateArchiveLinkTargets,
+} from "./build-zip";
+import { ARCHIVE_CSS } from "./style";
+
+const COURSE_CORE_PATHS = new Set([
+  "assets/archive.css",
+  "files.html",
+  "index.html",
+  "manifest.json",
+  "modules.html",
+  "pages.html",
+  "status.html",
+]);
 
 export type CourseArchiveOutput = {
   course: CourseSummary;
   fileName: string;
   manifest: ArchiveManifest;
+  moduleCount: number;
+  itemCount: number;
   zipBytes: Uint8Array;
 };
 
@@ -86,7 +98,7 @@ const rootIndex = (
   const cards = archives
     .map((archive, index) => {
       const root = roots[index]!;
-      return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${archive.manifest.totals.success} saved resources</p></article>`;
+      return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${archive.moduleCount} modules · ${archive.itemCount} module items · ${archive.manifest.totals.success} saved resources</p><p><a href="${encodedPath(`${root}/status.html`)}">View archive status</a></p></article>`;
     })
     .join("");
   return document(
@@ -96,11 +108,15 @@ const rootIndex = (
   );
 };
 
-const rootStatus = (manifest: CombinedArchiveManifest): string =>
+const rootStatus = (
+  archives: readonly CourseArchiveOutput[],
+  roots: readonly string[],
+  manifest: CombinedArchiveManifest,
+): string =>
   document(
     "Combined archive status",
     "status",
-    `<h1>Combined archive status</h1><section class="status-grid"><div class="panel"><strong>${manifest.courses.length}</strong><br>Courses</div><div class="panel"><strong>${manifest.totals.success}</strong><br>Saved</div><div class="panel"><strong>${manifest.totals.unavailable}</strong><br>Unavailable</div></section><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`,
+    `<h1>Combined archive status</h1><section class="status-grid"><div class="panel"><strong>${manifest.courses.length}</strong><br>Courses</div><div class="panel"><strong>${manifest.totals.success}</strong><br>Saved</div><div class="panel"><strong>${manifest.totals.failed}</strong><br>Failed</div><div class="panel"><strong>${manifest.totals.unavailable}</strong><br>Unavailable</div><div class="panel"><strong>${manifest.totals.unsupported}</strong><br>Unsupported</div><div class="panel"><strong>${manifest.totals.external}</strong><br>External</div></section><h2>Course status</h2><ul class="resource-list">${archives.map((archive, index) => `<li><a href="${encodedPath(`${roots[index]!}/status.html`)}">${escapeHtml(archive.course.name)} status</a></li>`).join("")}</ul><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`,
   );
 
 export function buildCombinedZip(input: CombinedArchiveInput): {
@@ -109,7 +125,7 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
 } {
   if (
     input.archives.length === 0 ||
-    typeof input.archiveCss !== "string" ||
+    input.archiveCss !== ARCHIVE_CSS ||
     typeof input.now !== "function" ||
     typeof input.fileName !== "function"
   ) {
@@ -151,17 +167,42 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
     "manifest.json",
     strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
   );
-  sources.set("status.html", strToU8(rootStatus(manifest)));
+  sources.set(
+    "status.html",
+    strToU8(rootStatus(input.archives, roots, manifest)),
+  );
 
   input.archives.forEach((archive, index) => {
     const root = roots[index]!;
     const entries: Unzipped = unzipSync(archive.zipBytes);
+    const nestedManifest = normalizeArchiveManifest(archive.manifest);
+    const expectedManifest = `${JSON.stringify(nestedManifest, null, 2)}\n`;
+    if (
+      !entries["manifest.json"] ||
+      new TextDecoder().decode(entries["manifest.json"]) !== expectedManifest ||
+      !entries["assets/archive.css"] ||
+      new TextDecoder().decode(entries["assets/archive.css"]) !== ARCHIVE_CSS
+    ) {
+      throw new TypeError("Invalid nested course core");
+    }
+    const expectedPaths = new Set(COURSE_CORE_PATHS);
+    for (const resource of nestedManifest.resources) {
+      if (resource.status === "success" && resource.archivePath !== null) {
+        expectedPaths.add(resource.archivePath);
+      }
+    }
+    if (
+      Object.keys(entries).length !== expectedPaths.size ||
+      Object.keys(entries).some((path) => !expectedPaths.has(path))
+    ) {
+      throw new TypeError("Invalid nested course entry set");
+    }
     for (const pagePath of COURSE_HTML_PATHS) {
       const bytes = entries[pagePath];
       if (!bytes) throw new TypeError("Missing nested course page");
       validateArchiveHtml(pagePath, new TextDecoder().decode(bytes));
     }
-    for (const resource of archive.manifest.resources) {
+    for (const resource of nestedManifest.resources) {
       if (
         resource.kind === "page" &&
         resource.status === "success" &&
@@ -186,14 +227,26 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
       sources.set(combinedPath, bytes);
     }
   });
-  if (sources.size > MAX_ARCHIVE_RESOURCES + 7) {
+  if (sources.size > MAX_CLASSIC_ZIP_ENTRIES) {
     throw new TypeError("Combined archive resource limit exceeded");
   }
-  const zipEntries: Zippable = Object.create(null) as Zippable;
-  for (const [path, bytes] of [...sources].sort(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  )) {
-    zipEntries[path] = [bytes, { level: 6, os: 3, attrs: 0o100644 * 65_536 }];
+  validateArchiveHtml(
+    "index.html",
+    new TextDecoder().decode(sources.get("index.html")),
+  );
+  validateArchiveHtml(
+    "status.html",
+    new TextDecoder().decode(sources.get("status.html")),
+  );
+  const combinedPaths = new Set(sources.keys());
+  for (const [path, bytes] of sources) {
+    if (path.endsWith(".html")) {
+      validateArchiveLinkTargets(
+        path,
+        new TextDecoder().decode(bytes),
+        combinedPaths,
+      );
+    }
   }
-  return { zipBytes: zipSync(zipEntries, { level: 6 }), manifest };
+  return { zipBytes: buildDeterministicZip(sources), manifest };
 }

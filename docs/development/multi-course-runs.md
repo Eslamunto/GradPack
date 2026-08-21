@@ -46,3 +46,13 @@ buffers are cleared after handoff or failure.
 The completion view reports the effective packaging mode, completed and failed
 course counts, output count, and aggregate resource outcomes. Each archive's
 `manifest.json` remains the authoritative resource-level record.
+
+## Release acceptance
+
+Automated tests extract individual and combined archives, parse every generated
+page under a `file://` URL, reject network-bearing markup, and verify that every
+local link resolves. Before a pilot merge, a maintainer must also open an
+extracted individual and combined archive directly in Chrome with networking
+disabled, then check keyboard order, visible focus, desktop layout, and the
+single-column layout below 48rem. This manual visual gate remains required when
+the test environment cannot navigate to local files.

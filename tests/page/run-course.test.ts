@@ -99,9 +99,7 @@ describe("runCourse", () => {
 
   it("builds a complete synthetic ZIP and reports exact scalar progress", async () => {
     const fileBytes = strToU8("data");
-    const pageBytes = strToU8(
-      '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main><p>Safe</p></main></body></html>',
-    );
+    const pageBytes = strToU8("<p>Safe</p>");
     const deps = dependencies(
       plan([file(1), page, external]),
       async (resource) => ({
@@ -287,6 +285,25 @@ describe("runCourse", () => {
       }),
     ).rejects.toBeInstanceOf(RunSafetyError);
     expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the byte cap after a sanitized page fragment is shell-wrapped", async () => {
+    const fragment = strToU8("<p>x</p>");
+    const deps = dependencies(plan([page]), async () => ({
+      status: "success",
+      bytes: fragment,
+    }));
+    deps.maxArchiveBytes = fragment.byteLength;
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(fragment.every((value) => value === 0)).toBe(true);
   });
 
   it("does not claim success when cancellation occurs during package or download", async () => {

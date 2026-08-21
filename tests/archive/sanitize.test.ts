@@ -444,7 +444,21 @@ describe("sanitizePageHtml", () => {
     expect(
       document.body.querySelector("blockquote")?.hasAttribute("cite"),
     ).toBe(false);
+    expect(document.body.querySelector("[class], [id], [role]")).toBeNull();
     expectSafeOutputTree(document);
+  });
+
+  it("cannot inject archive shell identity or structural landmarks", () => {
+    const document = parse(
+      sanitizePageHtml(
+        input(
+          '<nav class="global-rail" id="archive-main" role="navigation"><main><p class="panel">Course text</p></main></nav>',
+        ),
+      ),
+    );
+    expect(document.body.querySelector("nav, main main")).toBeNull();
+    expect(document.body.querySelector("[class], [id], [role]")).toBeNull();
+    expect(document.body.textContent).toContain("Course text");
   });
 
   it("keeps a DOM-clobbering namespace and mutation corpus inert across repeated parses", () => {

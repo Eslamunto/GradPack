@@ -120,6 +120,43 @@ const terminalOutcome = (
   failureCategory: null,
 });
 
+const removeUnavailableLocalLinks = (
+  fragment: string,
+  pagePath: string,
+  entries: ReadonlyMap<string, Uint8Array>,
+): string => {
+  const document = new DOMParser().parseFromString(
+    `<body>${fragment}</body>`,
+    "text/html",
+  );
+  const base = `https://archive.invalid/${pagePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  for (const anchor of document.body.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href");
+    if (
+      href === null ||
+      href.startsWith("#") ||
+      /^[a-z][a-z0-9+.-]*:/iu.test(href)
+    )
+      continue;
+    let target: string;
+    try {
+      target = decodeURIComponent(new URL(href, base).pathname.slice(1));
+    } catch {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("rel");
+      continue;
+    }
+    if (!entries.has(target)) {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("rel");
+    }
+  }
+  return document.body.innerHTML;
+};
+
 export async function buildCourseArchive(options: {
   course: CourseSummary;
   plan: CoursePlan;
@@ -287,7 +324,11 @@ export async function buildCourseArchive(options: {
           model,
           pagePath: resource.archivePath,
           title: resource.title,
-          sanitizedFragment: strFromU8(fragmentBytes),
+          sanitizedFragment: removeUnavailableLocalLinks(
+            strFromU8(fragmentBytes),
+            resource.archivePath,
+            entries,
+          ),
           combinedHomeHref:
             combinedRoot === null
               ? null
@@ -297,6 +338,15 @@ export async function buildCourseArchive(options: {
                 ),
         }),
       );
+      successfulBytes =
+        successfulBytes - fragmentBytes.byteLength + wrapped.byteLength;
+      if (
+        !Number.isSafeInteger(successfulBytes) ||
+        successfulBytes > byteLimit
+      ) {
+        wrapped.fill(0);
+        throw new RunSafetyError("Archive byte limit exceeded");
+      }
       fragmentBytes.fill(0);
       retained.add(wrapped);
       entries.set(resource.archivePath, wrapped);

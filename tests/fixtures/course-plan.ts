@@ -230,6 +230,9 @@ export const syntheticArchivePlan: CoursePlan = {
   ],
 };
 
+export const syntheticSavedPageHtml =
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome — GradPack</title><link rel="stylesheet" href="../assets/archive.css"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><main id="archive-main" tabindex="-1"><article class="saved-page-content"><h1>Welcome</h1><p>Welcome</p></article></main></div></body></html>';
+
 export const syntheticArchiveOutcomes: ResourceOutcome[] = [
   {
     ...syntheticArchivePlan.resources[0]!,
@@ -240,7 +243,7 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
   {
     ...syntheticArchivePlan.resources[1]!,
     status: "success",
-    actualBytes: 29,
+    actualBytes: strToU8(syntheticSavedPageHtml).byteLength,
     failureCategory: null,
   },
   {
@@ -284,7 +287,7 @@ export const syntheticArchiveInput: ArchiveInput = {
       unsupported: 1,
       external: 1,
       advertisedBytes: 19,
-      archivedBytes: 48,
+      archivedBytes: 19 + strToU8(syntheticSavedPageHtml).byteLength,
     },
     resources: syntheticArchiveOutcomes.map((outcome) => ({
       key: outcome.key,
@@ -300,7 +303,7 @@ export const syntheticArchiveInput: ArchiveInput = {
   },
   entries: new Map([
     ["files/slides.pdf", strToU8("synthetic PDF bytes")],
-    ["pages/welcome.html", strToU8("<!doctype html><p>Welcome</p>")],
+    ["pages/welcome.html", strToU8(syntheticSavedPageHtml)],
   ]),
 };
 

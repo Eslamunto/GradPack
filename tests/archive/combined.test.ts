@@ -73,6 +73,11 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
     course: plan.course,
     fileName: `gradpack-${id}.zip`,
     manifest,
+    moduleCount: plan.modules.length,
+    itemCount: plan.modules.reduce(
+      (total, module) => total + module.items.length,
+      0,
+    ),
     zipBytes,
   };
 };
@@ -84,7 +89,7 @@ describe("buildCombinedZip", () => {
         courseArchive(101, "First Course"),
         courseArchive(202, "Second Course"),
       ],
-      archiveCss: "body{font-family:system-ui}",
+      archiveCss: ARCHIVE_CSS,
       now: () => "2026-08-17T12:00:00.000Z",
       fileName: () => "gradpack-combined.zip",
     });
@@ -94,6 +99,7 @@ describe("buildCombinedZip", () => {
       "text/html",
     );
     expect(index.querySelectorAll(".course-card")).toHaveLength(2);
+    expect(index.body.textContent).toContain("1 modules · 2 module items");
     expect(
       [...index.querySelectorAll("a")].map((link) => ({
         text: link.textContent,
@@ -106,6 +112,7 @@ describe("buildCombinedZip", () => {
     expect(strFromU8(entries["status.html"]!)).toContain(
       "Combined archive status",
     );
+    expect(strFromU8(entries["status.html"]!)).toContain("First Course status");
     const savedPage = new DOMParser().parseFromString(
       strFromU8(entries["courses/First Course-101/pages/welcome.html"]!),
       "text/html",
@@ -158,7 +165,7 @@ describe("buildCombinedZip", () => {
     expect(() =>
       buildCombinedZip({
         archives: [archive],
-        archiveCss: "body{}",
+        archiveCss: ARCHIVE_CSS,
         now: () => "2026-08-17T12:00:00.000Z",
         fileName: () => "gradpack-combined.zip",
       }),
@@ -183,5 +190,36 @@ describe("buildCombinedZip", () => {
         fileName: () => "gradpack-combined.zip",
       }),
     ).toThrow(TypeError);
+  });
+
+  it("is deterministic and rejects tampered nested metadata or extra entries", () => {
+    const input = {
+      archives: [courseArchive(505, "Stable Course")],
+      archiveCss: ARCHIVE_CSS,
+      now: () => "2026-08-17T12:00:00.000Z",
+      fileName: () => "gradpack-combined.zip",
+    };
+    expect(buildCombinedZip(input).zipBytes).toEqual(
+      buildCombinedZip(input).zipBytes,
+    );
+
+    const tampered = courseArchive(506, "Tampered Course");
+    const entries = unzipSync(tampered.zipBytes);
+    entries["manifest.json"] = strToU8("{}\n");
+    tampered.zipBytes = zipSync(entries);
+    expect(() => buildCombinedZip({ ...input, archives: [tampered] })).toThrow(
+      TypeError,
+    );
+
+    const extra = courseArchive(507, "Extra Course");
+    const extraEntries = unzipSync(extra.zipBytes);
+    extraEntries["files/unlisted.bin"] = new Uint8Array([1]);
+    extra.zipBytes = zipSync(extraEntries);
+    expect(() => buildCombinedZip({ ...input, archives: [extra] })).toThrow(
+      TypeError,
+    );
+    expect(() => buildCombinedZip({ ...input, archiveCss: "body{}" })).toThrow(
+      TypeError,
+    );
   });
 });

@@ -102,6 +102,9 @@ describe("one-course classmate pilot Gate C", () => {
     ) as GateManifest;
 
     expect(zip["files/slides.pdf"]).toBeUndefined();
+    expect(strFromU8(zip["pages/welcome.html"]!)).not.toContain(
+      'href="../files/slides.pdf"',
+    );
     expect(manifest.totals).toMatchObject({
       success: 1,
       failed: 0,
