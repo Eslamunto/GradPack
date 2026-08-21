@@ -120,10 +120,14 @@ describe("runCourse", () => {
     const zip = unzipSync(result.zipBytes);
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/file-1.bin",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
     expect(JSON.parse(strFromU8(zip["manifest.json"]!))).toEqual(
       result.manifest,

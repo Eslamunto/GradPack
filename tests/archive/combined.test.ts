@@ -29,7 +29,7 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
     "2026-08-17T12:00:00.000Z",
   );
   const zipBytes = buildCourseZip({
-    indexHtml: syntheticArchiveInput.indexHtml,
+    pages: new Map(syntheticArchiveInput.pages),
     archiveCss: ARCHIVE_CSS,
     manifest,
     entries: new Map(
@@ -62,15 +62,23 @@ describe("buildCombinedZip", () => {
     expect(Object.keys(entries)).toEqual([
       "assets/archive.css",
       "courses/First Course-101/assets/archive.css",
+      "courses/First Course-101/files.html",
       "courses/First Course-101/files/slides.pdf",
       "courses/First Course-101/index.html",
       "courses/First Course-101/manifest.json",
+      "courses/First Course-101/modules.html",
+      "courses/First Course-101/pages.html",
       "courses/First Course-101/pages/welcome.html",
+      "courses/First Course-101/status.html",
       "courses/Second Course-202/assets/archive.css",
+      "courses/Second Course-202/files.html",
       "courses/Second Course-202/files/slides.pdf",
       "courses/Second Course-202/index.html",
       "courses/Second Course-202/manifest.json",
+      "courses/Second Course-202/modules.html",
+      "courses/Second Course-202/pages.html",
       "courses/Second Course-202/pages/welcome.html",
+      "courses/Second Course-202/status.html",
       "index.html",
       "manifest.json",
     ]);

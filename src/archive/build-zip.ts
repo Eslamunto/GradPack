@@ -12,11 +12,16 @@ import {
   isCanonicalArchivePath,
 } from "./paths";
 import { ARCHIVE_CSS } from "./style";
+import { COURSE_HTML_PATHS, type CourseHtmlPath } from "./archive-links";
 
 const CORE_PATHS = [
   "assets/archive.css",
+  "files.html",
   "index.html",
   "manifest.json",
+  "modules.html",
+  "pages.html",
+  "status.html",
 ] as const;
 const CORE_CANONICAL = new Set(CORE_PATHS.map(canonicalArchivePath));
 const FIXED_ZIP_DATE = 0x2821;
@@ -66,7 +71,7 @@ const INDEX_IDS = new Set([
 ]);
 
 export type ArchiveInput = {
-  indexHtml: string;
+  pages: ReadonlyMap<CourseHtmlPath, string>;
   archiveCss: string;
   manifest: ArchiveManifest;
   entries: ReadonlyMap<string, Uint8Array>;
@@ -96,7 +101,7 @@ const exactInput = (value: unknown): Record<string, unknown> => {
   } catch {
     throw new TypeError("Invalid archive input");
   }
-  const expected = ["indexHtml", "archiveCss", "manifest", "entries"];
+  const expected = ["pages", "archiveCss", "manifest", "entries"];
   if (
     keys.length !== expected.length ||
     keys.some((key) => typeof key !== "string" || !expected.includes(key))
@@ -352,6 +357,23 @@ const validateArchiveCss = (value: unknown): string => {
   return css;
 };
 
+const collectGeneratedPages = (value: unknown): Map<CourseHtmlPath, string> => {
+  if (Object.getPrototypeOf(value) !== Map.prototype) {
+    throw new TypeError("Invalid generated pages");
+  }
+  const pairs = [...Map.prototype.entries.call(value as Map<unknown, unknown>)];
+  if (pairs.length !== COURSE_HTML_PATHS.length) {
+    throw new TypeError("Invalid generated page set");
+  }
+  const pages = new Map<CourseHtmlPath, string>();
+  for (const path of COURSE_HTML_PATHS) {
+    const pair = pairs.find(([candidate]) => candidate === path);
+    if (!pair) throw new TypeError("Invalid generated page set");
+    pages.set(path, validateIndexHtml(pair[1]));
+  }
+  return pages;
+};
+
 const typedArrayPrototype = Object.getPrototypeOf(
   Uint8Array.prototype,
 ) as object;
@@ -576,14 +598,14 @@ const patchZipTimes = (bytes: Uint8Array): Uint8Array => {
 export function buildCourseZip(input: ArchiveInput): Uint8Array;
 export function buildCourseZip(input: unknown): Uint8Array {
   const record = exactInput(input);
-  const indexHtml = validateIndexHtml(ownValue(record, "indexHtml"));
+  const pages = collectGeneratedPages(ownValue(record, "pages"));
   const archiveCss = validateArchiveCss(ownValue(record, "archiveCss"));
   const manifest = normalizeArchiveManifest(ownValue(record, "manifest"));
   const payloads = collectPayloads(ownValue(record, "entries"), manifest);
   const sources = new Map<string, Uint8Array>([
     ["assets/archive.css", strToU8(archiveCss)],
-    ["index.html", strToU8(indexHtml)],
     ["manifest.json", strToU8(`${JSON.stringify(manifest, null, 2)}\n`)],
+    ...[...pages].map(([path, html]) => [path, strToU8(html)] as const),
     ...[...payloads.entries()].sort(([left], [right]) =>
       compareText(left, right),
     ),

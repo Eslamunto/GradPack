@@ -1,6 +1,6 @@
 import { strFromU8, strToU8 } from "fflate";
 import { buildCourseZip } from "../archive/build-zip";
-import { renderIndexPage } from "../archive/index-page";
+import { renderCoursePages } from "../archive/course-pages";
 import { buildArchiveNavigationModel } from "../archive/navigation-model";
 import {
   MAX_ARCHIVE_RESOURCES,
@@ -284,9 +284,9 @@ export async function buildCourseArchive(options: {
     }
     model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
     const manifest = model.manifest;
-    const indexHtml = renderIndexPage(immutablePlan, outcomes, createdAt);
+    const pages = renderCoursePages(model);
     zipBytes = buildCourseZip({
-      indexHtml,
+      pages,
       archiveCss: dependencies.archiveCss,
       manifest,
       entries,

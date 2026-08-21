@@ -19,7 +19,7 @@ import {
 } from "../fixtures/course-plan";
 
 const copyInput = (): ArchiveInput => ({
-  indexHtml: syntheticArchiveInput.indexHtml,
+  pages: new Map(syntheticArchiveInput.pages),
   archiveCss: TRUSTED_ARCHIVE_CSS,
   manifest: structuredClone(syntheticArchiveInput.manifest),
   entries: new Map(
@@ -149,17 +149,28 @@ const inputAtPayloadCount = (count: number): ArchiveInput => {
 };
 
 describe("buildCourseZip", () => {
+  it("accepts exactly five generated course pages", () => {
+    const input = copyInput();
+    expect(() => buildCourseZip(input)).not.toThrow();
+    (input.pages as Map<string, string>).delete("status.html");
+    expect(() => buildCourseZip(input)).toThrow(TypeError);
+  });
+
   it("contains exactly the required core and successful payload entries", () => {
     const zip = unzipSync(buildCourseZip(copyInput()));
 
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/slides.pdf",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
-    expect(strFromU8(zip["index.html"]!)).toBe(syntheticArchiveInput.indexHtml);
+    expect(strFromU8(zip["index.html"]!)).toBe(syntheticArchiveInput.pages.get("index.html"));
     expect(strFromU8(zip["assets/archive.css"]!)).toBe(TRUSTED_ARCHIVE_CSS);
     expect(JSON.parse(strFromU8(zip["manifest.json"]!))).toEqual(
       syntheticArchiveInput.manifest,
@@ -179,10 +190,14 @@ describe("buildCourseZip", () => {
     expect(second).toEqual(first);
     expect(zipHeaderMetadata(first).map(({ path }) => path)).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/slides.pdf",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
     expect(zipHeaderMetadata(first).every(({ time }) => time === 0)).toBe(true);
     expect(zipHeaderMetadata(first).every(({ date }) => date === 0x2821)).toBe(
@@ -432,7 +447,7 @@ describe("buildCourseZip", () => {
   });
 
   it("rejects every non-renderer index structure and URL-bearing legacy attribute", () => {
-    const trusted = copyInput().indexHtml;
+    const trusted = copyInput().pages.get("index.html")!;
     for (const indexHtml of [
       trusted.replace(
         "<main>",
@@ -470,7 +485,7 @@ describe("buildCourseZip", () => {
     ]) {
       const input = copyInput();
       input.archiveCss = TRUSTED_ARCHIVE_CSS;
-      input.indexHtml = indexHtml;
+      (input.pages as Map<string, string>).set("index.html", indexHtml);
       expect(() => buildCourseZip(input)).toThrowError(TypeError);
     }
   });
@@ -478,11 +493,11 @@ describe("buildCourseZip", () => {
   it("rejects a network-bearing background attribute on the actual body element", () => {
     const input = copyInput();
     const document = new DOMParser().parseFromString(
-      input.indexHtml,
+      input.pages.get("index.html")!,
       "text/html",
     );
     document.body.setAttribute("background", "https://tracking.example/pixel");
-    input.indexHtml = `<!doctype html>${document.documentElement.outerHTML}`;
+    (input.pages as Map<string, string>).set("index.html", `<!doctype html>${document.documentElement.outerHTML}`);
 
     expect(() => buildCourseZip(input)).toThrowError(TypeError);
   });
@@ -555,8 +570,8 @@ describe("buildCourseZip", () => {
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     const eocd = zip.byteLength - 22;
     expect(view.getUint32(eocd, true)).toBe(0x06054b50);
-    expect(view.getUint16(eocd + 8, true)).toBe(65_531);
-    expect(view.getUint16(eocd + 10, true)).toBe(65_531);
+    expect(view.getUint16(eocd + 8, true)).toBe(65_535);
+    expect(view.getUint16(eocd + 10, true)).toBe(65_535);
   }, 30_000);
 
   it("accepts only a manifest produced from a valid one-to-one plan", () => {
