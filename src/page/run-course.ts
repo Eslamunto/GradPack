@@ -128,7 +128,8 @@ export async function buildCourseArchive(options: {
   progress: (progress: Progress) => void;
   dependencies: CourseArchiveDependencies;
 }): Promise<RunResult> {
-  const { course, plan, combinedRoot, signal, progress, dependencies } = options;
+  const { course, plan, combinedRoot, signal, progress, dependencies } =
+    options;
   if (combinedRoot !== null && !isCanonicalArchivePath(combinedRoot)) {
     throw new RunSafetyError("Invalid combined course root");
   }
@@ -272,22 +273,37 @@ export async function buildCourseArchive(options: {
     const createdAt = dependencies.now();
     let model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
     for (const [index, resource] of immutablePlan.resources.entries()) {
-      if (resource.kind !== "page" || outcomes[index]?.status !== "success" || resource.archivePath === null) continue;
+      if (
+        resource.kind !== "page" ||
+        outcomes[index]?.status !== "success" ||
+        resource.archivePath === null
+      )
+        continue;
       const fragmentBytes = entries.get(resource.archivePath);
-      if (!fragmentBytes) throw new RunSafetyError("Missing sanitized page fragment");
-      const wrapped = strToU8(renderSavedPageHtml({
-        model,
-        pagePath: resource.archivePath,
-        title: resource.title,
-        sanitizedFragment: strFromU8(fragmentBytes),
-        combinedHomeHref: combinedRoot === null
-          ? null
-          : relativeArchiveHref(`${combinedRoot}/${resource.archivePath}`, "index.html"),
-      }));
+      if (!fragmentBytes)
+        throw new RunSafetyError("Missing sanitized page fragment");
+      const wrapped = strToU8(
+        renderSavedPageHtml({
+          model,
+          pagePath: resource.archivePath,
+          title: resource.title,
+          sanitizedFragment: strFromU8(fragmentBytes),
+          combinedHomeHref:
+            combinedRoot === null
+              ? null
+              : relativeArchiveHref(
+                  `${combinedRoot}/${resource.archivePath}`,
+                  "index.html",
+                ),
+        }),
+      );
       fragmentBytes.fill(0);
       retained.add(wrapped);
       entries.set(resource.archivePath, wrapped);
-      outcomes[index] = { ...outcomes[index]!, actualBytes: wrapped.byteLength };
+      outcomes[index] = {
+        ...outcomes[index],
+        actualBytes: wrapped.byteLength,
+      };
     }
     model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
     const manifest = model.manifest;

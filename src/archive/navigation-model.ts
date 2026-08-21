@@ -67,7 +67,10 @@ export function buildArchiveNavigationModel(
   const snapshot = snapshotArchiveData(plan, outcomes, createdAt);
   const manifest = buildManifestFromSnapshot(snapshot);
   const sourceByKey = new Map(
-    snapshot.plan.resources.map((resource) => [resource.key, resource.sourceUrl]),
+    snapshot.plan.resources.map((resource) => [
+      resource.key,
+      resource.sourceUrl,
+    ]),
   );
   const references = new Map<string, string[]>();
   for (const module of snapshot.plan.modules) {
@@ -92,7 +95,9 @@ export function buildArchiveNavigationModel(
       advertisedBytes: resource.advertisedBytes,
       actualBytes: resource.actualBytes,
       failureCategory: resource.failureCategory,
-      moduleReferences: Object.freeze([...(references.get(resource.key) ?? [])]),
+      moduleReferences: Object.freeze([
+        ...(references.get(resource.key) ?? []),
+      ]),
     }),
   );
   const lookup = new Map(resources.map((resource) => [resource.key, resource]));
@@ -109,7 +114,9 @@ export function buildArchiveNavigationModel(
             position: item.position,
             indent: item.indent,
             resource:
-              item.resourceKey === null ? null : (lookup.get(item.resourceKey) ?? null),
+              item.resourceKey === null
+                ? null
+                : (lookup.get(item.resourceKey) ?? null),
           }),
         ),
       ),

@@ -20,7 +20,9 @@ describe("archive shell", () => {
     );
     expect(document.querySelector('a[href="index.html"]')).not.toBeNull();
     expect(document.querySelector("script, style, iframe, form")).toBeNull();
-    expect(document.querySelector("main")?.textContent).toContain("Safe content");
+    expect(document.querySelector("main")?.textContent).toContain(
+      "Safe content",
+    );
   });
 
   it("escapes shell text and resolves links from saved pages", () => {
@@ -37,7 +39,9 @@ describe("archive shell", () => {
     );
     expect(document.querySelector("script, img")).toBeNull();
     expect(document.querySelector('a[href="../modules.html"]')).not.toBeNull();
-    expect(document.querySelector('a[href="../../../index.html"]')).not.toBeNull();
+    expect(
+      document.querySelector('a[href="../../../index.html"]'),
+    ).not.toBeNull();
     expect(document.querySelector('[aria-current="page"]')?.textContent).toBe(
       "Pages",
     );

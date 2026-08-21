@@ -170,7 +170,9 @@ describe("buildCourseZip", () => {
       "pages/welcome.html",
       "status.html",
     ]);
-    expect(strFromU8(zip["index.html"]!)).toBe(syntheticArchiveInput.pages.get("index.html"));
+    expect(strFromU8(zip["index.html"]!)).toBe(
+      syntheticArchiveInput.pages.get("index.html"),
+    );
     expect(strFromU8(zip["assets/archive.css"]!)).toBe(TRUSTED_ARCHIVE_CSS);
     expect(JSON.parse(strFromU8(zip["manifest.json"]!))).toEqual(
       syntheticArchiveInput.manifest,
@@ -497,7 +499,10 @@ describe("buildCourseZip", () => {
       "text/html",
     );
     document.body.setAttribute("background", "https://tracking.example/pixel");
-    (input.pages as Map<string, string>).set("index.html", `<!doctype html>${document.documentElement.outerHTML}`);
+    (input.pages as Map<string, string>).set(
+      "index.html",
+      `<!doctype html>${document.documentElement.outerHTML}`,
+    );
 
     expect(() => buildCourseZip(input)).toThrowError(TypeError);
   });

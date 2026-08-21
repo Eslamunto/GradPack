@@ -73,7 +73,7 @@ function expectSafeOutputTree(document: Document): void {
 describe("sanitizePageHtml", () => {
   it("separates the sanitized fragment from the trusted saved-page shell", () => {
     const fragment = sanitizePageFragment(
-      input('<p>Safe</p><script>alert(1)</script>'),
+      input("<p>Safe</p><script>alert(1)</script>"),
     );
     expect(fragment).toBe("<p>Safe</p>");
     expect(fragment).not.toContain("<html");

@@ -71,7 +71,11 @@ const encodedPath = (path: string): string =>
 export const combinedCourseRoot = (course: CourseSummary): string =>
   safeArchivePath("courses", `${course.name}-${course.id}`);
 
-const document = (title: string, active: "courses" | "status", content: string): string =>
+const document = (
+  title: string,
+  active: "courses" | "status",
+  content: string,
+): string =>
   `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} — GradPack</title><link rel="stylesheet" href="assets/archive.css"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><nav class="global-rail" aria-label="Archive"><span class="gradpack-mark" aria-label="GradPack">GP</span><a href="index.html">Archive</a><a href="index.html"${active === "courses" ? ' aria-current="page"' : ""}>Courses</a><a href="status.html"${active === "status" ? ' aria-current="page"' : ""}>Status</a></nav><div class="archive-workspace combined-workspace"><main id="archive-main" tabindex="-1">${content}</main><footer class="archive-identity">Local GradPack archive</footer></div></div></body></html>`;
 
 const rootIndex = (
@@ -85,11 +89,19 @@ const rootIndex = (
       return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${archive.manifest.totals.success} saved resources</p></article>`;
     })
     .join("");
-  return document("GradPack archives", "courses", `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>Your courses</h1><p>Browse ${manifest.courses.length} saved courses without Canvas.</p></header><section class="course-grid" aria-label="Saved courses">${cards}</section>`);
+  return document(
+    "GradPack archives",
+    "courses",
+    `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>Your courses</h1><p>Browse ${manifest.courses.length} saved courses without Canvas.</p></header><section class="course-grid" aria-label="Saved courses">${cards}</section>`,
+  );
 };
 
 const rootStatus = (manifest: CombinedArchiveManifest): string =>
-  document("Combined archive status", "status", `<h1>Combined archive status</h1><section class="status-grid"><div class="panel"><strong>${manifest.courses.length}</strong><br>Courses</div><div class="panel"><strong>${manifest.totals.success}</strong><br>Saved</div><div class="panel"><strong>${manifest.totals.unavailable}</strong><br>Unavailable</div></section><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`);
+  document(
+    "Combined archive status",
+    "status",
+    `<h1>Combined archive status</h1><section class="status-grid"><div class="panel"><strong>${manifest.courses.length}</strong><br>Courses</div><div class="panel"><strong>${manifest.totals.success}</strong><br>Saved</div><div class="panel"><strong>${manifest.totals.unavailable}</strong><br>Unavailable</div></section><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`,
+  );
 
 export function buildCombinedZip(input: CombinedArchiveInput): {
   zipBytes: Uint8Array;
@@ -131,7 +143,10 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   };
   const sources = new Map<string, Uint8Array>();
   sources.set("assets/archive.css", strToU8(input.archiveCss));
-  sources.set("index.html", strToU8(rootIndex(input.archives, roots, manifest)));
+  sources.set(
+    "index.html",
+    strToU8(rootIndex(input.archives, roots, manifest)),
+  );
   sources.set(
     "manifest.json",
     strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
@@ -154,7 +169,10 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
       ) {
         const bytes = entries[resource.archivePath];
         if (!bytes) throw new TypeError("Missing nested saved page");
-        validateArchiveHtml(resource.archivePath, new TextDecoder().decode(bytes));
+        validateArchiveHtml(
+          resource.archivePath,
+          new TextDecoder().decode(bytes),
+        );
       }
     }
     for (const [path, bytes] of Object.entries(entries)) {

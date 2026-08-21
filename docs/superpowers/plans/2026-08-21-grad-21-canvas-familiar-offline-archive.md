@@ -42,6 +42,7 @@
 ### Task 1: Lock generated paths, resource limit, and immutable navigation data
 
 **Files:**
+
 - Create: `src/archive/archive-links.ts`
 - Create: `src/archive/navigation-model.ts`
 - Modify: `src/shared/constants.ts`
@@ -54,6 +55,7 @@
 - Test: `tests/canvas/discovery.test.ts`
 
 **Interfaces:**
+
 - Produces: `COURSE_HTML_PATHS`, `relativeArchiveHref(fromPath, toPath)`, `ArchiveNavigationModel`, and `buildArchiveNavigationModel(plan, outcomes, createdAt)`.
 - Consumes: existing `CoursePlan`, `ResourceOutcome`, `ArchiveManifest`, `snapshotArchiveData`, and `buildManifestFromSnapshot`.
 
@@ -106,7 +108,10 @@ export const COURSE_HTML_PATHS = Object.freeze([
 ] as const);
 export type CourseHtmlPath = (typeof COURSE_HTML_PATHS)[number];
 
-export const relativeArchiveHref = (fromPath: string, toPath: string): string => {
+export const relativeArchiveHref = (
+  fromPath: string,
+  toPath: string,
+): string => {
   if (!isCanonicalArchivePath(fromPath) || !isCanonicalArchivePath(toPath)) {
     throw new TypeError("Invalid archive link path");
   }
@@ -192,6 +197,7 @@ git commit -m "feat: model offline archive navigation"
 ### Task 2: Build the trusted static shell and Canvas-familiar stylesheet
 
 **Files:**
+
 - Create: `src/archive/shell.ts`
 - Modify: `src/archive/style.ts`
 - Modify: `src/static/archive.css`
@@ -199,6 +205,7 @@ git commit -m "feat: model offline archive navigation"
 - Test: `tests/archive/archive-css.test.ts`
 
 **Interfaces:**
+
 - Consumes: `CourseHtmlPath` and `relativeArchiveHref` from Task 1.
 - Produces: `ArchivePageKind`, `ArchiveShellInput`, and `renderArchiveShell(input)`.
 
@@ -238,12 +245,7 @@ Expected: FAIL because `shell.ts` and the new design tokens do not exist.
 
 ```ts
 export type ArchivePageKind =
-  | "home"
-  | "modules"
-  | "pages"
-  | "files"
-  | "status"
-  | "saved-page";
+  "home" | "modules" | "pages" | "files" | "status" | "saved-page";
 
 export type ArchiveShellInput = Readonly<{
   pagePath: string;
@@ -280,12 +282,14 @@ git commit -m "feat: add Canvas-familiar archive shell"
 ### Task 3: Render all individual-course pages from the validated model
 
 **Files:**
+
 - Create: `src/archive/course-pages.ts`
 - Modify: `src/archive/index-page.ts`
 - Test: `tests/archive/course-pages.test.ts`
 - Modify: `tests/archive/index-page.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ArchiveNavigationModel` and `renderArchiveShell`.
 - Produces: `renderCoursePages(model, options?) => ReadonlyMap<CourseHtmlPath, string>`.
 - Preserves: `renderIndexPage(plan, outcomes, createdAt)` as a compatibility wrapper returning `index.html`.
@@ -363,19 +367,21 @@ git commit -m "feat: render offline course pages"
 ### Task 4: Separate Canvas-page sanitization from trusted shell rendering
 
 **Files:**
+
 - Modify: `src/archive/sanitize.ts`
 - Modify: `src/page/run-course.ts`
 - Modify: `tests/archive/sanitize.test.ts`
 - Modify: `tests/page/run-course.test.ts`
 
 **Interfaces:**
+
 - Produces: `sanitizePageFragment(input) => string` and `renderSavedPageHtml({ model, pagePath, title, sanitizedFragment, combinedHomeHref }) => string`.
 - Preserves: `sanitizePageHtml(input)` as a compatibility wrapper for tests/callers until Task 7 removes obsolete use.
 
 - [ ] **Step 1: Write failing fragment, shell, and cleanup tests**
 
 ```ts
-const fragment = sanitizePageFragment(input('<p>Safe</p><script>x()</script>'));
+const fragment = sanitizePageFragment(input("<p>Safe</p><script>x()</script>"));
 expect(fragment).toBe("<p>Safe</p>");
 expect(fragment).not.toContain("<html");
 
@@ -443,11 +449,13 @@ git commit -m "feat: wrap sanitized pages in archive shell"
 ### Task 5: Validate and package the exact generated course-page map
 
 **Files:**
+
 - Modify: `src/archive/build-zip.ts`
 - Modify: `tests/archive/build-zip.test.ts`
 - Modify: `tests/fixtures/course-plan.ts`
 
 **Interfaces:**
+
 - Changes `ArchiveInput` from `{ indexHtml, archiveCss, manifest, entries }` to `{ pages, archiveCss, manifest, entries }`.
 - Consumes the exact `ReadonlyMap<CourseHtmlPath, string>` from Task 3.
 - Produces deterministic ZIPs with seven core entries plus at most 65,528 payload entries.
@@ -469,7 +477,9 @@ expect(Object.keys(zip).sort()).toEqual([
 ]);
 expect(() => buildCourseZip(withoutPage("status.html"))).toThrow(TypeError);
 expect(() => buildCourseZip(withExtraPage("debug.html"))).toThrow(TypeError);
-expect(() => buildCourseZip(withHtml("modules.html", "<script>x()</script>"))).toThrow(TypeError);
+expect(() =>
+  buildCourseZip(withHtml("modules.html", "<script>x()</script>")),
+).toThrow(TypeError);
 expect(() => buildCourseZip(inputAtPayloadCount(65_529))).toThrow(
   ArchiveSafetyError,
 );
@@ -506,7 +516,8 @@ const collectGeneratedPages = (raw: unknown): Map<CourseHtmlPath, string> => {
     const html = pairs.find(([candidate]) => candidate === path)?.[1];
     pages.set(path, validateGeneratedPage(path, html));
   }
-  if (pages.size !== pairs.length) throw new TypeError("Invalid generated page set");
+  if (pages.size !== pairs.length)
+    throw new TypeError("Invalid generated page set");
   return pages;
 };
 ```
@@ -529,6 +540,7 @@ git commit -m "feat: package validated multi-page archives"
 ### Task 6: Add combined archive home/status pages and nested backlinks
 
 **Files:**
+
 - Modify: `src/archive/combined.ts`
 - Modify: `src/page/run-courses.ts`
 - Modify: `tests/archive/combined.test.ts`
@@ -536,6 +548,7 @@ git commit -m "feat: package validated multi-page archives"
 - Modify: `tests/page/run-courses.test.ts`
 
 **Interfaces:**
+
 - Consumes complete validated course ZIPs from Task 5.
 - Extends course archive rendering options with `combinedRoot: string | null`; multi-course orchestration supplies the deterministic `courses/<safe-course-root>` only in combined mode.
 - Produces combined `index.html` and `status.html` using the shared visual system and pre-rendered safe paths back from nested course pages.
@@ -545,7 +558,9 @@ git commit -m "feat: package validated multi-page archives"
 ```ts
 const entries = unzipSync(result.zipBytes);
 expect(entries["status.html"]).toBeDefined();
-expect(parse(entries["index.html"]).querySelectorAll(".course-card")).toHaveLength(2);
+expect(
+  parse(entries["index.html"]).querySelectorAll(".course-card"),
+).toHaveLength(2);
 expect(links(entries["index.html"])).toContainEqual({
   text: "First Course",
   href: "courses/First%20Course-101/index.html",
@@ -569,7 +584,10 @@ Expected: FAIL because the combined archive has only a minimal index and no nest
 - [ ] **Step 3: Implement trusted combined pages and nested course rendering context**
 
 ```ts
-const COMBINED_HTML_PATHS = Object.freeze(["index.html", "status.html"] as const);
+const COMBINED_HTML_PATHS = Object.freeze([
+  "index.html",
+  "status.html",
+] as const);
 
 const renderCombinedPages = (
   archives: readonly CourseArchiveOutput[],
@@ -608,6 +626,7 @@ git commit -m "feat: add combined archive navigation"
 ### Task 7: Integrate the full archive flow and verify extracted offline behavior
 
 **Files:**
+
 - Modify: `src/page/run-course.ts`
 - Modify: `tests/page/run-course.test.ts`
 - Modify: `tests/page/run-courses.test.ts`
@@ -618,6 +637,7 @@ git commit -m "feat: add combined archive navigation"
 - Modify: `docs/development/multi-course-runs.md`
 
 **Interfaces:**
+
 - Consumes all Task 1-6 interfaces.
 - Produces the complete user-visible single-course and combined Canvas-familiar archive flow.
 

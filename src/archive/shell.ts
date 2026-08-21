@@ -1,12 +1,7 @@
 import { relativeArchiveHref } from "./archive-links";
 
 export type ArchivePageKind =
-  | "home"
-  | "modules"
-  | "pages"
-  | "files"
-  | "status"
-  | "saved-page";
+  "home" | "modules" | "pages" | "files" | "status" | "saved-page";
 
 export type ArchiveShellInput = Readonly<{
   pagePath: string;
@@ -37,15 +32,23 @@ const navigation = [
   ["status", "Archive Status", "status.html"],
 ] as const;
 
-const archiveLink = (from: string, to: string, label: string, current = false) =>
+const archiveLink = (
+  from: string,
+  to: string,
+  label: string,
+  current = false,
+) =>
   `<a href="${relativeArchiveHref(from, to)}"${current ? ' aria-current="page"' : ""}>${label}</a>`;
 
 export const renderArchiveShell = (input: ArchiveShellInput): string => {
   const active = input.pageKind === "saved-page" ? "pages" : input.pageKind;
   const courseNav = navigation
-    .map(([kind, label, path]) => archiveLink(input.pagePath, path, label, kind === active))
+    .map(([kind, label, path]) =>
+      archiveLink(input.pagePath, path, label, kind === active),
+    )
     .join("");
-  const coursesHref = input.combinedHomeHref ?? relativeArchiveHref(input.pagePath, "index.html");
+  const coursesHref =
+    input.combinedHomeHref ?? relativeArchiveHref(input.pagePath, "index.html");
   const title = escapeHtml(input.title);
   const courseName = escapeHtml(input.course.name);
   const code = escapeHtml(input.course.courseCode);

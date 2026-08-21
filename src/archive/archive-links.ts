@@ -10,9 +10,6 @@ export const COURSE_HTML_PATHS = Object.freeze([
 
 export type CourseHtmlPath = (typeof COURSE_HTML_PATHS)[number];
 
-const encodePath = (segments: readonly string[]): string =>
-  segments.map(encodeURIComponent).join("/");
-
 export const relativeArchiveHref = (
   fromPath: string,
   toPath: string,

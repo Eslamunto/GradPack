@@ -30,6 +30,7 @@ a:hover { color: #781728; }
 .course-navigation a { padding: 0.55rem 0.65rem; border-radius: 0.2rem; text-decoration: none; }
 .course-navigation a[aria-current="page"] { color: var(--gradpack-accent); background: #f9ecef; font-weight: 700; }
 .archive-workspace { min-width: 0; padding: 0 2rem; }
+.combined-workspace { grid-column: 2 / -1; }
 .breadcrumbs { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; min-height: 3.5rem; border-bottom: 1px solid var(--gradpack-border); color: var(--gradpack-muted); font-size: 0.9rem; }
 main { width: min(70rem, 100%); padding: 2rem 0 4rem; }
 h1, h2 { line-height: 1.2; }
@@ -49,6 +50,8 @@ h2 { margin: 0 0 0.75rem; }
 .status-success { color: #17633a; background: #e8f5ed; }
 .status-unavailable, .status-failed { color: #7a3d00; background: #fff1df; }
 .metadata, .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 0.75rem; margin: 0; }
+.course-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); gap: 1rem; }
+.course-card h2 { font-size: 1.15rem; }
 .metadata dd { margin: 0.2rem 0 0; overflow-wrap: anywhere; }
 .metadata dt, .eyebrow { color: var(--gradpack-muted); font-size: 0.8rem; font-weight: 700; }
 .eyebrow { margin: 0 0 0.35rem; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -64,6 +67,7 @@ h2 { margin: 0 0 0.75rem; }
   .gradpack-mark { margin: 0 0.5rem 0 0; }
   .course-navigation strong, .course-code { width: 100%; }
   .archive-workspace { padding: 0 1rem; }
+  .combined-workspace { grid-column: auto; }
   main { padding-top: 1.25rem; }
 }
 `;

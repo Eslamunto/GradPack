@@ -4,3 +4,5 @@ coverage/
 pnpm-lock.yaml
 .superpowers/
 docs/design/
+# Byte-identical mirror of the reviewed ARCHIVE_CSS runtime constant.
+src/static/archive.css

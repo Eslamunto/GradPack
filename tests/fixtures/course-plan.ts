@@ -259,12 +259,16 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
 
 export const syntheticArchiveInput: ArchiveInput = {
   pages: new Map(
-    ["files.html", "index.html", "modules.html", "pages.html", "status.html"].map(
-      (path) => [
-        path,
-        '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
-      ],
-    ),
+    [
+      "files.html",
+      "index.html",
+      "modules.html",
+      "pages.html",
+      "status.html",
+    ].map((path) => [
+      path,
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
+    ]),
   ) as ArchiveInput["pages"],
   archiveCss: "body{font-family:system-ui}",
   manifest: {

@@ -8,10 +8,13 @@ their accessible Canvas course materials as a useful local archive.
 The project is currently an **alpha classmate pilot** distributed manually as
 an unpacked extension. It is not yet published on the Chrome Web Store.
 
-The pilot saves one accessible Canvas course at a time into a transparent local
-ZIP with an offline index and per-resource outcomes. It uses the student's
-existing signed-in Frankfurt School Canvas tab and has no analytics, telemetry,
-backend, or cloud upload.
+The pilot saves selected accessible Canvas courses into transparent local ZIPs,
+either one ZIP per course or one combined archive. Each archive has a
+Canvas-familiar, GradPack-branded static interface with Home, Modules, Pages,
+Files, and Archive Status navigation. It works fully offline, contains no
+archive JavaScript, and records per-resource outcomes. GradPack uses the
+student's existing signed-in Frankfurt School Canvas tab and has no analytics,
+telemetry, backend, or cloud upload.
 
 ## Pilot installation
 
@@ -57,3 +60,8 @@ pages exceed that same aggregate limit during the run; resources are never
 silently omitted to make an archive fit. Individual Canvas page-detail JSON
 bodies are streamed under a conservative 5 MiB raw-body cap and receive a
 fixed, transparent unavailable outcome when that cap is exceeded.
+
+Each course archive reserves seven ZIP entries for its generated interface and
+manifest, leaving a maximum of 65,528 discovered resource entries. GradPack
+stops safely when a course would exceed that limit; it never drops resources to
+make an archive fit.

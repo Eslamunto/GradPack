@@ -193,7 +193,8 @@ const safeShellHref = (value: string): boolean => {
     value.includes("?") ||
     value.includes("#") ||
     value.startsWith("//")
-  ) return false;
+  )
+    return false;
   let url: URL;
   try {
     url = new URL(value, "https://archive.invalid/index.html");
@@ -206,7 +207,9 @@ const safeShellHref = (value: string): boolean => {
   } catch {
     return false;
   }
-  return url.origin === "https://archive.invalid" && isCanonicalArchivePath(path);
+  return (
+    url.origin === "https://archive.invalid" && isCanonicalArchivePath(path)
+  );
 };
 
 const validateShellIndex = (
@@ -218,8 +221,11 @@ const validateShellIndex = (
     document.doctype?.name.toLowerCase() !== "html" ||
     !exactAttributes(document.documentElement, { lang: "en" }) ||
     !document.body.querySelector(":scope > .skip-link + .archive-layout") ||
-    document.querySelector("script, style, form, iframe, object, embed, input, button")
-  ) throw new TypeError("Invalid archive index");
+    document.querySelector(
+      "script, style, form, iframe, object, embed, input, button",
+    )
+  )
+    throw new TypeError("Invalid archive index");
   const link = document.head.querySelector('link[rel="stylesheet"]');
   if (
     link?.getAttribute("href") !==
@@ -234,13 +240,18 @@ const validateShellIndex = (
         attribute.name.startsWith("on") ||
         attribute.name === "style" ||
         attribute.name === "src"
-      ) throw new TypeError("Invalid archive index");
+      )
+        throw new TypeError("Invalid archive index");
     }
   }
   for (const anchor of document.querySelectorAll("a[href]")) {
     const href = anchor.getAttribute("href");
-    if (href === null || !safeShellHref(href)) throw new TypeError("Invalid archive index");
-    if (safeExternalHref(href) && anchor.getAttribute("rel") !== "noopener noreferrer") {
+    if (href === null || !safeShellHref(href))
+      throw new TypeError("Invalid archive index");
+    if (
+      safeExternalHref(href) &&
+      anchor.getAttribute("rel") !== "noopener noreferrer"
+    ) {
       throw new TypeError("Invalid archive index");
     }
   }
