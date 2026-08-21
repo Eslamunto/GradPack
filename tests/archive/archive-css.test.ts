@@ -7,6 +7,9 @@ describe("archive.css", () => {
     const css = readFileSync(resolve("src/static/archive.css"), "utf8");
 
     expect(css).toContain(".resource-status");
+    expect(css).toContain("--gradpack-rail");
+    expect(css).toContain(":focus-visible");
+    expect(css).toContain(".archive-layout");
     expect(css).toContain("@media");
     expect(css).not.toMatch(/@import/iu);
     expect(css).not.toMatch(/url\s*\(/iu);

@@ -57,6 +57,7 @@ export function syntheticCanvasHttp(
     id: 301,
     title: itemType === "File" ? "slides.pdf" : "Unsupported item",
     position: 1,
+    indent: 0,
     type: itemType,
     ...(itemType === "File" ? { content_id: 301 } : {}),
   };
@@ -212,6 +213,7 @@ export const syntheticArchivePlan: CoursePlan = {
           id: 301,
           title: "Slides",
           position: 1,
+          indent: 0,
           resourceKey: "file:301",
           type: "File",
         },
@@ -219,6 +221,7 @@ export const syntheticArchivePlan: CoursePlan = {
           id: 302,
           title: "Public reference",
           position: 2,
+          indent: 0,
           resourceKey: "external:401",
           type: "ExternalUrl",
         },
@@ -226,6 +229,9 @@ export const syntheticArchivePlan: CoursePlan = {
     },
   ],
 };
+
+export const syntheticSavedPageHtml =
+  '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome — GradPack</title><link rel="stylesheet" href="../assets/archive.css"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><main id="archive-main" tabindex="-1"><article class="saved-page-content"><h1>Welcome</h1><p>Welcome</p></article></main></div></body></html>';
 
 export const syntheticArchiveOutcomes: ResourceOutcome[] = [
   {
@@ -237,7 +243,7 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
   {
     ...syntheticArchivePlan.resources[1]!,
     status: "success",
-    actualBytes: 29,
+    actualBytes: strToU8(syntheticSavedPageHtml).byteLength,
     failureCategory: null,
   },
   {
@@ -255,8 +261,19 @@ export const syntheticArchiveOutcomes: ResourceOutcome[] = [
 ];
 
 export const syntheticArchiveInput: ArchiveInput = {
-  indexHtml:
-    '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
+  archiveRoot: null,
+  pages: new Map(
+    [
+      "files.html",
+      "index.html",
+      "modules.html",
+      "pages.html",
+      "status.html",
+    ].map((path) => [
+      path,
+      '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Synthetic Course</title><link rel="stylesheet" href="assets/archive.css"></head><body><main>Synthetic Course</main></body></html>',
+    ]),
+  ) as ArchiveInput["pages"],
   archiveCss: "body{font-family:system-ui}",
   manifest: {
     schemaVersion: 1,
@@ -271,7 +288,7 @@ export const syntheticArchiveInput: ArchiveInput = {
       unsupported: 1,
       external: 1,
       advertisedBytes: 19,
-      archivedBytes: 48,
+      archivedBytes: 19 + strToU8(syntheticSavedPageHtml).byteLength,
     },
     resources: syntheticArchiveOutcomes.map((outcome) => ({
       key: outcome.key,
@@ -287,7 +304,7 @@ export const syntheticArchiveInput: ArchiveInput = {
   },
   entries: new Map([
     ["files/slides.pdf", strToU8("synthetic PDF bytes")],
-    ["pages/welcome.html", strToU8("<!doctype html><p>Welcome</p>")],
+    ["pages/welcome.html", strToU8(syntheticSavedPageHtml)],
   ]),
 };
 

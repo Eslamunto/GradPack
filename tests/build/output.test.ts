@@ -41,6 +41,10 @@ describe("production build output", () => {
     expect(manifest.background.service_worker).toBe("service-worker.js");
     expect(manifest.side_panel.default_path).toBe("sidepanel.html");
     expect(manifest.content_scripts[0].js).toEqual(["relay.js"]);
+    expect(manifest.permissions).toEqual(["sidePanel", "scripting"]);
+    expect(manifest.host_permissions).toEqual([
+      "https://frankfurtschool.instructure.com/*",
+    ]);
     expect(requiredFiles).toEqual(
       expect.arrayContaining([
         manifest.background.service_worker,

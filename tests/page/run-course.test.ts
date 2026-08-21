@@ -2,7 +2,9 @@
 import { unzipSync, strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
+import { sanitizePageFragment } from "../../src/archive/sanitize";
 import {
+  buildCourseArchive,
   RunSafetyError,
   runCourse,
   type Retrieval,
@@ -74,11 +76,31 @@ const dependencies = (
 };
 
 describe("runCourse", () => {
+  it("builds a discovered course plan without handing off a download", async () => {
+    const deps = dependencies(plan([file(1)]), async () => ({
+      status: "success",
+      bytes: strToU8("data"),
+    }));
+
+    const result = await buildCourseArchive({
+      course: syntheticCourse,
+      plan: plan([file(1)]),
+      combinedRoot: null,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(result.manifest.course.id).toBe(syntheticCourse.id);
+    expect(Array.from(unzipSync(result.zipBytes)["files/file-1.bin"]!)).toEqual(
+      Array.from(strToU8("data")),
+    );
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
   it("builds a complete synthetic ZIP and reports exact scalar progress", async () => {
     const fileBytes = strToU8("data");
-    const pageBytes = strToU8(
-      '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Welcome</title><link rel="stylesheet" href="../assets/archive.css"></head><body><main><p>Safe</p></main></body></html>',
-    );
+    const pageBytes = strToU8("<p>Safe</p>");
     const deps = dependencies(
       plan([file(1), page, external]),
       async (resource) => ({
@@ -98,10 +120,14 @@ describe("runCourse", () => {
     const zip = unzipSync(result.zipBytes);
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/file-1.bin",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
     expect(JSON.parse(strFromU8(zip["manifest.json"]!))).toEqual(
       result.manifest,
@@ -260,6 +286,57 @@ describe("runCourse", () => {
       }),
     ).rejects.toBeInstanceOf(RunSafetyError);
     expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the byte cap after a sanitized page fragment is shell-wrapped", async () => {
+    const fragment = strToU8("<p>x</p>");
+    const deps = dependencies(plan([page]), async () => ({
+      status: "success",
+      bytes: fragment,
+    }));
+    deps.maxArchiveBytes = fragment.byteLength;
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(fragment.every((value) => value === 0)).toBe(true);
+  });
+
+  it("packages rich sanitized Canvas content under the final shell policy", async () => {
+    const fragment = sanitizePageFragment({
+      title: "Welcome",
+      body: '<h1>Source heading</h1><h3 aria-expanded="false">Details</h3><img src="https://remote.test/image.png" alt="Diagram"><a href="https://reference.test/path?q=ok#part">Reference</a><a href="mailto:reader@example.test">Email</a>',
+      resolveLocalHref: () => null,
+    });
+    const deps = dependencies(plan([page]), async () => ({
+      status: "success",
+      bytes: strToU8(fragment),
+    }));
+    const result = await runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+    const html = strFromU8(unzipSync(result.zipBytes)["pages/welcome.html"]!);
+    const document = new DOMParser().parseFromString(html, "text/html");
+    expect(document.querySelectorAll("h1")).toHaveLength(1);
+    expect(document.querySelector(".saved-page-content h2")?.textContent).toBe(
+      "Source heading",
+    );
+    expect(document.querySelector("h3")?.getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(document.querySelector("img")?.hasAttribute("src")).toBe(false);
+    expect(
+      document.querySelector('a[href="https://reference.test/path?q=ok#part"]'),
+    ).not.toBeNull();
+    expect(document.querySelector('a[href^="mailto:"]')).not.toBeNull();
   });
 
   it("does not claim success when cancellation occurs during package or download", async () => {

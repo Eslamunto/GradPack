@@ -12,19 +12,31 @@ import {
   isCanonicalArchivePath,
 } from "./paths";
 import { ARCHIVE_CSS } from "./style";
+import {
+  COURSE_HTML_PATHS,
+  relativeArchiveHref,
+  type CourseHtmlPath,
+} from "./archive-links";
 
 const CORE_PATHS = [
   "assets/archive.css",
+  "files.html",
   "index.html",
   "manifest.json",
+  "modules.html",
+  "pages.html",
+  "status.html",
 ] as const;
 const CORE_CANONICAL = new Set(CORE_PATHS.map(canonicalArchivePath));
 const FIXED_ZIP_DATE = 0x2821;
 const FIXED_ZIP_TIME = 0;
 const ZIP_MTIME_SEED = "2000-01-01T12:00:00.000Z";
+export const MAX_CLASSIC_ZIP_ENTRIES = 65_535;
 const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_ZIP_NAME_LENGTH = 180;
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";
+const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
+const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const INDEX_TAGS = new Set([
   "a",
   "aside",
@@ -64,9 +76,113 @@ const INDEX_IDS = new Set([
   "resources-title",
   "summary-title",
 ]);
+const SHELL_TAGS = new Set([
+  ...INDEX_TAGS,
+  "abbr",
+  "article",
+  "b",
+  "blockquote",
+  "br",
+  "caption",
+  "cite",
+  "code",
+  "col",
+  "colgroup",
+  "del",
+  "details",
+  "dfn",
+  "em",
+  "figcaption",
+  "figure",
+  "footer",
+  "hr",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "i",
+  "img",
+  "kbd",
+  "mark",
+  "nav",
+  "pre",
+  "q",
+  "s",
+  "samp",
+  "small",
+  "strong",
+  "sub",
+  "summary",
+  "sup",
+  "table",
+  "tbody",
+  "td",
+  "tfoot",
+  "th",
+  "thead",
+  "time",
+  "tr",
+  "u",
+  "var",
+]);
+const SHELL_CLASSES = new Set([
+  ...INDEX_CLASSES,
+  "archive-identity",
+  "archive-layout",
+  "archive-workspace",
+  "breadcrumbs",
+  "combined-workspace",
+  "course-card",
+  "course-code",
+  "course-grid",
+  "course-navigation",
+  "global-rail",
+  "gradpack-mark",
+  "panel",
+  "resource-list",
+  "saved-page-content",
+  "skip-link",
+  "status-external",
+  "status-failed",
+  "status-grid",
+  "status-success",
+  "status-unavailable",
+  "status-unsupported",
+]);
+const SHELL_ATTRIBUTES = new Set([
+  "abbr",
+  "alt",
+  "aria-current",
+  "aria-hidden",
+  "aria-label",
+  "charset",
+  "class",
+  "colspan",
+  "content",
+  "datetime",
+  "dir",
+  "headers",
+  "height",
+  "href",
+  "id",
+  "lang",
+  "name",
+  "rel",
+  "reversed",
+  "rowspan",
+  "scope",
+  "span",
+  "start",
+  "tabindex",
+  "title",
+  "type",
+  "value",
+  "width",
+]);
 
 export type ArchiveInput = {
-  indexHtml: string;
+  archiveRoot: string | null;
+  pages: ReadonlyMap<CourseHtmlPath, string>;
   archiveCss: string;
   manifest: ArchiveManifest;
   entries: ReadonlyMap<string, Uint8Array>;
@@ -96,7 +212,13 @@ const exactInput = (value: unknown): Record<string, unknown> => {
   } catch {
     throw new TypeError("Invalid archive input");
   }
-  const expected = ["indexHtml", "archiveCss", "manifest", "entries"];
+  const expected = [
+    "archiveRoot",
+    "pages",
+    "archiveCss",
+    "manifest",
+    "entries",
+  ];
   if (
     keys.length !== expected.length ||
     keys.some((key) => typeof key !== "string" || !expected.includes(key))
@@ -129,7 +251,7 @@ const archiveText = (value: unknown): string => {
 };
 
 const safeExternalHref = (value: string): boolean => {
-  if (/%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu.test(value)) return false;
+  if (CONTROL.test(value) || ENCODED_CONTROL.test(value)) return false;
   let url: URL;
   try {
     url = new URL(value);
@@ -137,13 +259,28 @@ const safeExternalHref = (value: string): boolean => {
     return false;
   }
   return (
-    url.protocol === "https:" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.search === "" &&
-    url.hash === ""
+    url.protocol === "https:" && url.username === "" && url.password === ""
   );
 };
+
+const safeMailtoHref = (value: string): boolean => {
+  if (CONTROL.test(value) || ENCODED_CONTROL.test(value)) return false;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return (
+    url.protocol === "mailto:" &&
+    url.username === "" &&
+    url.password === "" &&
+    /^mailto:[^/\s]/iu.test(value)
+  );
+};
+
+const safeExternalAnchorHref = (value: string): boolean =>
+  safeExternalHref(value) || safeMailtoHref(value);
 
 const safeLocalHref = (value: string): boolean => {
   let path: string;
@@ -175,9 +312,184 @@ const exactAttributes = (
   );
 };
 
-const validateIndexHtml = (value: unknown): string => {
+const safeShellHref = (value: string): boolean => {
+  if (value === "#archive-main") return true;
+  if (safeExternalAnchorHref(value)) return true;
+  if (
+    value.includes("\\") ||
+    value.includes(":") ||
+    value.includes("?") ||
+    value.includes("#") ||
+    value.startsWith("//")
+  )
+    return false;
+  let url: URL;
+  try {
+    url = new URL(value, "https://archive.invalid/index.html");
+  } catch {
+    return false;
+  }
+  let path: string;
+  try {
+    path = decodeURIComponent(url.pathname.slice(1));
+  } catch {
+    return false;
+  }
+  return (
+    url.origin === "https://archive.invalid" && isCanonicalArchivePath(path)
+  );
+};
+
+const validateShellIndex = (
+  html: string,
+  document: Document,
+  pagePath: string,
+): string => {
+  if (
+    document.doctype?.name.toLowerCase() !== "html" ||
+    document.documentElement.namespaceURI !== HTML_NAMESPACE ||
+    !exactAttributes(document.documentElement, { lang: "en" }) ||
+    !exactAttributes(document.head, {}) ||
+    !exactAttributes(document.body, {}) ||
+    !document.body.querySelector(":scope > .skip-link + .archive-layout") ||
+    document.querySelector(
+      "script, style, form, iframe, object, embed, input, button",
+    )
+  )
+    throw new TypeError("Invalid archive index");
+  const head = [...document.head.children];
+  const link = head[3];
+  if (
+    head.length !== 4 ||
+    head[0]?.localName !== "meta" ||
+    !exactAttributes(head[0], { charset: "utf-8" }) ||
+    head[1]?.localName !== "meta" ||
+    !exactAttributes(head[1], {
+      name: "viewport",
+      content: "width=device-width,initial-scale=1",
+    }) ||
+    head[2]?.localName !== "title" ||
+    !exactAttributes(head[2], {}) ||
+    head[2].children.length !== 0 ||
+    link?.localName !== "link" ||
+    link.parentElement !== document.head ||
+    document.querySelectorAll("link").length !== 1 ||
+    !exactAttributes(link, {
+      rel: "stylesheet",
+      href: relativeArchiveHref(pagePath, "assets/archive.css"),
+    }) ||
+    document.querySelectorAll("main").length !== 1 ||
+    document.querySelectorAll("h1").length !== 1
+  ) {
+    throw new TypeError("Invalid archive index");
+  }
+  for (const element of document.querySelectorAll("*")) {
+    if (
+      element.namespaceURI !== HTML_NAMESPACE ||
+      !SHELL_TAGS.has(element.localName)
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+    for (const attribute of [...element.attributes]) {
+      if (
+        attribute.namespaceURI !== null ||
+        attribute.name.startsWith("on") ||
+        (!SHELL_ATTRIBUTES.has(attribute.name) &&
+          !/^aria-[a-z][a-z0-9-]*$/u.test(attribute.name))
+      )
+        throw new TypeError(
+          `Invalid archive index attribute ${element.localName}:${attribute.name}`,
+        );
+    }
+    const className = element.getAttribute("class");
+    if (
+      className !== null &&
+      className
+        .split(/\s+/u)
+        .some(
+          (name) =>
+            !SHELL_CLASSES.has(name) && !/^module-indent-[0-5]$/u.test(name),
+        )
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+    const id = element.getAttribute("id");
+    if (id !== null && id !== "archive-main") {
+      throw new TypeError("Invalid archive index");
+    }
+    if (
+      element.localName !== "a" &&
+      element.localName !== "link" &&
+      element.hasAttribute("href")
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+  }
+  for (const anchor of document.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href");
+    if (href === null || !safeShellHref(href))
+      throw new TypeError("Invalid archive index");
+    if (
+      safeExternalAnchorHref(href) &&
+      anchor.getAttribute("rel") !== "noopener noreferrer"
+    ) {
+      throw new TypeError("Invalid archive index");
+    }
+  }
+  const walker = document.createTreeWalker(document, NodeFilter.SHOW_COMMENT);
+  if (walker.nextNode()) throw new TypeError("Invalid archive index");
+  return `<!doctype html>${document.documentElement.outerHTML}`;
+};
+
+export const validateArchiveLinkTargets = (
+  pagePath: string,
+  html: string,
+  paths: ReadonlySet<string>,
+): void => {
+  const document = new DOMParser().parseFromString(html, "text/html");
+  const archivePrefix = "/archive/";
+  const base = `https://archive.invalid${archivePrefix}${pagePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  for (const element of document.querySelectorAll("a[href], link[href]")) {
+    const href = element.getAttribute("href");
+    if (href === null || href.startsWith("#") || safeExternalAnchorHref(href))
+      continue;
+    let url: URL;
+    let target: string;
+    try {
+      url = new URL(href, base);
+      if (!url.pathname.startsWith(archivePrefix)) {
+        throw new TypeError("Invalid archive link target");
+      }
+      target = decodeURIComponent(url.pathname.slice(archivePrefix.length));
+    } catch {
+      throw new TypeError("Invalid archive link target");
+    }
+    if (
+      url.origin !== "https://archive.invalid" ||
+      !isCanonicalArchivePath(target) ||
+      !paths.has(target) ||
+      href !== relativeArchiveHref(pagePath, target)
+    ) {
+      throw new TypeError("Invalid archive link target");
+    }
+  }
+};
+
+export const validateArchiveHtml = (
+  pagePath: string,
+  value: unknown,
+): string => {
+  if (!isCanonicalArchivePath(pagePath)) {
+    throw new TypeError("Invalid archive page path");
+  }
   const html = archiveText(value);
   const document = new DOMParser().parseFromString(html, "text/html");
+  if (document.body.querySelector(".archive-layout")) {
+    return validateShellIndex(html, document, pagePath);
+  }
   const main = document.body.firstElementChild;
   if (
     document.doctype?.name.toLowerCase() !== "html" ||
@@ -207,7 +519,7 @@ const validateIndexHtml = (value: unknown): string => {
     head[3]?.localName !== "link" ||
     !exactAttributes(head[3], {
       rel: "stylesheet",
-      href: "assets/archive.css",
+      href: relativeArchiveHref(pagePath, "assets/archive.css"),
     })
   ) {
     throw new TypeError("Invalid archive index");
@@ -289,6 +601,23 @@ const validateArchiveCss = (value: unknown): string => {
     throw new TypeError("Invalid archive stylesheet");
   }
   return css;
+};
+
+const collectGeneratedPages = (value: unknown): Map<CourseHtmlPath, string> => {
+  if (Object.getPrototypeOf(value) !== Map.prototype) {
+    throw new TypeError("Invalid generated pages");
+  }
+  const pairs = [...Map.prototype.entries.call(value as Map<unknown, unknown>)];
+  if (pairs.length !== COURSE_HTML_PATHS.length) {
+    throw new TypeError("Invalid generated page set");
+  }
+  const pages = new Map<CourseHtmlPath, string>();
+  for (const path of COURSE_HTML_PATHS) {
+    const pair = pairs.find(([candidate]) => candidate === path);
+    if (!pair) throw new TypeError("Invalid generated page set");
+    pages.set(path, validateArchiveHtml(path, pair[1]));
+  }
+  return pages;
 };
 
 const typedArrayPrototype = Object.getPrototypeOf(
@@ -512,21 +841,12 @@ const patchZipTimes = (bytes: Uint8Array): Uint8Array => {
   return bytes;
 };
 
-export function buildCourseZip(input: ArchiveInput): Uint8Array;
-export function buildCourseZip(input: unknown): Uint8Array {
-  const record = exactInput(input);
-  const indexHtml = validateIndexHtml(ownValue(record, "indexHtml"));
-  const archiveCss = validateArchiveCss(ownValue(record, "archiveCss"));
-  const manifest = normalizeArchiveManifest(ownValue(record, "manifest"));
-  const payloads = collectPayloads(ownValue(record, "entries"), manifest);
-  const sources = new Map<string, Uint8Array>([
-    ["assets/archive.css", strToU8(archiveCss)],
-    ["index.html", strToU8(indexHtml)],
-    ["manifest.json", strToU8(`${JSON.stringify(manifest, null, 2)}\n`)],
-    ...[...payloads.entries()].sort(([left], [right]) =>
-      compareText(left, right),
-    ),
-  ]);
+export const buildDeterministicZip = (
+  sources: ReadonlyMap<string, Uint8Array>,
+): Uint8Array => {
+  if (sources.size > MAX_CLASSIC_ZIP_ENTRIES) {
+    throw new TypeError("ZIP entry limit exceeded");
+  }
   const zipEntries: Zippable = Object.create(null) as Zippable;
   for (const [path, bytes] of [...sources].sort(([left], [right]) =>
     compareText(left, right),
@@ -542,6 +862,64 @@ export function buildCourseZip(input: unknown): Uint8Array {
     ];
   }
   return patchZipTimes(zipSync(zipEntries, { level: 6 }));
+};
+
+export function buildCourseZip(input: ArchiveInput): Uint8Array;
+export function buildCourseZip(input: unknown): Uint8Array {
+  const record = exactInput(input);
+  const rawArchiveRoot = ownValue(record, "archiveRoot");
+  const archiveRoot =
+    rawArchiveRoot === null ||
+    (isCanonicalArchivePath(rawArchiveRoot) &&
+      rawArchiveRoot.startsWith("courses/"))
+      ? rawArchiveRoot
+      : (() => {
+          throw new TypeError("Invalid archive root");
+        })();
+  const pages = collectGeneratedPages(ownValue(record, "pages"));
+  const archiveCss = validateArchiveCss(ownValue(record, "archiveCss"));
+  const manifest = normalizeArchiveManifest(ownValue(record, "manifest"));
+  const payloads = collectPayloads(ownValue(record, "entries"), manifest);
+  const sources = new Map<string, Uint8Array>([
+    ["assets/archive.css", strToU8(archiveCss)],
+    ["manifest.json", strToU8(`${JSON.stringify(manifest, null, 2)}\n`)],
+    ...[...pages].map(([path, html]) => [path, strToU8(html)] as const),
+    ...[...payloads.entries()].sort(([left], [right]) =>
+      compareText(left, right),
+    ),
+  ]);
+  const paths = new Set(sources.keys());
+  const targetPaths =
+    archiveRoot === null
+      ? paths
+      : new Set([
+          "index.html",
+          ...[...paths].map((path) => `${archiveRoot}/${path}`),
+        ]);
+  const targetPagePath = (path: string): string =>
+    archiveRoot === null ? path : `${archiveRoot}/${path}`;
+  for (const [path, html] of pages)
+    validateArchiveLinkTargets(targetPagePath(path), html, targetPaths);
+  for (const resource of manifest.resources) {
+    if (
+      resource.kind === "page" &&
+      resource.status === "success" &&
+      resource.archivePath !== null
+    ) {
+      const bytes = payloads.get(resource.archivePath);
+      if (!bytes) throw new TypeError("Missing saved page");
+      const html = validateArchiveHtml(
+        resource.archivePath,
+        new TextDecoder().decode(bytes),
+      );
+      validateArchiveLinkTargets(
+        targetPagePath(resource.archivePath),
+        html,
+        targetPaths,
+      );
+    }
+  }
+  return buildDeterministicZip(sources);
 }
 
 const safeZipName = (value: unknown): string => {

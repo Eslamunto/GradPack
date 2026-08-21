@@ -1,5 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  renderSavedPageHtml,
+  sanitizePageFragment,
   sanitizePageHtml,
   type SanitizePageInput,
 } from "../../src/archive/sanitize";
@@ -69,6 +71,33 @@ function expectSafeOutputTree(document: Document): void {
 }
 
 describe("sanitizePageHtml", () => {
+  it("separates the sanitized fragment from the trusted saved-page shell", () => {
+    const fragment = sanitizePageFragment(
+      input("<p>Safe</p><script>alert(1)</script>"),
+    );
+    expect(fragment).toBe("<p>Safe</p>");
+    expect(fragment).not.toContain("<html");
+
+    const model = {
+      manifest: {
+        course: { name: "Synthetic Course", courseCode: "SYN-101" },
+      },
+    } as never;
+    const html = renderSavedPageHtml({
+      model,
+      pagePath: "pages/welcome.html",
+      title: "Welcome",
+      sanitizedFragment: fragment,
+      combinedHomeHref: null,
+    });
+    const document = parse(html);
+    expect(document.querySelector('[aria-current="page"]')?.textContent).toBe(
+      "Pages",
+    );
+    expect(document.querySelector('a[href="../modules.html"]')).not.toBeNull();
+    expect(document.querySelector("script, [style], [onclick]")).toBeNull();
+  });
+
   it("emits one complete deterministic offline document and escapes the title", () => {
     const page = {
       title: 'Research & <Practice> "Notes" 🌍',
@@ -259,7 +288,7 @@ describe("sanitizePageHtml", () => {
     );
   });
 
-  it("preserves safe fragments, HTTPS, and mailto while hardening external anchors", () => {
+  it("removes fragment identity while preserving hardened HTTPS and mailto anchors", () => {
     const document = parse(
       sanitizePageHtml(
         input(`
@@ -272,7 +301,8 @@ describe("sanitizePageHtml", () => {
     );
     const anchors = [...document.body.querySelectorAll("a")];
 
-    expect(anchors[0]?.outerHTML).toBe('<a href="#section-1">Jump</a>');
+    expect(anchors[0]?.outerHTML).toBe("<a>Jump</a>");
+    expect(document.body.querySelector("[id]")).toBeNull();
     expect(anchors[1]?.getAttribute("href")).toBe(
       "https://reference.test/path?q=ok#part",
     );
@@ -401,7 +431,7 @@ describe("sanitizePageHtml", () => {
       ),
     );
 
-    expect(document.body.querySelector("article h1")?.textContent).toBe(
+    expect(document.body.querySelector("article h2")?.textContent).toBe(
       "Heading 🌍",
     );
     expect(document.body.querySelectorAll("li")).toHaveLength(3);
@@ -415,7 +445,21 @@ describe("sanitizePageHtml", () => {
     expect(
       document.body.querySelector("blockquote")?.hasAttribute("cite"),
     ).toBe(false);
+    expect(document.body.querySelector("[class], [id], [role]")).toBeNull();
     expectSafeOutputTree(document);
+  });
+
+  it("cannot inject archive shell identity or structural landmarks", () => {
+    const document = parse(
+      sanitizePageHtml(
+        input(
+          '<nav class="global-rail" id="archive-main" role="navigation"><main><p class="panel">Course text</p></main></nav>',
+        ),
+      ),
+    );
+    expect(document.body.querySelector("nav, main main")).toBeNull();
+    expect(document.body.querySelector("[class], [id], [role]")).toBeNull();
+    expect(document.body.textContent).toContain("Course text");
   });
 
   it("keeps a DOM-clobbering namespace and mutation corpus inert across repeated parses", () => {

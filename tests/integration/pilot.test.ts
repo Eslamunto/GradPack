@@ -49,10 +49,14 @@ describe("one-course classmate pilot Gate C", () => {
     ).toHaveLength(1);
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/slides.pdf",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
     expect(strFromU8(zip["index.html"]!)).toContain("Synthetic Course");
     expect(page).toContain("../files/slides.pdf");
@@ -98,6 +102,9 @@ describe("one-course classmate pilot Gate C", () => {
     ) as GateManifest;
 
     expect(zip["files/slides.pdf"]).toBeUndefined();
+    expect(strFromU8(zip["pages/welcome.html"]!)).not.toContain(
+      'href="../files/slides.pdf"',
+    );
     expect(manifest.totals).toMatchObject({
       success: 1,
       failed: 0,

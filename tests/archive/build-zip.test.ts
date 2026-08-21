@@ -19,7 +19,8 @@ import {
 } from "../fixtures/course-plan";
 
 const copyInput = (): ArchiveInput => ({
-  indexHtml: syntheticArchiveInput.indexHtml,
+  archiveRoot: syntheticArchiveInput.archiveRoot,
+  pages: new Map(syntheticArchiveInput.pages),
   archiveCss: TRUSTED_ARCHIVE_CSS,
   manifest: structuredClone(syntheticArchiveInput.manifest),
   entries: new Map(
@@ -113,11 +114,11 @@ const manifestWithResources = (
     const suffix = index.toString().padStart(5, "0");
     return status === "success"
       ? {
-          key: `page:${suffix}`,
-          kind: "page" as const,
-          title: "Synthetic page",
+          key: `file:${suffix}`,
+          kind: "file" as const,
+          title: "Synthetic file",
           sourceId: suffix,
-          archivePath: `pages/topic-${suffix}.html`,
+          archivePath: `files/item-${suffix}.bin`,
           advertisedBytes: 0,
           status: "success" as const,
           actualBytes: 0,
@@ -149,17 +150,30 @@ const inputAtPayloadCount = (count: number): ArchiveInput => {
 };
 
 describe("buildCourseZip", () => {
+  it("accepts exactly five generated course pages", () => {
+    const input = copyInput();
+    expect(() => buildCourseZip(input)).not.toThrow();
+    (input.pages as Map<string, string>).delete("status.html");
+    expect(() => buildCourseZip(input)).toThrow(TypeError);
+  });
+
   it("contains exactly the required core and successful payload entries", () => {
     const zip = unzipSync(buildCourseZip(copyInput()));
 
     expect(Object.keys(zip).sort()).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/slides.pdf",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
-    expect(strFromU8(zip["index.html"]!)).toBe(syntheticArchiveInput.indexHtml);
+    expect(strFromU8(zip["index.html"]!)).toBe(
+      syntheticArchiveInput.pages.get("index.html"),
+    );
     expect(strFromU8(zip["assets/archive.css"]!)).toBe(TRUSTED_ARCHIVE_CSS);
     expect(JSON.parse(strFromU8(zip["manifest.json"]!))).toEqual(
       syntheticArchiveInput.manifest,
@@ -179,10 +193,14 @@ describe("buildCourseZip", () => {
     expect(second).toEqual(first);
     expect(zipHeaderMetadata(first).map(({ path }) => path)).toEqual([
       "assets/archive.css",
+      "files.html",
       "files/slides.pdf",
       "index.html",
       "manifest.json",
+      "modules.html",
+      "pages.html",
       "pages/welcome.html",
+      "status.html",
     ]);
     expect(zipHeaderMetadata(first).every(({ time }) => time === 0)).toBe(true);
     expect(zipHeaderMetadata(first).every(({ date }) => date === 0x2821)).toBe(
@@ -432,7 +450,7 @@ describe("buildCourseZip", () => {
   });
 
   it("rejects every non-renderer index structure and URL-bearing legacy attribute", () => {
-    const trusted = copyInput().indexHtml;
+    const trusted = copyInput().pages.get("index.html")!;
     for (const indexHtml of [
       trusted.replace(
         "<main>",
@@ -446,6 +464,10 @@ describe("buildCourseZip", () => {
       trusted.replace(
         "<head>",
         '<head><meta name="referrer" content="unsafe-url">',
+      ),
+      trusted.replace(
+        "<head>",
+        '<head><base href="https://tracking.example/">',
       ),
       trusted.replace(
         "<main>",
@@ -470,19 +492,47 @@ describe("buildCourseZip", () => {
     ]) {
       const input = copyInput();
       input.archiveCss = TRUSTED_ARCHIVE_CSS;
-      input.indexHtml = indexHtml;
+      (input.pages as Map<string, string>).set("index.html", indexHtml);
       expect(() => buildCourseZip(input)).toThrowError(TypeError);
+    }
+  });
+
+  it("rejects a generated link whose local target is absent", () => {
+    const input = copyInput();
+    const trusted = input.pages.get("index.html")!;
+    (input.pages as Map<string, string>).set(
+      "index.html",
+      trusted.replace(
+        "<main>",
+        '<main><a href="files/missing.bin">Missing</a>',
+      ),
+    );
+    expect(() => buildCourseZip(input)).toThrow(TypeError);
+  });
+
+  it("rejects local links that escape the archive root or use excess traversal", () => {
+    for (const href of ["../../../index.html", "files/../files/slides.pdf"]) {
+      const input = copyInput();
+      const trusted = input.pages.get("index.html")!;
+      (input.pages as Map<string, string>).set(
+        "index.html",
+        trusted.replace("<main>", `<main><a href="${href}">Unsafe</a>`),
+      );
+      expect(() => buildCourseZip(input)).toThrow(TypeError);
     }
   });
 
   it("rejects a network-bearing background attribute on the actual body element", () => {
     const input = copyInput();
     const document = new DOMParser().parseFromString(
-      input.indexHtml,
+      input.pages.get("index.html")!,
       "text/html",
     );
     document.body.setAttribute("background", "https://tracking.example/pixel");
-    input.indexHtml = `<!doctype html>${document.documentElement.outerHTML}`;
+    (input.pages as Map<string, string>).set(
+      "index.html",
+      `<!doctype html>${document.documentElement.outerHTML}`,
+    );
 
     expect(() => buildCourseZip(input)).toThrowError(TypeError);
   });
@@ -507,7 +557,8 @@ describe("buildCourseZip", () => {
       };
       input.manifest.totals.success -= 1;
       input.manifest.totals[status as "failed" | "unavailable"] += 1;
-      input.manifest.totals.archivedBytes -= 29;
+      input.manifest.totals.archivedBytes -=
+        syntheticArchiveOutcomes[1]?.actualBytes ?? 0;
       input.entries = new Map(
         [...input.entries].filter(([path]) => path !== "pages/welcome.html"),
       );
@@ -529,17 +580,18 @@ describe("buildCourseZip", () => {
     };
     input.manifest.totals.success -= 1;
     input.manifest.totals.failed += 1;
-    input.manifest.totals.archivedBytes -= 29;
+    input.manifest.totals.archivedBytes -=
+      syntheticArchiveOutcomes[1]?.actualBytes ?? 0;
     input.entries = new Map([
       ["files/folder/slides.pdf", strToU8("synthetic PDF bytes")],
     ]);
     expect(() => buildCourseZip(input)).toThrowError(TypeError);
   });
 
-  it("rejects 65,533 total resources before ZIP construction", () => {
+  it("rejects 65,529 total resources before ZIP construction", () => {
     const input = copyInput();
     input.archiveCss = TRUSTED_ARCHIVE_CSS;
-    input.manifest = manifestWithResources(65_533, "unsupported");
+    input.manifest = manifestWithResources(65_529, "unsupported");
     input.entries = new Map();
 
     expect(() => buildCourseZip(input)).toThrowError(
@@ -550,8 +602,8 @@ describe("buildCourseZip", () => {
     );
   });
 
-  it("accepts exactly 65,532 payloads and writes the classic-ZIP EOCD maximum", () => {
-    const zip = buildCourseZip(inputAtPayloadCount(65_532));
+  it("accepts exactly 65,528 payloads under the reserved core-entry limit", () => {
+    const zip = buildCourseZip(inputAtPayloadCount(65_528));
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     const eocd = zip.byteLength - 22;
     expect(view.getUint32(eocd, true)).toBe(0x06054b50);

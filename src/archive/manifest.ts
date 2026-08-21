@@ -410,6 +410,7 @@ const validateModules = (value: unknown): CoursePlan["modules"] =>
         "id",
         "title",
         "position",
+        "indent",
         "resourceKey",
         "type",
       ]);
@@ -421,6 +422,11 @@ const validateModules = (value: unknown): CoursePlan["modules"] =>
         id: safeInteger(valueOf(item, "id"), 1),
         title: text(valueOf(item, "title"), true),
         position: safeInteger(valueOf(item, "position")),
+        indent: (() => {
+          const indent = safeInteger(valueOf(item, "indent"));
+          if (indent > 5) throw new TypeError("Invalid archive data");
+          return indent;
+        })(),
         resourceKey: resourceKey === null ? null : text(resourceKey),
         type: text(valueOf(item, "type"), true),
       };

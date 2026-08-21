@@ -1,13 +1,14 @@
-import { strToU8 } from "fflate";
+import { strFromU8, strToU8 } from "fflate";
 import { buildCourseZip } from "../archive/build-zip";
-import { renderIndexPage } from "../archive/index-page";
+import { renderCoursePages } from "../archive/course-pages";
+import { relativeArchiveHref } from "../archive/archive-links";
+import { buildArchiveNavigationModel } from "../archive/navigation-model";
 import {
   MAX_ARCHIVE_RESOURCES,
-  buildManifest,
   type ArchiveManifest,
 } from "../archive/manifest";
 import { isCanonicalArchivePath } from "../archive/paths";
-import { sanitizePageHtml } from "../archive/sanitize";
+import { renderSavedPageHtml, sanitizePageFragment } from "../archive/sanitize";
 import { assertPilotSize } from "../canvas/discovery";
 import { canvasEndpoint } from "../canvas/endpoints";
 import {
@@ -28,6 +29,7 @@ import type {
   CoursePlan,
   CourseSummary,
   PlannedResource,
+  Progress,
   ResourceOutcome,
 } from "../shared/model";
 
@@ -38,14 +40,6 @@ const PAGE_TITLE_MAX_CHARACTERS = 500;
 export class RunSafetyError extends TypeError {
   override readonly name = "RunSafetyError";
 }
-
-export type RunStage = "discovery" | "download" | "sanitize" | "package";
-export type Progress = {
-  stage: RunStage;
-  completed: number;
-  total: number;
-  failed: number;
-};
 
 export type Retrieval =
   | { status: "success"; bytes: Uint8Array }
@@ -74,6 +68,11 @@ export type RunDependencies = {
   maxArchiveBytes?: number;
 };
 
+export type CourseArchiveDependencies = Omit<
+  RunDependencies,
+  "discover" | "download"
+>;
+
 export type RunResult = { manifest: ArchiveManifest; zipBytes: Uint8Array };
 
 const abortError = (signal: AbortSignal): DOMException =>
@@ -85,7 +84,7 @@ const throwIfAborted = (signal: AbortSignal): void => {
   if (signal.aborted) throw abortError(signal);
 };
 
-const clonePlan = (plan: CoursePlan): CoursePlan => {
+export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
   const clone: CoursePlan = {
     course: { ...plan.course },
     modules: plan.modules.map((module) => ({
@@ -121,13 +120,56 @@ const terminalOutcome = (
   failureCategory: null,
 });
 
-export async function runCourse(options: {
+const removeUnavailableLocalLinks = (
+  fragment: string,
+  pagePath: string,
+  entries: ReadonlyMap<string, Uint8Array>,
+): string => {
+  const document = new DOMParser().parseFromString(
+    `<body>${fragment}</body>`,
+    "text/html",
+  );
+  const base = `https://archive.invalid/${pagePath
+    .split("/")
+    .map(encodeURIComponent)
+    .join("/")}`;
+  for (const anchor of document.body.querySelectorAll("a[href]")) {
+    const href = anchor.getAttribute("href");
+    if (
+      href === null ||
+      href.startsWith("#") ||
+      /^[a-z][a-z0-9+.-]*:/iu.test(href)
+    )
+      continue;
+    let target: string;
+    try {
+      target = decodeURIComponent(new URL(href, base).pathname.slice(1));
+    } catch {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("rel");
+      continue;
+    }
+    if (!entries.has(target)) {
+      anchor.removeAttribute("href");
+      anchor.removeAttribute("rel");
+    }
+  }
+  return document.body.innerHTML;
+};
+
+export async function buildCourseArchive(options: {
   course: CourseSummary;
+  plan: CoursePlan;
+  combinedRoot: string | null;
   signal: AbortSignal;
   progress: (progress: Progress) => void;
-  dependencies: RunDependencies;
+  dependencies: CourseArchiveDependencies;
 }): Promise<RunResult> {
-  const { course, signal, progress, dependencies } = options;
+  const { course, plan, combinedRoot, signal, progress, dependencies } =
+    options;
+  if (combinedRoot !== null && !isCanonicalArchivePath(combinedRoot)) {
+    throw new RunSafetyError("Invalid combined course root");
+  }
   const controller = new AbortController();
   const onCallerAbort = (): void => controller.abort(abortError(signal));
   signal.addEventListener("abort", onCallerAbort, { once: true });
@@ -140,10 +182,7 @@ export async function runCourse(options: {
 
   try {
     throwIfAborted(controller.signal);
-    progress({ stage: "discovery", completed: 0, total: 0, failed: 0 });
-    const immutablePlan = clonePlan(
-      await dependencies.discover({ ...course }, controller.signal),
-    );
+    const immutablePlan = freezeCoursePlan(plan);
     if (immutablePlan.course.id !== course.id) {
       throw new RunSafetyError("Discovered course does not match selection");
     }
@@ -269,19 +308,73 @@ export async function runCourse(options: {
     dependencies.beforePackage?.();
     throwIfAborted(controller.signal);
     const createdAt = dependencies.now();
-    const manifest = buildManifest(immutablePlan, outcomes, createdAt);
-    const indexHtml = renderIndexPage(immutablePlan, outcomes, createdAt);
+    let model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
+    for (const [index, resource] of immutablePlan.resources.entries()) {
+      if (
+        resource.kind !== "page" ||
+        outcomes[index]?.status !== "success" ||
+        resource.archivePath === null
+      )
+        continue;
+      const fragmentBytes = entries.get(resource.archivePath);
+      if (!fragmentBytes)
+        throw new RunSafetyError("Missing sanitized page fragment");
+      const wrapped = strToU8(
+        renderSavedPageHtml({
+          model,
+          pagePath: resource.archivePath,
+          title: resource.title,
+          sanitizedFragment: removeUnavailableLocalLinks(
+            strFromU8(fragmentBytes),
+            resource.archivePath,
+            entries,
+          ),
+          combinedHomeHref:
+            combinedRoot === null
+              ? null
+              : relativeArchiveHref(
+                  `${combinedRoot}/${resource.archivePath}`,
+                  "index.html",
+                ),
+        }),
+      );
+      successfulBytes =
+        successfulBytes - fragmentBytes.byteLength + wrapped.byteLength;
+      if (
+        !Number.isSafeInteger(successfulBytes) ||
+        successfulBytes > byteLimit
+      ) {
+        wrapped.fill(0);
+        throw new RunSafetyError("Archive byte limit exceeded");
+      }
+      fragmentBytes.fill(0);
+      retained.add(wrapped);
+      entries.set(resource.archivePath, wrapped);
+      outcomes[index] = {
+        ...outcomes[index],
+        actualBytes: wrapped.byteLength,
+      };
+    }
+    model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
+    const manifest = model.manifest;
+    const pages = renderCoursePages(
+      model,
+      combinedRoot === null
+        ? {}
+        : {
+            combinedHomeHref: relativeArchiveHref(
+              `${combinedRoot}/index.html`,
+              "index.html",
+            ),
+          },
+    );
     zipBytes = buildCourseZip({
-      indexHtml,
+      archiveRoot: combinedRoot,
+      pages,
       archiveCss: dependencies.archiveCss,
       manifest,
       entries,
     });
-    throwIfAborted(controller.signal);
-    dependencies.download(
-      dependencies.fileName(immutablePlan.course),
-      zipBytes,
-    );
     throwIfAborted(controller.signal);
     succeeded = true;
     return { manifest, zipBytes };
@@ -292,6 +385,29 @@ export async function runCourse(options: {
     if (!succeeded) zipBytes?.fill(0);
     retained.clear();
   }
+}
+
+export async function runCourse(options: {
+  course: CourseSummary;
+  signal: AbortSignal;
+  progress: (progress: Progress) => void;
+  dependencies: RunDependencies;
+}): Promise<RunResult> {
+  const { course, signal, progress, dependencies } = options;
+  progress({ stage: "discovery", completed: 0, total: 0, failed: 0 });
+  const plan = await dependencies.discover({ ...course }, signal);
+  const result = await buildCourseArchive({
+    course,
+    plan,
+    combinedRoot: null,
+    signal,
+    progress,
+    dependencies,
+  });
+  throwIfAborted(signal);
+  dependencies.download(dependencies.fileName(course), result.zipBytes);
+  throwIfAborted(signal);
+  return result;
 }
 
 type FileTransport = {
@@ -629,7 +745,7 @@ export async function fetchPageResource(
     );
     throwIfAborted(signal);
     const page = exactPage(response.value);
-    const html = sanitizePageHtml({
+    const html = sanitizePageFragment({
       title: page.title,
       body: page.body,
       resolveLocalHref: (href) => resolveLocalHref(href, plan),
