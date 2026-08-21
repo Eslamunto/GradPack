@@ -84,6 +84,7 @@ describe("runCourse", () => {
     const result = await buildCourseArchive({
       course: syntheticCourse,
       plan: plan([file(1)]),
+      combinedRoot: null,
       signal: new AbortController().signal,
       progress: vi.fn(),
       dependencies: deps,

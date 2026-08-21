@@ -9,6 +9,8 @@ import { MAX_ARCHIVE_RESOURCES } from "./manifest";
 import { isCanonicalArchivePath, safeArchivePath } from "./paths";
 import type { ArchiveManifest } from "./manifest";
 import type { CourseSummary } from "../shared/model";
+import { COURSE_HTML_PATHS } from "./archive-links";
+import { validateArchiveHtml } from "./build-zip";
 
 export type CourseArchiveOutput = {
   course: CourseSummary;
@@ -66,21 +68,28 @@ const encodedPath = (path: string): string =>
     .map((segment) => encodeURIComponent(segment))
     .join("/");
 
-const courseRoot = (course: CourseSummary): string =>
+export const combinedCourseRoot = (course: CourseSummary): string =>
   safeArchivePath("courses", `${course.name}-${course.id}`);
+
+const document = (title: string, active: "courses" | "status", content: string): string =>
+  `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} — GradPack</title><link rel="stylesheet" href="assets/archive.css"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><nav class="global-rail" aria-label="Archive"><span class="gradpack-mark" aria-label="GradPack">GP</span><a href="index.html">Archive</a><a href="index.html"${active === "courses" ? ' aria-current="page"' : ""}>Courses</a><a href="status.html"${active === "status" ? ' aria-current="page"' : ""}>Status</a></nav><div class="archive-workspace combined-workspace"><main id="archive-main" tabindex="-1">${content}</main><footer class="archive-identity">Local GradPack archive</footer></div></div></body></html>`;
 
 const rootIndex = (
   archives: readonly CourseArchiveOutput[],
   roots: readonly string[],
+  manifest: CombinedArchiveManifest,
 ): string => {
-  const links = archives
+  const cards = archives
     .map((archive, index) => {
       const root = roots[index]!;
-      return `<li><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a> <span>${escapeHtml(archive.course.courseCode)}</span></li>`;
+      return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${archive.manifest.totals.success} saved resources</p></article>`;
     })
     .join("");
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>GradPack archives</title><link rel="stylesheet" href="assets/archive.css"></head><body><main><h1>GradPack archives</h1><p>Combined local course archive.</p><ul>${links}</ul></main></body></html>`;
+  return document("GradPack archives", "courses", `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>Your courses</h1><p>Browse ${manifest.courses.length} saved courses without Canvas.</p></header><section class="course-grid" aria-label="Saved courses">${cards}</section>`);
 };
+
+const rootStatus = (manifest: CombinedArchiveManifest): string =>
+  document("Combined archive status", "status", `<h1>Combined archive status</h1><section class="status-grid"><div class="panel"><strong>${manifest.courses.length}</strong><br>Courses</div><div class="panel"><strong>${manifest.totals.success}</strong><br>Saved</div><div class="panel"><strong>${manifest.totals.unavailable}</strong><br>Unavailable</div></section><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`);
 
 export function buildCombinedZip(input: CombinedArchiveInput): {
   zipBytes: Uint8Array;
@@ -94,7 +103,7 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   ) {
     throw new TypeError("Invalid combined archive input");
   }
-  const roots = input.archives.map(({ course }) => courseRoot(course));
+  const roots = input.archives.map(({ course }) => combinedCourseRoot(course));
   if (new Set(roots).size !== roots.length) {
     throw new TypeError("Conflicting combined course paths");
   }
@@ -122,15 +131,32 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   };
   const sources = new Map<string, Uint8Array>();
   sources.set("assets/archive.css", strToU8(input.archiveCss));
-  sources.set("index.html", strToU8(rootIndex(input.archives, roots)));
+  sources.set("index.html", strToU8(rootIndex(input.archives, roots, manifest)));
   sources.set(
     "manifest.json",
     strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
   );
+  sources.set("status.html", strToU8(rootStatus(manifest)));
 
   input.archives.forEach((archive, index) => {
     const root = roots[index]!;
     const entries: Unzipped = unzipSync(archive.zipBytes);
+    for (const pagePath of COURSE_HTML_PATHS) {
+      const bytes = entries[pagePath];
+      if (!bytes) throw new TypeError("Missing nested course page");
+      validateArchiveHtml(pagePath, new TextDecoder().decode(bytes));
+    }
+    for (const resource of archive.manifest.resources) {
+      if (
+        resource.kind === "page" &&
+        resource.status === "success" &&
+        resource.archivePath !== null
+      ) {
+        const bytes = entries[resource.archivePath];
+        if (!bytes) throw new TypeError("Missing nested saved page");
+        validateArchiveHtml(resource.archivePath, new TextDecoder().decode(bytes));
+      }
+    }
     for (const [path, bytes] of Object.entries(entries)) {
       if (!isCanonicalArchivePath(path)) {
         throw new TypeError("Invalid nested archive path");
@@ -142,7 +168,7 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
       sources.set(combinedPath, bytes);
     }
   });
-  if (sources.size > MAX_ARCHIVE_RESOURCES + 3) {
+  if (sources.size > MAX_ARCHIVE_RESOURCES + 7) {
     throw new TypeError("Combined archive resource limit exceeded");
   }
   const zipEntries: Zippable = Object.create(null) as Zippable;

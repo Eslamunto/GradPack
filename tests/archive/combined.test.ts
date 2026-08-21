@@ -1,12 +1,16 @@
-import { strFromU8, strToU8, unzipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import { buildCourseZip } from "../../src/archive/build-zip";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
   buildCombinedZip,
+  combinedCourseRoot,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
-import { buildManifest } from "../../src/archive/manifest";
+import { renderCoursePages } from "../../src/archive/course-pages";
+import { relativeArchiveHref } from "../../src/archive/archive-links";
+import { buildArchiveNavigationModel } from "../../src/archive/navigation-model";
+import { renderSavedPageHtml } from "../../src/archive/sanitize";
 import {
   syntheticArchiveInput,
   syntheticArchivePlan,
@@ -23,21 +27,47 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
       courseCode: `SYN-${id}`,
     },
   };
-  const manifest = buildManifest(
+  const outcomes = structuredClone(syntheticArchiveOutcomes);
+  const root = combinedCourseRoot(plan.course);
+  let model = buildArchiveNavigationModel(
     plan,
-    structuredClone(syntheticArchiveOutcomes),
+    outcomes,
     "2026-08-17T12:00:00.000Z",
   );
+  const entries = new Map(
+    [...syntheticArchiveInput.entries].map(([path, bytes]) => [
+      path,
+      bytes.slice(),
+    ]),
+  );
+  const pagePath = "pages/welcome.html";
+  const savedPage = strToU8(
+    renderSavedPageHtml({
+      model,
+      pagePath,
+      title: "Welcome",
+      sanitizedFragment: "<p>Welcome</p>",
+      combinedHomeHref: relativeArchiveHref(
+        `${root}/${pagePath}`,
+        "index.html",
+      ),
+    }),
+  );
+  entries.set(pagePath, savedPage);
+  outcomes[1] = { ...outcomes[1]!, actualBytes: savedPage.byteLength };
+  model = buildArchiveNavigationModel(
+    plan,
+    outcomes,
+    "2026-08-17T12:00:00.000Z",
+  );
+  const manifest = model.manifest;
   const zipBytes = buildCourseZip({
-    pages: new Map(syntheticArchiveInput.pages),
+    pages: renderCoursePages(model, {
+      combinedHomeHref: relativeArchiveHref(`${root}/index.html`, "index.html"),
+    }),
     archiveCss: ARCHIVE_CSS,
     manifest,
-    entries: new Map(
-      [...syntheticArchiveInput.entries].map(([path, bytes]) => [
-        path,
-        bytes.slice(),
-      ]),
-    ),
+    entries,
   });
   return {
     course: plan.course,
@@ -59,6 +89,32 @@ describe("buildCombinedZip", () => {
       fileName: () => "gradpack-combined.zip",
     });
     const entries = unzipSync(result.zipBytes);
+    const index = new DOMParser().parseFromString(
+      strFromU8(entries["index.html"]!),
+      "text/html",
+    );
+    expect(index.querySelectorAll(".course-card")).toHaveLength(2);
+    expect(
+      [...index.querySelectorAll("a")].map((link) => ({
+        text: link.textContent,
+        href: link.getAttribute("href"),
+      })),
+    ).toContainEqual({
+      text: "First Course",
+      href: "courses/First%20Course-101/index.html",
+    });
+    expect(strFromU8(entries["status.html"]!)).toContain(
+      "Combined archive status",
+    );
+    const savedPage = new DOMParser().parseFromString(
+      strFromU8(entries["courses/First Course-101/pages/welcome.html"]!),
+      "text/html",
+    );
+    expect(
+      [...savedPage.querySelectorAll("a")]
+        .filter((link) => link.textContent === "Courses")
+        .map((link) => link.getAttribute("href")),
+    ).toContain("../../../index.html");
     expect(Object.keys(entries)).toEqual([
       "assets/archive.css",
       "courses/First Course-101/assets/archive.css",
@@ -81,6 +137,7 @@ describe("buildCombinedZip", () => {
       "courses/Second Course-202/status.html",
       "index.html",
       "manifest.json",
+      "status.html",
     ]);
     const manifest = JSON.parse(strFromU8(entries["manifest.json"]!)) as {
       kind: string;
@@ -106,5 +163,25 @@ describe("buildCombinedZip", () => {
         fileName: () => "gradpack-combined.zip",
       }),
     ).toThrow();
+  });
+
+  it("rejects an unsafe nested course shell", () => {
+    const archive = courseArchive(404, "Unsafe Course");
+    const entries = unzipSync(archive.zipBytes);
+    entries["index.html"] = strToU8(
+      strFromU8(entries["index.html"]!).replace(
+        "</body>",
+        "<script>alert(1)</script></body>",
+      ),
+    );
+    archive.zipBytes = zipSync(entries);
+    expect(() =>
+      buildCombinedZip({
+        archives: [archive],
+        archiveCss: ARCHIVE_CSS,
+        now: () => "2026-08-17T12:00:00.000Z",
+        fileName: () => "gradpack-combined.zip",
+      }),
+    ).toThrow(TypeError);
   });
 });

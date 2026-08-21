@@ -12,7 +12,11 @@ import {
   isCanonicalArchivePath,
 } from "./paths";
 import { ARCHIVE_CSS } from "./style";
-import { COURSE_HTML_PATHS, type CourseHtmlPath } from "./archive-links";
+import {
+  COURSE_HTML_PATHS,
+  relativeArchiveHref,
+  type CourseHtmlPath,
+} from "./archive-links";
 
 const CORE_PATHS = [
   "assets/archive.css",
@@ -205,7 +209,11 @@ const safeShellHref = (value: string): boolean => {
   return url.origin === "https://archive.invalid" && isCanonicalArchivePath(path);
 };
 
-const validateShellIndex = (html: string, document: Document): string => {
+const validateShellIndex = (
+  html: string,
+  document: Document,
+  pagePath: string,
+): string => {
   if (
     document.doctype?.name.toLowerCase() !== "html" ||
     !exactAttributes(document.documentElement, { lang: "en" }) ||
@@ -213,7 +221,10 @@ const validateShellIndex = (html: string, document: Document): string => {
     document.querySelector("script, style, form, iframe, object, embed, input, button")
   ) throw new TypeError("Invalid archive index");
   const link = document.head.querySelector('link[rel="stylesheet"]');
-  if (link?.getAttribute("href") !== "assets/archive.css") {
+  if (
+    link?.getAttribute("href") !==
+    relativeArchiveHref(pagePath, "assets/archive.css")
+  ) {
     throw new TypeError("Invalid archive index");
   }
   for (const element of document.querySelectorAll("*")) {
@@ -238,11 +249,17 @@ const validateShellIndex = (html: string, document: Document): string => {
   return `<!doctype html>${document.documentElement.outerHTML}`;
 };
 
-const validateIndexHtml = (value: unknown): string => {
+export const validateArchiveHtml = (
+  pagePath: string,
+  value: unknown,
+): string => {
+  if (!isCanonicalArchivePath(pagePath)) {
+    throw new TypeError("Invalid archive page path");
+  }
   const html = archiveText(value);
   const document = new DOMParser().parseFromString(html, "text/html");
   if (document.body.querySelector(".archive-layout")) {
-    return validateShellIndex(html, document);
+    return validateShellIndex(html, document, pagePath);
   }
   const main = document.body.firstElementChild;
   if (
@@ -369,7 +386,7 @@ const collectGeneratedPages = (value: unknown): Map<CourseHtmlPath, string> => {
   for (const path of COURSE_HTML_PATHS) {
     const pair = pairs.find(([candidate]) => candidate === path);
     if (!pair) throw new TypeError("Invalid generated page set");
-    pages.set(path, validateIndexHtml(pair[1]));
+    pages.set(path, validateArchiveHtml(path, pair[1]));
   }
   return pages;
 };

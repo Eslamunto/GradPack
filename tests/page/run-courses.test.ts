@@ -245,10 +245,41 @@ describe("runCourses", () => {
       dependencies: deps,
     });
     expect(result.combined?.fileName).toBe("gradpack-combined.zip");
+    expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        combinedRoot: "courses/First Course-101",
+      }),
+    );
+    expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        combinedRoot: "courses/Second Course-202",
+      }),
+    );
     expect(deps.buildCombinedZip).toHaveBeenCalledOnce();
     expect(deps.download).toHaveBeenCalledWith(
       "gradpack-combined.zip",
       expect.any(Uint8Array),
+    );
+  });
+
+  it("does not supply a combined root in per-course mode", async () => {
+    const deps = baseDependencies(vi.fn(async (course) => planFor(course)));
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 1),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+    await runCourses({
+      plan,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+    expect(deps.buildCourseArchive).toHaveBeenCalledWith(
+      expect.objectContaining({ combinedRoot: null }),
     );
   });
 });

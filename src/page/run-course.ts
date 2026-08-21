@@ -1,6 +1,7 @@
 import { strFromU8, strToU8 } from "fflate";
 import { buildCourseZip } from "../archive/build-zip";
 import { renderCoursePages } from "../archive/course-pages";
+import { relativeArchiveHref } from "../archive/archive-links";
 import { buildArchiveNavigationModel } from "../archive/navigation-model";
 import {
   MAX_ARCHIVE_RESOURCES,
@@ -122,11 +123,15 @@ const terminalOutcome = (
 export async function buildCourseArchive(options: {
   course: CourseSummary;
   plan: CoursePlan;
+  combinedRoot: string | null;
   signal: AbortSignal;
   progress: (progress: Progress) => void;
   dependencies: CourseArchiveDependencies;
 }): Promise<RunResult> {
-  const { course, plan, signal, progress, dependencies } = options;
+  const { course, plan, combinedRoot, signal, progress, dependencies } = options;
+  if (combinedRoot !== null && !isCanonicalArchivePath(combinedRoot)) {
+    throw new RunSafetyError("Invalid combined course root");
+  }
   const controller = new AbortController();
   const onCallerAbort = (): void => controller.abort(abortError(signal));
   signal.addEventListener("abort", onCallerAbort, { once: true });
@@ -275,7 +280,9 @@ export async function buildCourseArchive(options: {
         pagePath: resource.archivePath,
         title: resource.title,
         sanitizedFragment: strFromU8(fragmentBytes),
-        combinedHomeHref: null,
+        combinedHomeHref: combinedRoot === null
+          ? null
+          : relativeArchiveHref(`${combinedRoot}/${resource.archivePath}`, "index.html"),
       }));
       fragmentBytes.fill(0);
       retained.add(wrapped);
@@ -284,7 +291,17 @@ export async function buildCourseArchive(options: {
     }
     model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
     const manifest = model.manifest;
-    const pages = renderCoursePages(model);
+    const pages = renderCoursePages(
+      model,
+      combinedRoot === null
+        ? {}
+        : {
+            combinedHomeHref: relativeArchiveHref(
+              `${combinedRoot}/index.html`,
+              "index.html",
+            ),
+          },
+    );
     zipBytes = buildCourseZip({
       pages,
       archiveCss: dependencies.archiveCss,
@@ -315,6 +332,7 @@ export async function runCourse(options: {
   const result = await buildCourseArchive({
     course,
     plan,
+    combinedRoot: null,
     signal,
     progress,
     dependencies,

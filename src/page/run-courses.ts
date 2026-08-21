@@ -1,6 +1,7 @@
 import { CanvasSessionError } from "../canvas/http";
 import {
   buildCombinedZip,
+  combinedCourseRoot,
   type CombinedArchiveOutput,
   type CourseArchiveOutput,
 } from "../archive/combined";
@@ -33,6 +34,7 @@ export type MultiCourseDependencies = {
   buildCourseArchive: (options: {
     course: CourseSummary;
     plan: CoursePlan;
+    combinedRoot: string | null;
     signal: AbortSignal;
     progress: (progress: Progress) => void;
     dependencies: CourseArchiveDependencies;
@@ -261,6 +263,10 @@ export async function runCourses(options: {
         const result = await dependencies.buildCourseArchive({
           course: coursePlan.course,
           plan: coursePlan,
+          combinedRoot:
+            plan.summary.effectivePackaging === "combined"
+              ? combinedCourseRoot(coursePlan.course)
+              : null,
           signal,
           progress: courseProgress,
           dependencies,
