@@ -87,6 +87,12 @@ Top-level names avoid collisions with the existing `pages/` and `files/`
 resource namespaces. Resource paths remain canonical and are not renamed merely
 for presentation.
 
+Classic ZIP permits at most 65,535 entries. The course archive reserves seven
+entries for its five generated HTML pages, stylesheet, and manifest, so GRAD-21
+changes the maximum captured-resource count from 65,532 to **65,528**. The
+builder must reject larger plans before retrieval or packaging; it must not
+silently omit resources or emit an over-limit archive.
+
 The course home introduces the local archive and provides direct routes to the
 four content/status destinations. It does not duplicate the entire manifest.
 
@@ -351,5 +357,6 @@ The design is complete when:
 5. no Canvas/institutional assets, archive JavaScript, or network dependency is
    introduced;
 6. strict archive, sanitizer, path, privacy, deterministic ZIP, cancellation,
-   and size/resource-limit contracts remain enforced; and
+   and size/resource-limit contracts remain enforced, including the approved
+   65,528 captured-resource maximum; and
 7. the complete automated and extracted-offline verification strategy passes.
