@@ -58,6 +58,7 @@ export type ModuleItem = {
   id: number;
   title: string;
   position: number;
+  indent: number;
   resourceKey: string | null;
   type: string;
 };

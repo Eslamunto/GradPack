@@ -63,6 +63,19 @@ const position = (value: unknown): number => {
   return value;
 };
 
+const moduleIndent = (value: unknown): number => {
+  if (value === undefined) return 0;
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 0 ||
+    value > 5
+  ) {
+    throw new TypeError("Invalid module item indent");
+  }
+  return value;
+};
+
 const optionalText = (
   value: unknown,
   fallback: string,
@@ -321,6 +334,7 @@ const normalizeItem = (
       id,
       title: optionalText(own(value, "title"), `Item ${id}`, "item title"),
       position: position(own(value, "position")),
+      indent: moduleIndent(own(value, "indent")),
       resourceKey,
       type,
     },

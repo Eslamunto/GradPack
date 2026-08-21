@@ -57,6 +57,7 @@ export function syntheticCanvasHttp(
     id: 301,
     title: itemType === "File" ? "slides.pdf" : "Unsupported item",
     position: 1,
+    indent: 0,
     type: itemType,
     ...(itemType === "File" ? { content_id: 301 } : {}),
   };
@@ -212,6 +213,7 @@ export const syntheticArchivePlan: CoursePlan = {
           id: 301,
           title: "Slides",
           position: 1,
+          indent: 0,
           resourceKey: "file:301",
           type: "File",
         },
@@ -219,6 +221,7 @@ export const syntheticArchivePlan: CoursePlan = {
           id: 302,
           title: "Public reference",
           position: 2,
+          indent: 0,
           resourceKey: "external:401",
           type: "ExternalUrl",
         },
