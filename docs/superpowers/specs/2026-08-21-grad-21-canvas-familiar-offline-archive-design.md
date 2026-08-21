@@ -123,7 +123,10 @@ segments.
 ### 4.1 Modules
 
 The Modules page preserves the normalized plan's authored module order, module
-item order, and indentation. Each item renders one explicit outcome:
+item order, and Canvas indentation levels 0 through 5. Missing indentation is
+normalized to 0; negative, fractional, or larger values are rejected rather
+than converted into unbounded presentation classes. Each item renders one
+explicit outcome:
 
 - **Saved page** — working local page link;
 - **Saved file** — working local file link;
