@@ -6,7 +6,7 @@ an unpacked extension, not through the Chrome Web Store.
 ## Before installing
 
 - Use desktop Chrome 116 or newer.
-- Keep both supplied files together: `gradpack-0.1.0-alpha.2.zip` and its
+- Keep both supplied files together: `gradpack-0.1.0-alpha.3.zip` and its
   `.sha256` sidecar.
 - GradPack saves the resulting course archive locally. It has no analytics,
   telemetry, backend, or cloud upload.
@@ -21,20 +21,20 @@ supplied files. Continue only when the calculated SHA-256 matches the sidecar.
 ### macOS
 
 ```bash
-shasum -a 256 -c gradpack-0.1.0-alpha.2.zip.sha256
+shasum -a 256 -c gradpack-0.1.0-alpha.3.zip.sha256
 ```
 
 ### Linux
 
 ```bash
-sha256sum -c gradpack-0.1.0-alpha.2.zip.sha256
+sha256sum -c gradpack-0.1.0-alpha.3.zip.sha256
 ```
 
 ### Windows PowerShell
 
 ```powershell
-Get-FileHash .\gradpack-0.1.0-alpha.2.zip -Algorithm SHA256
-Get-Content .\gradpack-0.1.0-alpha.2.zip.sha256
+Get-FileHash .\gradpack-0.1.0-alpha.3.zip -Algorithm SHA256
+Get-Content .\gradpack-0.1.0-alpha.3.zip.sha256
 ```
 
 Compare the two hexadecimal values exactly. Stop and contact the maintainer if

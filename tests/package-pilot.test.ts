@@ -27,7 +27,7 @@ const makeBuild = async (): Promise<string> => {
     await writeFile(
       join(root, path),
       path === "manifest.json"
-        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.2"}\n'
+        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.3"}\n'
         : `synthetic:${path}\n`,
     );
   }
@@ -71,6 +71,21 @@ const centralHeaders = (bytes: Uint8Array): Header[] => {
 };
 
 describe("pilot package", () => {
+  it("rejects a stale release identity", async () => {
+    const buildRoot = await makeBuild();
+    await writeFile(
+      join(buildRoot, "manifest.json"),
+      '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.2"}\n',
+    );
+
+    await expect(
+      packagePilot({
+        buildRoot,
+        artifactRoot: join(buildRoot, "out"),
+      }),
+    ).rejects.toThrow("Pilot manifest identity is invalid");
+  });
+
   it("is byte-identical and contains only fixed, allowlisted members", async () => {
     const buildRoot = await makeBuild();
     const firstArtifacts = await mkdtemp(
@@ -199,7 +214,7 @@ describe("pilot package", () => {
       await writeFile(
         join(ancestorBuild, path),
         path === "manifest.json"
-          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.2"}\n'
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.3"}\n'
           : `synthetic:${path}\n`,
       );
     }

@@ -2,8 +2,13 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { PILOT_ARTIFACT_NAME } from "../../scripts/package-pilot.mjs";
+import { buildManifest } from "../../src/archive/manifest";
+import {
+  syntheticArchiveOutcomes,
+  syntheticArchivePlan,
+} from "../fixtures/course-plan";
 
-const RELEASE_VERSION = "0.1.0-alpha.2";
+const RELEASE_VERSION = "0.1.0-alpha.3";
 const ARTIFACT_NAME = `gradpack-${RELEASE_VERSION}.zip`;
 
 describe("pilot release identity", () => {
@@ -28,6 +33,12 @@ describe("pilot release identity", () => {
     expect(packageMetadata.version).toBe(RELEASE_VERSION);
     expect(extensionManifest.version).toBe("0.1.0");
     expect(extensionManifest.version_name).toBe(RELEASE_VERSION);
+    const archiveManifest = buildManifest(
+      structuredClone(syntheticArchivePlan),
+      structuredClone(syntheticArchiveOutcomes),
+      "2026-08-25T09:00:00.000Z",
+    );
+    expect(archiveManifest.gradPackVersion).toBe(RELEASE_VERSION);
     expect(PILOT_ARTIFACT_NAME).toBe(ARTIFACT_NAME);
     expect(security).toContain(`current \`${RELEASE_VERSION}\``);
     expect(install).toContain(ARTIFACT_NAME);
