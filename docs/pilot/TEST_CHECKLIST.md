@@ -6,6 +6,11 @@
 - Operating-system version:
 - Extension installation: pass / fail
 - Course list: pass / fail
+- Selected-course count:
+- Requested packaging: combined / per-course
+- Effective packaging: combined / per-course
+- Packaging fallback notice: pass / fail / not-shown
+- Output count:
 - Course archive download: pass / fail
 - ZIP extraction: pass / fail
 - Offline index: pass / fail

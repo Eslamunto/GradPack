@@ -16,16 +16,22 @@ describe("pilot release identity", () => {
     const packageMetadata = JSON.parse(
       await readFile(new URL("../../package.json", import.meta.url), "utf8"),
     ) as { version: string };
-    const [manifestText, security, install, checklist] = await Promise.all([
-      readFile(new URL("../../src/manifest.json", import.meta.url), "utf8"),
-      readFile(new URL("../../SECURITY.md", import.meta.url), "utf8"),
-      readFile(new URL("../../docs/pilot/INSTALL.md", import.meta.url), "utf8"),
-      readFile(
-        new URL("../../docs/pilot/TEST_CHECKLIST.md", import.meta.url),
-        "utf8",
-      ),
-    ]);
+    const [manifestText, security, install, checklist, readme] =
+      await Promise.all([
+        readFile(new URL("../../src/manifest.json", import.meta.url), "utf8"),
+        readFile(new URL("../../SECURITY.md", import.meta.url), "utf8"),
+        readFile(
+          new URL("../../docs/pilot/INSTALL.md", import.meta.url),
+          "utf8",
+        ),
+        readFile(
+          new URL("../../docs/pilot/TEST_CHECKLIST.md", import.meta.url),
+          "utf8",
+        ),
+        readFile(new URL("../../README.md", import.meta.url), "utf8"),
+      ]);
     const extensionManifest = JSON.parse(manifestText) as {
+      description: string;
       version: string;
       version_name: string;
     };
@@ -33,6 +39,9 @@ describe("pilot release identity", () => {
     expect(packageMetadata.version).toBe(RELEASE_VERSION);
     expect(extensionManifest.version).toBe("0.1.0");
     expect(extensionManifest.version_name).toBe(RELEASE_VERSION);
+    expect(extensionManifest.description).toBe(
+      "Save selected accessible Canvas courses for offline use.",
+    );
     const archiveManifest = buildManifest(
       structuredClone(syntheticArchivePlan),
       structuredClone(syntheticArchiveOutcomes),
@@ -43,6 +52,21 @@ describe("pilot release identity", () => {
     expect(security).toContain(`current \`${RELEASE_VERSION}\``);
     expect(install).toContain(ARTIFACT_NAME);
     expect(install).toContain(`${ARTIFACT_NAME}.sha256`);
+    expect(install).toContain("select one or more accessible courses");
+    expect(install).toContain("combined archive or one ZIP per course");
+    expect(install).toContain("packaging fallback before retrieval");
     expect(checklist).toContain(`Artifact version: ${RELEASE_VERSION}`);
+    expect(checklist).toContain("Selected-course count:");
+    expect(checklist).toContain("Requested packaging: combined / per-course");
+    expect(checklist).toContain("Effective packaging: combined / per-course");
+    expect(checklist).toContain(
+      "Packaging fallback notice: pass / fail / not-shown",
+    );
+    expect(checklist).toContain("Output count:");
+    expect(readme).not.toContain("The one-course pilot stops before retrieval");
+    expect(readme).toContain(
+      "Every selected course is validated before retrieval",
+    );
+    expect(readme).toContain("combined-to-per-course fallback");
   });
 });

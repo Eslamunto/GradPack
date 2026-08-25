@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GradPack",
-  "description": "Save one accessible Canvas course for offline use.",
+  "description": "Save selected accessible Canvas courses for offline use.",
   "version": "0.1.0",
   "version_name": "0.1.0-alpha.3",
   "minimum_chrome_version": "116",

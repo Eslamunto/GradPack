@@ -54,11 +54,16 @@ local session. It is not an end-user feature.
 
 ### Pilot memory limits
 
-The one-course pilot stops before retrieval when advertised file sizes are
-unknown or exceed 250 MiB. It also stops if successful files plus sanitized
-pages exceed that same aggregate limit during the run; resources are never
-silently omitted to make an archive fit. Individual Canvas page-detail JSON
-bodies are streamed under a conservative 5 MiB raw-body cap and receive a
+Every selected course is validated before retrieval. GradPack stops when any
+selected course has unknown advertised file sizes or exceeds 250 MiB; it never
+silently omits resources to make a course fit. If a requested combined archive
+exceeds its aggregate size or ZIP-entry limit while the individual courses
+remain valid, GradPack shows a combined-to-per-course fallback before retrieval
+and requires confirmation.
+
+During retrieval, each course also stops if successful files plus sanitized
+pages exceed the same 250 MiB per-course limit. Individual Canvas page-detail
+JSON bodies are streamed under a conservative 5 MiB raw-body cap and receive a
 fixed, transparent unavailable outcome when that cap is exceeded.
 
 Each course archive reserves seven ZIP entries for its generated interface and

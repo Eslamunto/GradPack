@@ -10,8 +10,13 @@ an unpacked extension, not through the Chrome Web Store.
   `.sha256` sidecar.
 - GradPack saves the resulting course archive locally. It has no analytics,
   telemetry, backend, or cloud upload.
-- The pilot handles one course at a time, requires every file to have a known
-  size, and stops above 250 MiB.
+- GradPack can select one or more accessible courses and produce one
+  combined archive or one ZIP per course.
+- Every selected course requires known advertised file sizes and must fit the
+  existing 250 MiB per-course limit.
+- If a requested combined archive exceeds its aggregate size or entry limit,
+  GradPack shows the packaging fallback before retrieval and uses per-course
+  output only after confirmation.
 
 ## Verify the checksum
 
@@ -50,9 +55,11 @@ they differ.
 5. Sign in to Frankfurt School Canvas in a normal Chrome tab.
 6. Keep that tab open, signed in, and unnavigated while GradPack works.
 7. Select GradPack in the Chrome toolbar to open its Side Panel.
-8. Choose one course that meets the pilot limits and start packing.
-9. Keep the resulting course ZIP local. Extract it before opening
-   `index.html`.
+8. Select one or more accessible courses, choose combined or per-course output,
+   and start planning.
+9. Review the plan and any packaging fallback notice, then confirm retrieval.
+10. Keep the resulting archive or archives local. Extract each ZIP before
+    opening its `index.html`.
 
 GradPack retrieves only resources available to the signed-in Canvas session.
 Some resources may be unavailable, unsupported, or retained as labeled
