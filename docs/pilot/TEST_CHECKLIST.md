@@ -22,5 +22,5 @@
 - Sanitized defect description (optional):
 
 Do not include course names, filenames, Canvas IDs or URLs, screenshots,
-generated archives, page or file contents, request or response bodies, cookies,
-headers, tokens, or student identity.
+generated archives, page or file contents, request or response bodies,
+credentials, cookies, headers, tokens, or student identity.

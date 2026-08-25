@@ -63,6 +63,7 @@ describe("pilot release identity", () => {
       "Packaging fallback notice: pass / fail / not-shown",
     );
     expect(checklist).toContain("Output count:");
+    expect(checklist).toContain("credentials");
     expect(readme).not.toContain("The one-course pilot stops before retrieval");
     expect(readme).toContain(
       "Every selected course is validated before retrieval",
