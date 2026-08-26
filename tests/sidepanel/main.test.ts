@@ -62,7 +62,7 @@ beforeAll(async () => {
 });
 
 describe("accessible Side Panel flow", () => {
-  it("selects multiple courses, reviews fallback packaging, and reports aggregate completion", async () => {
+  it("correlates a multi-course plan with local progress and partial completion", async () => {
     expect(document.querySelector("h1")?.textContent).toBe("Connect to Canvas");
     expect(document.body.textContent).toContain("250 MB");
     expect(document.body.textContent).toContain("processed locally");
@@ -124,18 +124,18 @@ describe("accessible Side Panel flow", () => {
             courseId: 101,
             advertisedBytes: 19,
             unknownSizeCount: 0,
-            resourceCount: 1,
+            resourceCount: 2,
           },
           {
             courseId: 102,
             advertisedBytes: 20,
             unknownSizeCount: 0,
-            resourceCount: 1,
+            resourceCount: 3,
           },
         ],
         advertisedBytes: 39,
         unknownSizeCount: 0,
-        resourceCount: 2,
+        resourceCount: 5,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
         fallbackReason: "combined-size-exceeded",
@@ -155,6 +155,9 @@ describe("accessible Side Panel flow", () => {
       }),
     );
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    expect(document.querySelector('[role="status"]')?.textContent).toContain(
+      "course 1 of 2; 0 of 2",
+    );
     const cancel = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent === "Cancel",
     ) as HTMLButtonElement;
@@ -170,7 +173,27 @@ describe("accessible Side Panel flow", () => {
         totalCourses: 2,
         completedCourses: 1,
         completed: 1,
-        total: 2,
+        total: 5,
+        failed: 0,
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector('[role="status"]')?.textContent).toContain(
+      "course 1 of 2; 0 of 2",
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "PROGRESS",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        stage: "download",
+        currentCourseId: 102,
+        currentCourseIndex: 1,
+        totalCourses: 2,
+        completedCourses: 1,
+        completed: 1,
+        total: 3,
         failed: 0,
       },
       sender(),
@@ -180,30 +203,47 @@ describe("accessible Side Panel flow", () => {
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
       "course 2 of 2",
     );
-    listener(
-      {
-        channel: RUNNER_CHANNEL,
-        type: "COMPLETE",
-        runId: "run-12345678-1234-1234-1234-123456789abc",
-        message: "Your GradPack archives were downloaded.",
-        packaging: "per-course",
-        completedCourses: 2,
-        failedCourses: 0,
-        outputCount: 2,
-        success: 2,
-        failed: 0,
-        unavailable: 0,
-        unsupported: 0,
-        external: 0,
-      },
-      sender(),
-      vi.fn(),
-    );
+    const complete = (overrides: Record<string, unknown> = {}): void => {
+      listener(
+        {
+          channel: RUNNER_CHANNEL,
+          type: "COMPLETE",
+          runId: "run-12345678-1234-1234-1234-123456789abc",
+          message: "Your GradPack archives were downloaded.",
+          packaging: "per-course",
+          completedCourses: 1,
+          failedCourses: 1,
+          outputCount: 1,
+          success: 2,
+          failed: 0,
+          unavailable: 0,
+          unsupported: 0,
+          external: 0,
+          ...overrides,
+        },
+        sender(),
+        vi.fn(),
+      );
+    };
+    complete({ packaging: "combined", success: 5 });
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    complete({ completedCourses: 1, failedCourses: 0, success: 5 });
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    complete({ success: 6 });
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    complete({
+      completedCourses: 2,
+      failedCourses: 0,
+      outputCount: 2,
+      success: 4,
+    });
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    complete();
     expect(document.querySelector("h1")?.textContent).toBe(
       "Archives downloaded",
     );
     expect(document.querySelector(".archive-summary")?.textContent).toContain(
-      "2 archive(s) downloaded",
+      "1 archive(s) downloaded; 1 course(s) completed; 1 course(s) failed",
     );
   });
 

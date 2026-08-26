@@ -8,7 +8,10 @@ import {
 } from "../../src/page/run-courses";
 import { RunSafetyError } from "../../src/page/run-course";
 import type { CoursePlan, CourseSummary } from "../../src/shared/model";
-import { MAX_ARCHIVE_BYTES } from "../../src/shared/constants";
+import {
+  MAX_ARCHIVE_BYTES,
+  MAX_ARCHIVE_RESOURCES,
+} from "../../src/shared/constants";
 
 const courses: CourseSummary[] = [
   {
@@ -203,6 +206,43 @@ describe("createRunPlan", () => {
       fallbackReason: null,
       unknownSizeCount: 1,
     });
+  });
+
+  it("allows a safe direct per-course aggregate above one course resource cap", async () => {
+    const resourcesPerCourse = Math.floor(MAX_ARCHIVE_RESOURCES / 2) + 1;
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, 0),
+        resources: Array.from({ length: resourcesPerCourse }, (_, index) => ({
+          key: `file:${course.id}:${index}`,
+          kind: "file" as const,
+          title: `file-${index}.bin`,
+          sourceId: `${course.id}:${index}`,
+          archivePath: `files/file-${index}.bin`,
+          advertisedBytes: 0,
+          sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}-${index}/download`,
+        })),
+      })),
+    );
+
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      requestedPackaging: "per-course",
+      effectivePackaging: "per-course",
+      resourceCount: resourcesPerCourse * 2,
+      fallbackReason: null,
+    });
+    expect(plan.summary.resourceCount).toBeGreaterThan(MAX_ARCHIVE_RESOURCES);
+    expect(plan.summary.selected).toEqual([
+      expect.objectContaining({ resourceCount: resourcesPerCourse }),
+      expect.objectContaining({ resourceCount: resourcesPerCourse }),
+    ]);
   });
 
   it("falls back before retrieval when combined advertised bytes exceed the limit", async () => {

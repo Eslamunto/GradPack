@@ -64,6 +64,15 @@ describe("pilot release surface", () => {
     expect(security).toContain("private vulnerability reporting");
     expect(security).toContain("Do not include Canvas");
     expect(readme).toContain("alpha classmate pilot");
+    expect(readme).toContain(
+      "Unknown-size files are streamed under the hard 250 MiB per-course cap",
+    );
+    expect(readme).toMatch(
+      /combined request falls back to per-course output before\s+retrieval/u,
+    );
+    expect(readme).not.toContain(
+      "stops when any selected course has unknown advertised file sizes",
+    );
     expect(readme).not.toContain("product-definition and feasibility phase");
   });
 

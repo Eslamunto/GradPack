@@ -26,7 +26,6 @@ let activeRunId = "";
 let activeTabId: number | null = null;
 let terminalReceived = false;
 let cancelRequested = false;
-let lastProgressTotal: number | null = null;
 
 const button = (
   label: string,
@@ -293,7 +292,6 @@ async function connect(): Promise<void> {
   activeTabId = null;
   terminalReceived = false;
   cancelRequested = false;
-  lastProgressTotal = null;
   update({ type: "CONNECTING" });
   try {
     const result = exactConnection(
@@ -417,13 +415,20 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
   if (event.type === "COURSES") {
     update({ type: "COURSES", courses: event.courses });
   } else if (event.type === "PLAN_READY") {
-    lastProgressTotal = event.resourceCount;
     update({ type: "PLAN_READY", plan: event });
   } else if (event.type === "PROGRESS") {
     if (state.name !== "packing") return;
-    if (lastProgressTotal !== null && event.total !== lastProgressTotal) return;
+    const selectedCourse = state.plan.selected[event.currentCourseIndex];
+    if (
+      event.totalCourses !== state.plan.selected.length ||
+      selectedCourse?.courseId !== event.currentCourseId ||
+      selectedCourse.resourceCount !== event.total
+    ) {
+      return;
+    }
     update({ type: "PROGRESS", progress: event });
   } else if (event.type === "COMPLETE") {
+    if (state.name !== "packing") return;
     const counts: OutcomeCounts = {
       success: event.success,
       failed: event.failed,
@@ -432,7 +437,16 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       external: event.external,
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    if (lastProgressTotal === null || total !== lastProgressTotal) return;
+    const resolvedCourses = event.completedCourses + event.failedCourses;
+    if (
+      !Number.isSafeInteger(resolvedCourses) ||
+      event.packaging !== state.plan.effectivePackaging ||
+      resolvedCourses !== state.plan.selected.length ||
+      total > state.plan.resourceCount ||
+      (event.failedCourses === 0 && total !== state.plan.resourceCount)
+    ) {
+      return;
+    }
     const previous = state;
     update({
       type: "COMPLETE",

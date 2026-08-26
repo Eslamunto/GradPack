@@ -54,12 +54,14 @@ local session. It is not an end-user feature.
 
 ### Pilot memory limits
 
-Every selected course is validated before retrieval. GradPack stops when any
-selected course has unknown advertised file sizes or exceeds 250 MiB; it never
-silently omits resources to make a course fit. If a requested combined archive
-exceeds its aggregate size or ZIP-entry limit while the individual courses
-remain valid, GradPack shows a combined-to-per-course fallback before retrieval
-and requires confirmation.
+Every selected course is validated before retrieval.
+
+Unknown-size files are streamed under the hard 250 MiB per-course cap. When
+they are present, a combined request falls back to per-course output before
+retrieval and requires confirmation. A requested combined archive that exceeds
+its aggregate size or ZIP-entry limit while the individual courses remain valid
+uses the same visible combined-to-per-course fallback. GradPack never silently
+omits resources to make a course fit.
 
 During retrieval, each course also stops if successful files plus sanitized
 pages exceed the same 250 MiB per-course limit. Individual Canvas page-detail

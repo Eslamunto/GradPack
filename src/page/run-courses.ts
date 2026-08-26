@@ -214,24 +214,21 @@ export async function createRunPlan(options: {
       0,
     );
   if (
-    summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
-    (requestedPackaging === "combined" &&
-      (!Number.isSafeInteger(combinedEntryCount) ||
-        combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT))
+    requestedPackaging === "combined" &&
+    (summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
+      !Number.isSafeInteger(combinedEntryCount) ||
+      combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
   ) {
-    if (requestedPackaging === "combined") {
-      const summary = planSummary(
-        plans,
-        requestedPackaging,
-        "per-course",
-        "combined-resource-limit-exceeded",
-      );
-      return Object.freeze({
-        courses: Object.freeze(plans),
-        summary: Object.freeze(summary),
-      });
-    }
-    throw new MultiCourseSafetyError("Selected course resource limit exceeded");
+    const summary = planSummary(
+      plans,
+      requestedPackaging,
+      "per-course",
+      "combined-resource-limit-exceeded",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plans),
+      summary: Object.freeze(summary),
+    });
   }
   if (
     requestedPackaging === "combined" &&

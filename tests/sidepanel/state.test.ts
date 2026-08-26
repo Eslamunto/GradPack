@@ -40,7 +40,7 @@ const progress: AggregateProgress = {
   totalCourses: 2,
   completedCourses: 1,
   completed: 1,
-  total: 3,
+  total: 1,
   failed: 0,
 };
 
@@ -53,12 +53,12 @@ describe("Side Panel state reducer", () => {
     expect(choose).toMatchObject({ name: "choose", selectedIds: [] });
 
     const selected = reduceState(
-      reduceState(choose, { type: "SELECT", courseId: secondCourse.id }),
-      { type: "SELECT", courseId: syntheticCourse.id },
+      reduceState(choose, { type: "SELECT", courseId: syntheticCourse.id }),
+      { type: "SELECT", courseId: secondCourse.id },
     );
     expect(selected).toMatchObject({
       name: "choose",
-      selectedIds: [secondCourse.id, syntheticCourse.id],
+      selectedIds: [syntheticCourse.id, secondCourse.id],
     });
 
     const configure = reduceState(selected, { type: "CONFIGURE" });
@@ -76,14 +76,15 @@ describe("Side Panel state reducer", () => {
     expect(packing).toMatchObject({
       name: "packing",
       packaging: "per-course",
+      plan,
       progress: {
         stage: "discovery",
-        currentCourseId: secondCourse.id,
+        currentCourseId: syntheticCourse.id,
         currentCourseIndex: 0,
         totalCourses: 2,
         completedCourses: 0,
         completed: 0,
-        total: 3,
+        total: 2,
         failed: 0,
       },
     });

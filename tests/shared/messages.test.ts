@@ -478,12 +478,46 @@ describe("parseRunnerEvent", () => {
   });
 
   it.each([
-    { success: 65_533 },
-    { success: 65_532, failed: 1 },
+    { success: MAX_ARCHIVE_RESOURCES * 2 + 1 },
+    { success: MAX_ARCHIVE_RESOURCES * 2, failed: 1 },
     { completedCourses: 3, failedCourses: 0, outputCount: 0 },
     { completedCourses: 1, failedCourses: 1, outputCount: 0 },
   ])("rejects over-cap or inconsistent terminal totals %#", (value) => {
     expect(() => parseRunnerEvent(complete(value))).toThrow();
+  });
+
+  it("accepts aggregate COMPLETE outcomes across completed courses", () => {
+    expect(() =>
+      parseRunnerEvent(
+        complete({
+          completedCourses: 2,
+          outputCount: 2,
+          success: MAX_ARCHIVE_RESOURCES + 1,
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects COMPLETE outcomes above the completed-course bound", () => {
+    expect(() =>
+      parseRunnerEvent(
+        complete({
+          completedCourses: 2,
+          outputCount: 2,
+          success: MAX_ARCHIVE_RESOURCES * 2 + 1,
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it("rejects COMPLETE when the completed-course bound overflows", () => {
+    const completedCourses =
+      Math.floor(Number.MAX_SAFE_INTEGER / MAX_ARCHIVE_RESOURCES) + 1;
+    expect(() =>
+      parseRunnerEvent(
+        complete({ completedCourses, outputCount: completedCourses }),
+      ),
+    ).toThrow();
   });
 
   it("rejects an extra top-level or nested field", () => {

@@ -460,7 +460,12 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       external: nonNegativeInteger(input.external),
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    if (!Number.isSafeInteger(total) || total > MAX_ARCHIVE_RESOURCES) {
+    const maximumTotal = completedCourses * MAX_ARCHIVE_RESOURCES;
+    if (
+      !Number.isSafeInteger(maximumTotal) ||
+      !Number.isSafeInteger(total) ||
+      total > maximumTotal
+    ) {
       throw new TypeError("Invalid terminal counts");
     }
     return {
