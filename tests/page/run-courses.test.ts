@@ -8,7 +8,10 @@ import {
 } from "../../src/page/run-courses";
 import { RunSafetyError } from "../../src/page/run-course";
 import type { CoursePlan, CourseSummary } from "../../src/shared/model";
-import { MAX_ARCHIVE_BYTES } from "../../src/shared/constants";
+import {
+  MAX_ARCHIVE_BYTES,
+  MAX_ARCHIVE_RESOURCES,
+} from "../../src/shared/constants";
 
 const courses: CourseSummary[] = [
   {
@@ -34,10 +37,14 @@ const courses: CourseSummary[] = [
   },
 ];
 
-const planFor = (course: CourseSummary, advertisedBytes = 10): CoursePlan => ({
+const planFor = (
+  course: CourseSummary,
+  advertisedBytes = 10,
+  unknownSize = false,
+): CoursePlan => ({
   course: { ...course },
   modules: [],
-  advertisedBytes,
+  advertisedBytes: unknownSize ? 0 : advertisedBytes,
   resources: [
     {
       key: `file:${course.id}`,
@@ -45,7 +52,7 @@ const planFor = (course: CourseSummary, advertisedBytes = 10): CoursePlan => ({
       title: "file.bin",
       sourceId: String(course.id),
       archivePath: "files/file.bin",
-      advertisedBytes,
+      advertisedBytes: unknownSize ? null : advertisedBytes,
       sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}/download`,
     },
   ],
@@ -54,7 +61,7 @@ const planFor = (course: CourseSummary, advertisedBytes = 10): CoursePlan => ({
 const manifest = (course: CourseSummary): ArchiveManifest =>
   ({
     schemaVersion: 1,
-    gradPackVersion: "0.1.0-alpha.3",
+    gradPackVersion: "0.1.0-alpha.4",
     createdAt: "2026-08-17T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },
@@ -74,10 +81,15 @@ const baseDependencies = (
   discover: MultiCourseDependencies["discover"],
 ): MultiCourseDependencies => ({
   discover,
-  retrieve: vi.fn(async () => ({
-    status: "success" as const,
-    bytes: new Uint8Array([1]),
-  })),
+  retrieve: vi.fn(
+    async (...args: Parameters<MultiCourseDependencies["retrieve"]>) => {
+      void args;
+      return {
+        status: "success" as const,
+        bytes: new Uint8Array([1]),
+      };
+    },
+  ),
   buildCourseArchive: vi.fn(async ({ course, progress }) => {
     progress({ stage: "package", completed: 1, total: 1, failed: 0 });
     return {
@@ -148,10 +160,89 @@ describe("createRunPlan", () => {
       requestedPackaging: "combined",
       effectivePackaging: "combined",
       advertisedBytes: 20,
+      unknownSizeCount: 0,
       resourceCount: 2,
       fallbackReason: null,
     });
     expect(plan.courses[0]).not.toBe(sourcePlans.get(101));
+  });
+
+  it("falls back to per-course output before retrieval for unknown file sizes", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => planFor(course, 10, course.id === 101)),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+      unknownSizeCount: 1,
+      selected: [
+        { courseId: 101, unknownSizeCount: 1 },
+        { courseId: 202, unknownSizeCount: 0 },
+      ],
+    });
+    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("keeps a direct per-course request without a fallback for unknown file sizes", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => planFor(course, 10, course.id === 101)),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: null,
+      unknownSizeCount: 1,
+    });
+  });
+
+  it("allows a safe direct per-course aggregate above one course resource cap", async () => {
+    const resourcesPerCourse = Math.floor(MAX_ARCHIVE_RESOURCES / 2) + 1;
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, 0),
+        resources: Array.from({ length: resourcesPerCourse }, (_, index) => ({
+          key: `file:${course.id}:${index}`,
+          kind: "file" as const,
+          title: `file-${index}.bin`,
+          sourceId: `${course.id}:${index}`,
+          archivePath: `files/file-${index}.bin`,
+          advertisedBytes: 0,
+          sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}-${index}/download`,
+        })),
+      })),
+    );
+
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      requestedPackaging: "per-course",
+      effectivePackaging: "per-course",
+      resourceCount: resourcesPerCourse * 2,
+      fallbackReason: null,
+    });
+    expect(plan.summary.resourceCount).toBeGreaterThan(MAX_ARCHIVE_RESOURCES);
+    expect(plan.summary.selected).toEqual([
+      expect.objectContaining({ resourceCount: resourcesPerCourse }),
+      expect.objectContaining({ resourceCount: resourcesPerCourse }),
+    ]);
   });
 
   it("falls back before retrieval when combined advertised bytes exceed the limit", async () => {
@@ -202,6 +293,43 @@ describe("createRunPlan", () => {
     expect(plan.summary.fallbackReason).toBe(
       "combined-resource-limit-exceeded",
     );
+    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("prefers the unknown-size fallback when combined ZIP entries also exceed capacity", async () => {
+    const counts = new Map([
+      [101, 32_759],
+      [202, 32_759],
+    ]);
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, 0),
+        resources: Array.from(
+          { length: counts.get(course.id)! },
+          (_, index) => ({
+            key: `file:${course.id}:${index}`,
+            kind: "file" as const,
+            title: `file-${index}.bin`,
+            sourceId: `${course.id}:${index}`,
+            archivePath: `files/file-${index}.bin`,
+            advertisedBytes: course.id === 101 && index === 0 ? null : 0,
+            sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}-${index}/download`,
+          }),
+        ),
+      })),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+      unknownSizeCount: 1,
+    });
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
@@ -281,16 +409,17 @@ describe("runCourses", () => {
       dependencies: deps,
     });
     expect(result.combined?.fileName).toBe("gradpack-combined.zip");
+    expect(result.effectivePackaging).toBe("combined");
     expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        combinedRoot: "courses/First Course-101",
+        combinedRoot: null,
       }),
     );
     expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        combinedRoot: "courses/Second Course-202",
+        combinedRoot: null,
       }),
     );
     expect(deps.buildCombinedZip).toHaveBeenCalledOnce();
@@ -298,6 +427,51 @@ describe("runCourses", () => {
       "gradpack-combined.zip",
       expect.any(Uint8Array),
     );
+  });
+
+  it("hands off standalone successes when one requested combined course fails", async () => {
+    const deps = baseDependencies(vi.fn(async (course) => planFor(course)));
+    deps.buildCourseArchive = vi.fn(async ({ course, combinedRoot }) => {
+      expect(combinedRoot).toBeNull();
+      if (course.id === 202) throw new RunSafetyError("course-local");
+      return {
+        manifest: manifest(course),
+        zipBytes: new Uint8Array([course.id % 256]),
+      };
+    });
+    const plan = await createRunPlan({
+      courses,
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    const result = await runCourses({
+      plan,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(deps.buildCourseArchive).toHaveBeenCalledTimes(3);
+    expect(deps.buildCombinedZip).not.toHaveBeenCalled();
+    expect(deps.download).toHaveBeenCalledTimes(2);
+    expect(deps.download).toHaveBeenNthCalledWith(
+      1,
+      "gradpack-101.zip",
+      expect.any(Uint8Array),
+    );
+    expect(deps.download).toHaveBeenNthCalledWith(
+      2,
+      "gradpack-303.zip",
+      expect.any(Uint8Array),
+    );
+    expect(result).toMatchObject({
+      effectivePackaging: "per-course",
+      combined: null,
+      failedCourseIds: [202],
+    });
+    expect(result.completed.map(({ course }) => course.id)).toEqual([101, 303]);
   });
 
   it("does not supply a combined root in per-course mode", async () => {

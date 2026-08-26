@@ -76,9 +76,9 @@ const productionDependencies = (
         signal.removeEventListener("abort", onAbort);
       }
     },
-    retrieve: async (resource, plan, activeSignal) => {
+    retrieve: async (resource, plan, activeSignal, remainingBytes) => {
       if (resource.kind === "file")
-        return fetchFileResource(resource, activeSignal);
+        return fetchFileResource(resource, activeSignal, {}, remainingBytes);
       if (resource.kind === "page")
         return fetchPageResource(
           resource,
@@ -187,6 +187,7 @@ if (scope[marker] !== true) {
         message: FIXED.complete,
         packaging: result.effectivePackaging,
         completedCourses: result.completed.length,
+        completedCourseIds: result.completed.map(({ course }) => course.id),
         failedCourses: result.failedCourseIds.length,
         outputCount,
         ...result.counts,

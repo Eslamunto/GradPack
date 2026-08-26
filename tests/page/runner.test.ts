@@ -2,6 +2,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { CanvasSessionError } from "../../src/canvas/http";
 import { EXTENSION_CHANNEL } from "../../src/shared/constants";
+import { parseRunnerEvent } from "../../src/shared/messages";
 import { syntheticCourse } from "../fixtures/course-plan";
 
 const mocks = vi.hoisted(() => ({
@@ -79,11 +80,17 @@ const plan = (
   ],
   summary: {
     selected: [
-      { courseId: syntheticCourse.id, advertisedBytes: 0, resourceCount: 0 },
+      {
+        courseId: syntheticCourse.id,
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount: 0,
+      },
     ],
     requestedPackaging: "combined" as const,
     effectivePackaging,
     advertisedBytes: 0,
+    unknownSizeCount: 0,
     resourceCount: 0,
     fallbackReason:
       effectivePackaging === "per-course"
@@ -120,6 +127,22 @@ const successfulResult = {
     external: 0,
   },
 };
+
+const partialCourses = [
+  syntheticCourse,
+  {
+    ...syntheticCourse,
+    id: 202,
+    name: "Second Course",
+    courseCode: "SYN-202",
+  },
+  {
+    ...syntheticCourse,
+    id: 303,
+    name: "Third Course",
+    courseCode: "SYN-303",
+  },
+];
 
 let runnerImported = false;
 beforeAll(async () => {
@@ -213,6 +236,92 @@ describe("production page runner", () => {
     expect(mocks.runCourses).not.toHaveBeenCalled();
     cancel("run-plan0002");
     await new Promise((resolve) => setTimeout(resolve, 0));
+    postMessage.mockRestore();
+  });
+
+  it("emits a parser-accepted partial COMPLETE with exact course IDs", async () => {
+    mocks.listAccessibleCourses.mockResolvedValueOnce(partialCourses);
+    mocks.createRunPlan.mockResolvedValueOnce({
+      courses: partialCourses.map((course) => ({
+        course,
+        modules: [],
+        resources: [],
+        advertisedBytes: 0,
+      })),
+      summary: {
+        selected: partialCourses.map((course) => ({
+          courseId: course.id,
+          advertisedBytes: 0,
+          unknownSizeCount: 0,
+          resourceCount: 0,
+        })),
+        requestedPackaging: "combined",
+        effectivePackaging: "combined",
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount: 0,
+        fallbackReason: null,
+      },
+    });
+    mocks.runCourses.mockResolvedValueOnce({
+      effectivePackaging: "per-course",
+      combined: null,
+      completed: [partialCourses[0]!, partialCourses[2]!].map((course) => ({
+        course,
+        fileName: `gradpack-${course.id}.zip`,
+        manifest: {
+          totals: {
+            success: 1,
+            failed: 0,
+            unavailable: 0,
+            unsupported: 0,
+            external: 0,
+          },
+        },
+        zipBytes: new Uint8Array(),
+      })),
+      failedCourseIds: [202],
+      counts: {
+        success: 2,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
+      },
+    });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+
+    list("run-plan0007");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start(
+      "run-plan0007",
+      partialCourses.map(({ id }) => id),
+      "combined",
+    );
+    await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
+    confirm("run-plan0007");
+    await vi.waitFor(() => expect(mocks.runCourses).toHaveBeenCalledOnce());
+    const completePayload = await vi.waitFor(() => {
+      const payload = postMessage.mock.calls
+        .map(([value]) => (value as RuntimeEvent).payload)
+        .find((value) => value?.type === "COMPLETE");
+      expect(payload).toBeDefined();
+      return payload!;
+    });
+
+    expect(() => parseRunnerEvent(completePayload)).not.toThrow();
+    expect(completePayload).toMatchObject({
+      type: "COMPLETE",
+      packaging: "per-course",
+      completedCourses: 2,
+      completedCourseIds: [101, 303],
+      failedCourses: 1,
+      outputCount: 2,
+    });
     postMessage.mockRestore();
   });
 

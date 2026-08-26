@@ -6,14 +6,16 @@ an unpacked extension, not through the Chrome Web Store.
 ## Before installing
 
 - Use desktop Chrome 116 or newer.
-- Keep both supplied files together: `gradpack-0.1.0-alpha.3.zip` and its
+- Keep both supplied files together: `gradpack-0.1.0-alpha.4.zip` and its
   `.sha256` sidecar.
 - GradPack saves the resulting course archive locally. It has no analytics,
   telemetry, backend, or cloud upload.
 - GradPack can select one or more accessible courses and produce one
   combined archive or one ZIP per course.
-- Every selected course requires known advertised file sizes and must fit the
-  existing 250 MiB per-course limit.
+- Unknown-size files are streamed under the hard 250 MiB per-course cap.
+- If a combined request includes unknown-size files, GradPack shows the
+  packaging fallback before retrieval and falls back to per-course output
+  after confirmation.
 - If a requested combined archive exceeds its aggregate size or entry limit,
   GradPack shows the packaging fallback before retrieval and uses per-course
   output only after confirmation.
@@ -26,20 +28,20 @@ supplied files. Continue only when the calculated SHA-256 matches the sidecar.
 ### macOS
 
 ```bash
-shasum -a 256 -c gradpack-0.1.0-alpha.3.zip.sha256
+shasum -a 256 -c gradpack-0.1.0-alpha.4.zip.sha256
 ```
 
 ### Linux
 
 ```bash
-sha256sum -c gradpack-0.1.0-alpha.3.zip.sha256
+sha256sum -c gradpack-0.1.0-alpha.4.zip.sha256
 ```
 
 ### Windows PowerShell
 
 ```powershell
-Get-FileHash .\gradpack-0.1.0-alpha.3.zip -Algorithm SHA256
-Get-Content .\gradpack-0.1.0-alpha.3.zip.sha256
+Get-FileHash .\gradpack-0.1.0-alpha.4.zip -Algorithm SHA256
+Get-Content .\gradpack-0.1.0-alpha.4.zip.sha256
 ```
 
 Compare the two hexadecimal values exactly. Stop and contact the maintainer if

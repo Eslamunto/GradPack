@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 
-export const PILOT_ARTIFACT_NAME = "gradpack-0.1.0-alpha.3.zip";
+export const PILOT_ARTIFACT_NAME = "gradpack-0.1.0-alpha.4.zip";
 export const PILOT_FILES = Object.freeze([
   "archive.css",
   "manifest.json",
@@ -285,7 +285,7 @@ const validateText = (path, bytes) => {
       !("version" in manifest) ||
       manifest.version !== "0.1.0" ||
       !("version_name" in manifest) ||
-      manifest.version_name !== "0.1.0-alpha.3"
+      manifest.version_name !== "0.1.0-alpha.4"
     ) {
       throw new TypeError("Pilot manifest identity is invalid");
     }
@@ -587,5 +587,12 @@ export async function packagePilot({
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  await packagePilot();
+  const rawArguments = process.argv.slice(2);
+  const argumentsList =
+    rawArguments[0] === "--" ? rawArguments.slice(1) : rawArguments;
+  if (argumentsList.length > 1) {
+    throw new TypeError("Unsupported packaging arguments");
+  }
+  const artifactRoot = argumentsList[0];
+  await packagePilot(artifactRoot === undefined ? {} : { artifactRoot });
 }

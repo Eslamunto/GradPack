@@ -5,11 +5,16 @@ import {
   PilotSizeError,
 } from "../../src/canvas/discovery";
 import {
+  CanvasBodySizeError,
   CanvasHttp,
   CanvasResponseError,
   CanvasSessionError,
+  CanvasTransientError,
 } from "../../src/canvas/http";
-import { CANVAS_ORIGIN } from "../../src/shared/constants";
+import {
+  CANVAS_ORIGIN,
+  CANVAS_PAGE_JSON_MAX_BYTES,
+} from "../../src/shared/constants";
 import {
   planWithOneFile,
   syntheticCanvasHttp,
@@ -17,7 +22,11 @@ import {
   type SyntheticHttp,
 } from "../fixtures/course-plan";
 
-const file = (id: number, name = `file-${id}.bin`, size = id) => ({
+const file = (
+  id: number,
+  name = `file-${id}.bin`,
+  size: number | null = id,
+) => ({
   id,
   folder_id: 401,
   display_name: name,
@@ -146,6 +155,324 @@ describe("discoverCoursePlan", () => {
     );
   });
 
+  it("discovers one canonical metadata-backed file from both accepted anchors on a planned page", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: {
+        welcome: {
+          title: "Welcome",
+          body: [
+            '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+            `<a href="${CANVAS_ORIGIN}/courses/101/files/777/download">Download</a>`,
+          ].join(""),
+        },
+      },
+      fileDetails: { 777: file(777, "official.pdf", 23) },
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan.resources.map(({ key }) => key)).toEqual([
+      "file:777",
+      "page:welcome",
+    ]);
+    expect(plan.resources.filter(({ key }) => key === "file:777")).toEqual([
+      {
+        key: "file:777",
+        kind: "file",
+        title: "official.pdf",
+        sourceId: "777",
+        archivePath: "files/Week One/official.pdf",
+        advertisedBytes: 23,
+        sourceUrl: `${CANVAS_ORIGIN}/files/777/download`,
+      },
+    ]);
+    expect(plan.resources.filter(({ kind }) => kind === "page")).toHaveLength(
+      1,
+    );
+    expect(http.jsonBoundedResource.mock.calls).toContainEqual([
+      expect.objectContaining({
+        href: `${CANVAS_ORIGIN}/api/v1/courses/101/pages/welcome`,
+      }),
+      CANVAS_PAGE_JSON_MAX_BYTES,
+    ]);
+  });
+
+  it.each([403, 404] as const)(
+    "creates one deterministic unknown-size file when exact metadata returns %s",
+    async (status) => {
+      const http = syntheticCanvasHttp({
+        modules: [],
+        files: [],
+        pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+        pageDetails: {
+          welcome: {
+            title: "Welcome",
+            body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+          },
+        },
+        fileDetailStatuses: { 777: status },
+      });
+
+      const plan = await discoverCoursePlan(http, syntheticCourse);
+
+      expect(plan.resources.find(({ key }) => key === "file:777")).toEqual({
+        key: "file:777",
+        kind: "file",
+        title: "file-777",
+        sourceId: "777",
+        archivePath: "files/file-777",
+        advertisedBytes: null,
+        sourceUrl: `${CANVAS_ORIGIN}/courses/101/files/777/download`,
+      });
+      expect(plan.advertisedBytes).toBe(0);
+    },
+  );
+
+  it("rejects an indexed file with an explicit null size", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [file(777, "indexed.pdf", null)],
+      pages: [],
+    });
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+      "Invalid file size",
+    );
+  });
+
+  it("rejects successful page-linked metadata with an explicit null size", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: {
+        welcome: {
+          title: "Welcome",
+          body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+        },
+      },
+      fileDetails: { 777: file(777, "successful.pdf", null) },
+    });
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+      "Invalid file size",
+    );
+  });
+
+  it.each([
+    ["session", new CanvasSessionError("session")],
+    ["transient exhaustion", new CanvasTransientError("transient")],
+    ["oversized metadata body", new CanvasBodySizeError("metadata too large")],
+  ])("rejects page-linked file metadata on %s", async (_name, error) => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: {
+        welcome: {
+          title: "Welcome",
+          body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+        },
+      },
+    });
+    const bounded = http.jsonBoundedResource.getMockImplementation()!;
+    http.jsonBoundedResource.mockImplementation((url, maximumBytes) =>
+      url.pathname.endsWith("/files/777")
+        ? Promise.reject(error)
+        : bounded(url, maximumBytes),
+    );
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toBe(error);
+  });
+
+  it.each([
+    ["malformed", null, "Mismatched file metadata"],
+    ["mismatched-ID", file(778), "Mismatched file metadata"],
+    [
+      "unsafe",
+      { ...file(777), url: "https://untrusted.test/files/777/download" },
+      "Rejected file URL",
+    ],
+    ["malformed-size", file(777, "invalid.bin", -1), "Invalid file size"],
+  ])(
+    "rejects %s page-linked file metadata",
+    async (_name, detail, expectedMessage) => {
+      const http = syntheticCanvasHttp({
+        modules: [],
+        files: [],
+        pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+        pageDetails: {
+          welcome: {
+            title: "Welcome",
+            body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+          },
+        },
+        fileDetails: { 777: detail },
+      });
+
+      await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+        expectedMessage,
+      );
+    },
+  );
+
+  it.each([403, 404] as const)(
+    "keeps a planned page but contributes no embedded files when its preflight returns %s",
+    async (status) => {
+      const http = syntheticCanvasHttp({
+        modules: [],
+        files: [],
+        pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+        pageResourceStatuses: { welcome: status },
+      });
+
+      const plan = await discoverCoursePlan(http, syntheticCourse);
+
+      expect(plan.resources.map(({ key }) => key)).toEqual(["page:welcome"]);
+      expect(
+        http.jsonBoundedResource.mock.calls.some(([url]) =>
+          url.pathname.includes("/files/"),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("keeps a planned page but contributes no embedded files when its preflight exceeds the body cap", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+    });
+    const error = new CanvasBodySizeError("page too large");
+    http.jsonBoundedResource.mockRejectedValue(error);
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan.resources.map(({ key }) => key)).toEqual(["page:welcome"]);
+  });
+
+  it.each([
+    ["session", new CanvasSessionError("session")],
+    ["transient exhaustion", new CanvasTransientError("transient")],
+    ["unsafe final URL", new CanvasResponseError("Rejected final Canvas URL")],
+    ["cancellation", new DOMException("aborted", "AbortError")],
+  ])(
+    "fails planning when page preflight has a terminal %s",
+    async (_name, error) => {
+      const http = syntheticCanvasHttp({
+        modules: [],
+        files: [],
+        pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      });
+      http.jsonBoundedResource.mockRejectedValue(error);
+
+      await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toBe(
+        error,
+      );
+    },
+  );
+
+  it("rejects a malformed page preflight response", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: { welcome: null },
+    });
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+      "Canvas returned an invalid page",
+    );
+  });
+
+  it("keeps authoritative indexed file metadata when a page links to the same ID", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [file(777, "indexed.pdf", 31)],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: {
+        welcome: {
+          title: "Welcome",
+          body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+        },
+      },
+      fileDetailStatuses: { 777: 404 },
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan.resources.find(({ key }) => key === "file:777")).toEqual(
+      expect.objectContaining({
+        title: "indexed.pdf",
+        advertisedBytes: 31,
+        sourceUrl: `${CANVAS_ORIGIN}/files/777/download`,
+      }),
+    );
+    expect(
+      http.jsonBoundedResource.mock.calls.some(([url]) =>
+        url.pathname.endsWith("/files/777"),
+      ),
+    ).toBe(false);
+  });
+
+  it("settles active page preflights and rejects queued pages after the first terminal failure", async () => {
+    const activeGate = deferred();
+    const failureSeen = deferred();
+    const marker = new CanvasResponseError("page preflight failure");
+    const calls: string[] = [];
+    let active = 0;
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: ["alpha", "beta", "gamma", "delta"].map((url, index) => ({
+        page_id: 501 + index,
+        url,
+        title: url,
+      })),
+    });
+    http.jsonBoundedResource.mockImplementation(async (url) => {
+      const token = url.pathname.split("/").at(-1)!;
+      calls.push(token);
+      active += 1;
+      if (token === "alpha") {
+        await activeGate.promise;
+        active -= 1;
+        return { value: { title: "alpha", body: "" } };
+      }
+      if (token === "beta") {
+        active -= 1;
+        failureSeen.resolve();
+        throw marker;
+      }
+      active -= 1;
+      return { value: { title: token, body: "" } };
+    });
+    const request = discoverCoursePlan(http, syntheticCourse);
+    let terminal = false;
+    const observed = request.then(
+      () => {
+        terminal = true;
+      },
+      () => {
+        terminal = true;
+      },
+    );
+
+    await failureSeen.promise;
+    await Promise.resolve();
+    const terminalBeforeJoin = terminal;
+    activeGate.resolve();
+    await expect(request).rejects.toBe(marker);
+    await observed;
+
+    expect(terminalBeforeJoin).toBe(false);
+    expect(calls).toEqual(["alpha", "beta"]);
+    expect(active).toBe(0);
+  });
+
   it("aborts active discovery siblings, rejects queued work, and awaits cleanup on first failure", async () => {
     const controller = new AbortController();
     const first = new TypeError("first discovery failure");
@@ -208,22 +535,24 @@ describe("discoverCoursePlan", () => {
       "file:777",
       "page:module-page",
     ]);
-    expect(http.json.mock.calls).toContainEqual([
+    expect(http.jsonBoundedResource.mock.calls).toContainEqual([
       expect.objectContaining({
         pathname: "/api/v1/courses/101/files/777",
       }),
+      CANVAS_PAGE_JSON_MAX_BYTES,
     ]);
     expect(
-      [...http.fetchAll.mock.calls, ...http.json.mock.calls].map(
+      [...http.fetchAll.mock.calls, ...http.jsonBoundedResource.mock.calls].map(
         ([url]) => url.origin,
       ),
     ).toEqual(
       expect.arrayContaining(["https://frankfurtschool.instructure.com"]),
     );
     expect(
-      [...http.fetchAll.mock.calls, ...http.json.mock.calls].some(([url]) =>
-        url.href.includes("evil.test"),
-      ),
+      [
+        ...http.fetchAll.mock.calls,
+        ...http.jsonBoundedResource.mock.calls,
+      ].some(([url]) => url.href.includes("evil.test")),
     ).toBe(false);
     expect(
       plan.resources.find(({ key }) => key === "file:777")?.archivePath,
@@ -574,7 +903,7 @@ describe("discoverCoursePlan", () => {
       }
       throw new TypeError("Unexpected synthetic request");
     });
-    const json = vi.fn(async (url: URL) => {
+    const jsonBoundedResource = vi.fn(async (url: URL) => {
       active += 1;
       maxActive = Math.max(maxActive, active);
       await Promise.resolve();
@@ -582,7 +911,11 @@ describe("discoverCoursePlan", () => {
       const id = Number(url.pathname.split("/").at(-1));
       return { value: file(id) };
     });
-    const http = { fetchAll, json } as unknown as SyntheticHttp;
+    const http = {
+      fetchAll,
+      json: vi.fn(),
+      jsonBoundedResource,
+    } as unknown as SyntheticHttp;
 
     const plan = await discoverCoursePlan(http, syntheticCourse);
 
@@ -715,7 +1048,7 @@ describe("discoverCoursePlan", () => {
       unavailableIndexes: { files: 404 },
       pages: [],
     });
-    http.json.mockImplementation(async (url: URL) => {
+    http.jsonBoundedResource.mockImplementation(async (url: URL) => {
       const id = Number(url.pathname.split("/").at(-1));
       calls.push(id);
       active += 1;
@@ -864,7 +1197,7 @@ describe("assertPilotSize", () => {
     [262_144_000, false],
     [262_144_001, true],
     [-1, true],
-    [null, true],
+    [null, false],
     [1.5, true],
     [Number.NaN, true],
   ])("enforces advertised size %s", (size, rejected) => {

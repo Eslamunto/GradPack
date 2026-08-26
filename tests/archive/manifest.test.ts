@@ -5,6 +5,7 @@ import {
   syntheticArchiveInput,
   syntheticArchiveOutcomes,
   syntheticArchivePlan,
+  unknownFileResource,
 } from "../fixtures/course-plan";
 
 const CREATED_AT = "2026-08-16T12:00:00.000Z";
@@ -14,12 +15,115 @@ const copyOutcomes = (): ResourceOutcome[] =>
   structuredClone(syntheticArchiveOutcomes);
 
 describe("buildManifest", () => {
+  it.each([
+    ["success", 25, null],
+    ["unavailable", null, "not-found"],
+  ] as const)(
+    "records an unknown-size file with a %s outcome",
+    (status, actualBytes, failureCategory) => {
+      const resource = unknownFileResource();
+      const plan: CoursePlan = {
+        course: structuredClone(syntheticArchivePlan.course),
+        modules: [],
+        resources: [resource],
+        advertisedBytes: 0,
+      };
+      const outcomes: ResourceOutcome[] = [
+        { ...resource, status, actualBytes, failureCategory },
+      ];
+
+      const manifest = buildManifest(plan, outcomes, CREATED_AT);
+
+      expect(manifest.schemaVersion).toBe(1);
+      expect(manifest.totals).toMatchObject({
+        success: status === "success" ? 1 : 0,
+        unavailable: status === "unavailable" ? 1 : 0,
+        advertisedBytes: 0,
+        archivedBytes: actualBytes ?? 0,
+      });
+      expect(manifest.resources).toEqual([
+        expect.objectContaining({
+          key: "file:777",
+          advertisedBytes: null,
+          status,
+          actualBytes,
+          failureCategory,
+        }),
+      ]);
+    },
+  );
+
+  it.each([
+    [
+      "another course",
+      "https://frankfurtschool.instructure.com/courses/202/files/777/download",
+    ],
+    [
+      "a query",
+      "https://frankfurtschool.instructure.com/courses/101/files/777/download?verifier=synthetic",
+    ],
+    [
+      "the known-size route",
+      "https://frankfurtschool.instructure.com/files/777/download",
+    ],
+  ])("rejects an unknown-size file URL for %s", (_label, sourceUrl) => {
+    const resource = { ...unknownFileResource(), sourceUrl };
+    const plan: CoursePlan = {
+      course: structuredClone(syntheticArchivePlan.course),
+      modules: [],
+      resources: [resource],
+      advertisedBytes: 0,
+    };
+    const outcomes: ResourceOutcome[] = [
+      {
+        ...resource,
+        status: "unavailable",
+        actualBytes: null,
+        failureCategory: "not-found",
+      },
+    ];
+
+    expect(() => buildManifest(plan, outcomes, CREATED_AT)).toThrowError(
+      TypeError,
+    );
+  });
+
+  it.each(["0", "0777", "not-a-file-id"])(
+    "rejects the non-canonical unknown-size file ID %s",
+    (sourceId) => {
+      const resource = {
+        ...unknownFileResource(),
+        key: `file:${sourceId}`,
+        sourceId,
+        sourceUrl: `https://frankfurtschool.instructure.com/courses/101/files/${sourceId}/download`,
+      };
+      const plan: CoursePlan = {
+        course: structuredClone(syntheticArchivePlan.course),
+        modules: [],
+        resources: [resource],
+        advertisedBytes: 0,
+      };
+      const outcomes: ResourceOutcome[] = [
+        {
+          ...resource,
+          status: "unavailable",
+          actualBytes: null,
+          failureCategory: "not-found",
+        },
+      ];
+
+      expect(() => buildManifest(plan, outcomes, CREATED_AT)).toThrowError(
+        TypeError,
+      );
+    },
+  );
+
   it("builds a deterministic privacy-safe manifest in plan order", () => {
     const manifest = buildManifest(copyPlan(), copyOutcomes(), CREATED_AT);
 
     expect(manifest).toEqual({
       schemaVersion: 1,
-      gradPackVersion: "0.1.0-alpha.3",
+      gradPackVersion: "0.1.0-alpha.4",
       createdAt: CREATED_AT,
       canvasHost: "frankfurtschool.instructure.com",
       course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },

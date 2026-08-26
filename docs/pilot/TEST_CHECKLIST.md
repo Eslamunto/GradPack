@@ -1,6 +1,6 @@
 # GradPack pilot test checklist
 
-- Artifact version: 0.1.0-alpha.3
+- Artifact version: 0.1.0-alpha.4
 - SHA-256 verified: pass / fail
 - Chrome version:
 - Operating-system version:

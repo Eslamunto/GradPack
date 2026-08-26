@@ -27,6 +27,7 @@ export type UiEvent =
       type: "COMPLETE";
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       counts: OutcomeCounts;
@@ -50,11 +51,17 @@ export type ViewState =
       selectedIds: number[];
       plan: RunPlanSummary;
     }
-  | { name: "packing"; progress: AggregateProgress; packaging: PackagingMode }
+  | {
+      name: "packing";
+      progress: AggregateProgress;
+      packaging: PackagingMode;
+      plan: RunPlanSummary;
+    }
   | {
       name: "complete";
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       counts: OutcomeCounts;
@@ -124,19 +131,20 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
     };
   }
   if (event.type === "CONFIRM" && state.name === "review") {
-    const firstCourseId = state.selectedIds[0];
-    if (firstCourseId === undefined) return state;
+    const firstCourse = state.plan.selected[0];
+    if (firstCourse === undefined) return state;
     return {
       name: "packing",
       packaging: state.plan.effectivePackaging,
+      plan: state.plan,
       progress: {
         stage: "discovery",
-        currentCourseId: firstCourseId,
+        currentCourseId: firstCourse.courseId,
         currentCourseIndex: 0,
-        totalCourses: state.selectedIds.length,
+        totalCourses: state.plan.selected.length,
         completedCourses: 0,
         completed: 0,
-        total: state.plan.resourceCount,
+        total: firstCourse.resourceCount,
         failed: 0,
       },
     };
@@ -149,6 +157,7 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
       name: "complete",
       packaging: event.packaging,
       completedCourses: event.completedCourses,
+      completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
       counts: event.counts,

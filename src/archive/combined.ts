@@ -3,7 +3,7 @@ import { normalizeArchiveManifest } from "./manifest";
 import { isCanonicalArchivePath, safeArchivePath } from "./paths";
 import type { ArchiveManifest } from "./manifest";
 import type { CourseSummary } from "../shared/model";
-import { COURSE_HTML_PATHS } from "./archive-links";
+import { COURSE_HTML_PATHS, relativeArchiveHref } from "./archive-links";
 import {
   buildDeterministicZip,
   MAX_CLASSIC_ZIP_ENTRIES,
@@ -11,6 +11,7 @@ import {
   validateArchiveLinkTargets,
 } from "./build-zip";
 import { ARCHIVE_CSS } from "./style";
+import { COURSES_HOME_LINK_CLASS } from "./shell";
 
 const COURSE_CORE_PATHS = new Set([
   "assets/archive.css",
@@ -79,6 +80,43 @@ const encodedPath = (path: string): string =>
     .split("/")
     .map((segment) => encodeURIComponent(segment))
     .join("/");
+
+const rewriteCoursesHomeLinks = (
+  pagePath: string,
+  root: string,
+  validatedHtml: string,
+): Uint8Array => {
+  const document = new DOMParser().parseFromString(validatedHtml, "text/html");
+  const selector = `a.${COURSES_HOME_LINK_CLASS}`;
+  const marked = [...document.querySelectorAll(selector)];
+  const globalLink = document.querySelector(`nav.global-rail > ${selector}`);
+  const breadcrumbLink = document.querySelector(
+    `nav.breadcrumbs > ${selector}`,
+  );
+  const standaloneHref = relativeArchiveHref(pagePath, "index.html");
+  if (
+    marked.length !== 2 ||
+    globalLink === null ||
+    breadcrumbLink === null ||
+    globalLink === breadcrumbLink ||
+    marked.some(
+      (link) =>
+        (link !== globalLink && link !== breadcrumbLink) ||
+        link.textContent !== "Courses" ||
+        link.getAttribute("href") !== standaloneHref,
+    )
+  ) {
+    throw new TypeError("Invalid nested Courses links");
+  }
+  const standaloneAnchor = `<a class="${COURSES_HOME_LINK_CLASS}" href="${standaloneHref}">Courses</a>`;
+  const fragments = validatedHtml.split(standaloneAnchor);
+  if (fragments.length !== 3) {
+    throw new TypeError("Invalid nested Courses links");
+  }
+  const combinedHref = relativeArchiveHref(`${root}/${pagePath}`, "index.html");
+  const combinedAnchor = `<a class="${COURSES_HOME_LINK_CLASS}" href="${combinedHref}">Courses</a>`;
+  return strToU8(fragments.join(combinedAnchor));
+};
 
 export const combinedCourseRoot = (course: CourseSummary): string =>
   safeArchivePath("courses", `${course.name}-${course.id}`);
@@ -175,6 +213,7 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
   input.archives.forEach((archive, index) => {
     const root = roots[index]!;
     const entries: Unzipped = unzipSync(archive.zipBytes);
+    const rewrittenHtml = new Map<string, Uint8Array>();
     const nestedManifest = normalizeArchiveManifest(archive.manifest);
     const expectedManifest = `${JSON.stringify(nestedManifest, null, 2)}\n`;
     if (
@@ -200,7 +239,14 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
     for (const pagePath of COURSE_HTML_PATHS) {
       const bytes = entries[pagePath];
       if (!bytes) throw new TypeError("Missing nested course page");
-      validateArchiveHtml(pagePath, new TextDecoder().decode(bytes));
+      const validated = validateArchiveHtml(
+        pagePath,
+        new TextDecoder().decode(bytes),
+      );
+      rewrittenHtml.set(
+        pagePath,
+        rewriteCoursesHomeLinks(pagePath, root, validated),
+      );
     }
     for (const resource of nestedManifest.resources) {
       if (
@@ -210,9 +256,13 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
       ) {
         const bytes = entries[resource.archivePath];
         if (!bytes) throw new TypeError("Missing nested saved page");
-        validateArchiveHtml(
+        const validated = validateArchiveHtml(
           resource.archivePath,
           new TextDecoder().decode(bytes),
+        );
+        rewrittenHtml.set(
+          resource.archivePath,
+          rewriteCoursesHomeLinks(resource.archivePath, root, validated),
         );
       }
     }
@@ -224,7 +274,7 @@ export function buildCombinedZip(input: CombinedArchiveInput): {
       if (!isCanonicalArchivePath(combinedPath) || sources.has(combinedPath)) {
         throw new TypeError("Conflicting combined archive path");
       }
-      sources.set(combinedPath, bytes);
+      sources.set(combinedPath, rewrittenHtml.get(path) ?? bytes);
     }
   });
   if (sources.size > MAX_CLASSIC_ZIP_ENTRIES) {

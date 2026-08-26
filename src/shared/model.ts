@@ -16,11 +16,14 @@ export type Progress = {
 
 export type PackagingMode = "combined" | "per-course";
 export type PlanFallbackReason =
-  "combined-size-exceeded" | "combined-resource-limit-exceeded";
+  | "combined-size-exceeded"
+  | "combined-resource-limit-exceeded"
+  | "unknown-size-files";
 
 export type CoursePlanSummary = {
   courseId: number;
   advertisedBytes: number;
+  unknownSizeCount: number;
   resourceCount: number;
 };
 
@@ -29,6 +32,7 @@ export type RunPlanSummary = {
   requestedPackaging: PackagingMode;
   effectivePackaging: PackagingMode;
   advertisedBytes: number;
+  unknownSizeCount: number;
   resourceCount: number;
   fallbackReason: PlanFallbackReason | null;
 };

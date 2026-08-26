@@ -12,12 +12,23 @@ const secondCourse = {
 
 const plan: RunPlanSummary = {
   selected: [
-    { courseId: syntheticCourse.id, advertisedBytes: 19, resourceCount: 2 },
-    { courseId: secondCourse.id, advertisedBytes: 21, resourceCount: 1 },
+    {
+      courseId: syntheticCourse.id,
+      advertisedBytes: 19,
+      unknownSizeCount: 0,
+      resourceCount: 2,
+    },
+    {
+      courseId: secondCourse.id,
+      advertisedBytes: 21,
+      unknownSizeCount: 0,
+      resourceCount: 1,
+    },
   ],
   requestedPackaging: "combined",
   effectivePackaging: "per-course",
   advertisedBytes: 40,
+  unknownSizeCount: 0,
   resourceCount: 3,
   fallbackReason: "combined-size-exceeded",
 };
@@ -29,7 +40,7 @@ const progress: AggregateProgress = {
   totalCourses: 2,
   completedCourses: 1,
   completed: 1,
-  total: 3,
+  total: 1,
   failed: 0,
 };
 
@@ -42,12 +53,12 @@ describe("Side Panel state reducer", () => {
     expect(choose).toMatchObject({ name: "choose", selectedIds: [] });
 
     const selected = reduceState(
-      reduceState(choose, { type: "SELECT", courseId: secondCourse.id }),
-      { type: "SELECT", courseId: syntheticCourse.id },
+      reduceState(choose, { type: "SELECT", courseId: syntheticCourse.id }),
+      { type: "SELECT", courseId: secondCourse.id },
     );
     expect(selected).toMatchObject({
       name: "choose",
-      selectedIds: [secondCourse.id, syntheticCourse.id],
+      selectedIds: [syntheticCourse.id, secondCourse.id],
     });
 
     const configure = reduceState(selected, { type: "CONFIGURE" });
@@ -65,14 +76,15 @@ describe("Side Panel state reducer", () => {
     expect(packing).toMatchObject({
       name: "packing",
       packaging: "per-course",
+      plan,
       progress: {
         stage: "discovery",
-        currentCourseId: secondCourse.id,
+        currentCourseId: syntheticCourse.id,
         currentCourseIndex: 0,
         totalCourses: 2,
         completedCourses: 0,
         completed: 0,
-        total: 3,
+        total: 2,
         failed: 0,
       },
     });
@@ -85,6 +97,7 @@ describe("Side Panel state reducer", () => {
         type: "COMPLETE",
         packaging: "per-course",
         completedCourses: 1,
+        completedCourseIds: [syntheticCourse.id],
         failedCourses: 1,
         outputCount: 1,
         counts: {
@@ -95,7 +108,11 @@ describe("Side Panel state reducer", () => {
           external: 0,
         },
       }),
-    ).toMatchObject({ name: "complete", outputCount: 1 });
+    ).toMatchObject({
+      name: "complete",
+      completedCourseIds: [syntheticCourse.id],
+      outputCount: 1,
+    });
   });
 
   it("ignores impossible transitions and blocks empty or invalid runs", () => {

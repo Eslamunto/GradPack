@@ -1,4 +1,7 @@
 import {
+  CLASSIC_ZIP_ENTRY_LIMIT,
+  COMBINED_CORE_ENTRY_COUNT,
+  COURSE_CORE_ENTRY_COUNT,
   EXTENSION_CHANNEL,
   MAX_ARCHIVE_RESOURCES,
   RUNNER_CHANNEL,
@@ -64,6 +67,7 @@ export type RunnerEvent =
       message: string;
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       success: number;
@@ -215,7 +219,8 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
   if (
     value !== null &&
     value !== "combined-size-exceeded" &&
-    value !== "combined-resource-limit-exceeded"
+    value !== "combined-resource-limit-exceeded" &&
+    value !== "unknown-size-files"
   ) {
     throw new TypeError("Invalid fallback reason");
   }
@@ -224,10 +229,16 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
 
 const planSummary = (value: unknown): CoursePlanSummary => {
   const input = record(value);
-  exactKeys(input, ["courseId", "advertisedBytes", "resourceCount"]);
+  exactKeys(input, [
+    "courseId",
+    "advertisedBytes",
+    "unknownSizeCount",
+    "resourceCount",
+  ]);
   return {
     courseId: positiveInteger(input.courseId, "Invalid course ID"),
     advertisedBytes: nonNegativeInteger(input.advertisedBytes),
+    unknownSizeCount: nonNegativeInteger(input.unknownSizeCount),
     resourceCount: nonNegativeInteger(input.resourceCount),
   };
 };
@@ -239,6 +250,7 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     "runId",
     "selected",
     "advertisedBytes",
+    "unknownSizeCount",
     "resourceCount",
     "requestedPackaging",
     "effectivePackaging",
@@ -247,12 +259,23 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const selected = denseArray(input.selected, 10_000).map(planSummary);
   if (selected.length === 0) throw new TypeError("Invalid plan");
   const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
+  const unknownSizeCount = nonNegativeInteger(input.unknownSizeCount);
   const resourceCount = nonNegativeInteger(input.resourceCount);
-  if (resourceCount > MAX_ARCHIVE_RESOURCES)
-    throw new TypeError("Invalid plan");
+  if (
+    unknownSizeCount > resourceCount ||
+    selected.some(
+      (item) =>
+        item.resourceCount > MAX_ARCHIVE_RESOURCES ||
+        item.unknownSizeCount > item.resourceCount,
+    )
+  ) {
+    throw new TypeError("Invalid plan counts");
+  }
   if (
     selected.reduce((total, item) => total + item.advertisedBytes, 0) !==
       advertisedBytes ||
+    selected.reduce((total, item) => total + item.unknownSizeCount, 0) !==
+      unknownSizeCount ||
     selected.reduce((total, item) => total + item.resourceCount, 0) !==
       resourceCount
   ) {
@@ -261,10 +284,26 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const requestedPackaging = packaging(input.requestedPackaging);
   const effectivePackaging = packaging(input.effectivePackaging);
   const reason = fallbackReason(input.fallbackReason);
+  const combinedEntryCount =
+    COMBINED_CORE_ENTRY_COUNT +
+    COURSE_CORE_ENTRY_COUNT * selected.length +
+    resourceCount;
+  if (
+    effectivePackaging === "combined" &&
+    (resourceCount > MAX_ARCHIVE_RESOURCES ||
+      !Number.isSafeInteger(combinedEntryCount) ||
+      combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
+  ) {
+    throw new TypeError("Invalid plan");
+  }
   if (
     (requestedPackaging === effectivePackaging && reason !== null) ||
     (requestedPackaging !== effectivePackaging && reason === null) ||
-    (effectivePackaging === "combined" && reason !== null)
+    (effectivePackaging === "combined" && reason !== null) ||
+    (reason === "unknown-size-files" && unknownSizeCount === 0) ||
+    (requestedPackaging === "combined" &&
+      unknownSizeCount > 0 &&
+      reason !== "unknown-size-files")
   ) {
     throw new TypeError("Invalid packaging fallback");
   }
@@ -274,6 +313,7 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     runId: id,
     selected,
     advertisedBytes,
+    unknownSizeCount,
     resourceCount,
     requestedPackaging,
     effectivePackaging,
@@ -399,6 +439,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       "message",
       "packaging",
       "completedCourses",
+      "completedCourseIds",
       "failedCourses",
       "outputCount",
       "success",
@@ -412,10 +453,15 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     ]);
     const packagingMode = packaging(input.packaging);
     const completedCourses = nonNegativeInteger(input.completedCourses);
+    const completedCourseIds = denseArray(input.completedCourseIds, 10_000).map(
+      (value) => positiveInteger(value, "Invalid completed course ID"),
+    );
     const failedCourses = nonNegativeInteger(input.failedCourses);
     const outputCount = nonNegativeInteger(input.outputCount);
     if (
       completedCourses === 0 ||
+      completedCourseIds.length !== completedCourses ||
+      new Set(completedCourseIds).size !== completedCourseIds.length ||
       outputCount === 0 ||
       (packagingMode === "combined" && outputCount !== 1) ||
       (packagingMode === "per-course" && outputCount !== completedCourses)
@@ -430,7 +476,12 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       external: nonNegativeInteger(input.external),
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    if (!Number.isSafeInteger(total) || total > MAX_ARCHIVE_RESOURCES) {
+    const maximumTotal = completedCourses * MAX_ARCHIVE_RESOURCES;
+    if (
+      !Number.isSafeInteger(maximumTotal) ||
+      !Number.isSafeInteger(total) ||
+      total > maximumTotal
+    ) {
       throw new TypeError("Invalid terminal counts");
     }
     return {
@@ -440,6 +491,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       message,
       packaging: packagingMode,
       completedCourses,
+      completedCourseIds,
       failedCourses,
       outputCount,
       ...counts,

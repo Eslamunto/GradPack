@@ -3,16 +3,32 @@ import { strFromU8, strToU8, unzipSync, type Unzipped } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
   buildCombinedZip,
-  combinedCourseRoot,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
+import type { ArchiveManifest } from "../../src/archive/manifest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
   buildCourseArchive,
   type CourseArchiveDependencies,
 } from "../../src/page/run-course";
 import type { CoursePlan, CourseSummary } from "../../src/shared/model";
-import { syntheticArchivePlan } from "../fixtures/course-plan";
+import {
+  runSyntheticPilot,
+  SYNTHETIC_PAGE_ONLY_FILE_CONTENT,
+  SYNTHETIC_PAGE_ONLY_FILE_ID,
+  syntheticArchivePlan,
+} from "../fixtures/course-plan";
+
+type PageOnlyPilotOptions = Parameters<typeof runSyntheticPilot>[0] & {
+  pageOnlyFile: true;
+};
+
+const pageOnlyPilotOptions = (
+  unavailableFile = false,
+): PageOnlyPilotOptions => ({
+  pageOnlyFile: true,
+  unavailableFile,
+});
 
 const course = (id: number, name: string): CourseSummary => ({
   id,
@@ -113,6 +129,78 @@ const verifyOfflineArchive = (entries: Unzipped): void => {
 };
 
 describe("extracted offline archive navigation", () => {
+  it("archives an unknown-size file discovered only from a synthetic page", async () => {
+    const result = await runSyntheticPilot(pageOnlyPilotOptions());
+    const entries = unzipSync(result.zipBytes);
+    const manifest = JSON.parse(
+      strFromU8(entries["manifest.json"]!),
+    ) as ArchiveManifest;
+    const page = new DOMParser().parseFromString(
+      strFromU8(entries["pages/welcome.html"]!),
+      "text/html",
+    );
+
+    verifyOfflineArchive(entries);
+    expect(Object.keys(entries)).toContain(
+      `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+    );
+    expect(
+      page.querySelector(
+        `a[href="../files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}"]`,
+      )?.textContent,
+    ).toContain("Open the page-only file");
+    expect(manifest.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: `file:${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          archivePath: `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          advertisedBytes: null,
+          status: "success",
+          actualBytes: strToU8(SYNTHETIC_PAGE_ONLY_FILE_CONTENT).byteLength,
+          failureCategory: null,
+        }),
+      ]),
+    );
+  });
+
+  it("keeps page-only unavailable file text without a broken local link", async () => {
+    const result = await runSyntheticPilot(pageOnlyPilotOptions(true));
+    const entries = unzipSync(result.zipBytes);
+    const manifest = JSON.parse(
+      strFromU8(entries["manifest.json"]!),
+    ) as ArchiveManifest;
+    const page = new DOMParser().parseFromString(
+      strFromU8(entries["pages/welcome.html"]!),
+      "text/html",
+    );
+    const status = new DOMParser().parseFromString(
+      strFromU8(entries["status.html"]!),
+      "text/html",
+    );
+
+    verifyOfflineArchive(entries);
+    expect(
+      entries[`files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`],
+    ).toBeUndefined();
+    expect(page.body.textContent).toContain("Open the page-only file");
+    expect(page.querySelector('a[href*="file-777"]')).toBeNull();
+    expect(status.body.textContent).toContain("file-777");
+    expect(status.body.textContent).toContain("unavailable");
+    expect(manifest.totals).toMatchObject({ unavailable: 1 });
+    expect(manifest.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: `file:${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          archivePath: `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          advertisedBytes: null,
+          status: "unavailable",
+          actualBytes: null,
+          failureCategory: "not-found",
+        }),
+      ]),
+    );
+  });
+
   it("resolves every individual and combined local link without network access", async () => {
     const first = course(101, "First Course");
     const individual = await buildCourse(first, null);
@@ -136,12 +224,28 @@ describe("extracted offline archive navigation", () => {
         .querySelector('.course-navigation a[aria-current="page"]')
         ?.textContent,
     ).toBe("Pages");
+    const standaloneModules = new DOMParser().parseFromString(
+      strFromU8(individualEntries["modules.html"]!),
+      "text/html",
+    );
+    expect(
+      [...standaloneModules.querySelectorAll("a.courses-home-link")].map(
+        (link) => link.getAttribute("href"),
+      ),
+    ).toEqual(["index.html", "index.html"]);
+    const standaloneSavedPage = new DOMParser().parseFromString(
+      strFromU8(individualEntries["pages/welcome.html"]!),
+      "text/html",
+    );
+    expect(
+      [...standaloneSavedPage.querySelectorAll("a.courses-home-link")].map(
+        (link) => link.getAttribute("href"),
+      ),
+    ).toEqual(["../index.html", "../index.html"]);
 
     const second = course(202, "Second Course");
     const archives = await Promise.all(
-      [first, second].map((selected) =>
-        buildCourse(selected, combinedCourseRoot(selected)),
-      ),
+      [first, second].map((selected) => buildCourse(selected, null)),
     );
     const combined = buildCombinedZip({
       archives,
@@ -151,6 +255,26 @@ describe("extracted offline archive navigation", () => {
     });
     const combinedEntries = unzipSync(combined.zipBytes);
     verifyOfflineArchive(combinedEntries);
+    const nestedHome = new DOMParser().parseFromString(
+      strFromU8(combinedEntries["courses/First Course-101/index.html"]!),
+      "text/html",
+    );
+    expect(
+      [...nestedHome.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../index.html", "../../index.html"]);
+    const nestedPage = new DOMParser().parseFromString(
+      strFromU8(
+        combinedEntries["courses/First Course-101/pages/welcome.html"]!,
+      ),
+      "text/html",
+    );
+    expect(
+      [...nestedPage.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../../index.html", "../../../index.html"]);
     expect(combined.manifest.courses).toHaveLength(2);
     expect(combined.manifest.totals.success).toBe(4);
   });

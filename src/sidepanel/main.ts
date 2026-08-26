@@ -26,7 +26,6 @@ let activeRunId = "";
 let activeTabId: number | null = null;
 let terminalReceived = false;
 let cancelRequested = false;
-let lastProgressTotal: number | null = null;
 
 const button = (
   label: string,
@@ -180,12 +179,27 @@ const render = (): void => {
       paragraph(
         `Advertised material: ${state.plan.advertisedBytes} bytes across ${state.plan.resourceCount} resource(s).`,
       ),
-      state.plan.fallbackReason
+      ...(state.plan.unknownSizeCount > 0
+        ? [
+            paragraph(
+              `Unknown-size files: ${state.plan.unknownSizeCount}. GradPack will stream them under the hard 250 MiB per-course cap.`,
+              "unknown-size-notice",
+            ),
+          ]
+        : []),
+      state.plan.fallbackReason === "unknown-size-files"
         ? paragraph(
-            "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+            "The requested combined archive will be changed to separate course ZIPs because unknown-size files must be streamed under the hard 250 MiB per-course cap.",
             "fallback-notice",
           )
-        : paragraph("Discovery is complete. Confirm to begin local retrieval."),
+        : state.plan.fallbackReason
+          ? paragraph(
+              "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+              "fallback-notice",
+            )
+          : paragraph(
+              "Discovery is complete. Confirm to begin local retrieval.",
+            ),
       button("Continue to packing", () => void confirmPlan()),
       button(
         cancelRequested ? "Cancelling…" : "Cancel",
@@ -278,7 +292,6 @@ async function connect(): Promise<void> {
   activeTabId = null;
   terminalReceived = false;
   cancelRequested = false;
-  lastProgressTotal = null;
   update({ type: "CONNECTING" });
   try {
     const result = exactConnection(
@@ -402,13 +415,20 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
   if (event.type === "COURSES") {
     update({ type: "COURSES", courses: event.courses });
   } else if (event.type === "PLAN_READY") {
-    lastProgressTotal = event.resourceCount;
     update({ type: "PLAN_READY", plan: event });
   } else if (event.type === "PROGRESS") {
     if (state.name !== "packing") return;
-    if (lastProgressTotal !== null && event.total !== lastProgressTotal) return;
+    const selectedCourse = state.plan.selected[event.currentCourseIndex];
+    if (
+      event.totalCourses !== state.plan.selected.length ||
+      selectedCourse?.courseId !== event.currentCourseId ||
+      selectedCourse.resourceCount !== event.total
+    ) {
+      return;
+    }
     update({ type: "PROGRESS", progress: event });
   } else if (event.type === "COMPLETE") {
+    if (state.name !== "packing") return;
     const counts: OutcomeCounts = {
       success: event.success,
       failed: event.failed,
@@ -417,12 +437,37 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       external: event.external,
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    if (lastProgressTotal === null || total !== lastProgressTotal) return;
+    const resolvedCourses = event.completedCourses + event.failedCourses;
+    const selectedById = new Map(
+      state.plan.selected.map((selected) => [selected.courseId, selected]),
+    );
+    const completedAreSelected = event.completedCourseIds.every((courseId) =>
+      selectedById.has(courseId),
+    );
+    const expectedOutcomeTotal = event.completedCourseIds.reduce(
+      (sum, courseId) => sum + (selectedById.get(courseId)?.resourceCount ?? 0),
+      0,
+    );
+    const expectedPackaging =
+      event.failedCourses > 0 ? "per-course" : state.plan.effectivePackaging;
+    if (
+      !Number.isSafeInteger(resolvedCourses) ||
+      event.packaging !== expectedPackaging ||
+      resolvedCourses !== state.plan.selected.length ||
+      event.failedCourses !==
+        state.plan.selected.length - event.completedCourseIds.length ||
+      !completedAreSelected ||
+      !Number.isSafeInteger(expectedOutcomeTotal) ||
+      total !== expectedOutcomeTotal
+    ) {
+      return;
+    }
     const previous = state;
     update({
       type: "COMPLETE",
       packaging: event.packaging,
       completedCourses: event.completedCourses,
+      completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
       counts,

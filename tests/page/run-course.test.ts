@@ -5,6 +5,7 @@ import { ARCHIVE_CSS } from "../../src/archive/style";
 import { sanitizePageFragment } from "../../src/archive/sanitize";
 import {
   buildCourseArchive,
+  resolveLocalHref,
   RunSafetyError,
   runCourse,
   type Retrieval,
@@ -21,6 +22,12 @@ const file = (id: number, size = 4): PlannedResource => ({
   archivePath: `files/file-${id}.bin`,
   advertisedBytes: size,
   sourceUrl: `https://frankfurtschool.instructure.com/files/${id}/download`,
+});
+
+const unknownFile = (id: number): PlannedResource => ({
+  ...file(id),
+  advertisedBytes: null,
+  sourceUrl: `https://frankfurtschool.instructure.com/courses/${syntheticCourse.id}/files/${id}/download`,
 });
 
 const page: PlannedResource = {
@@ -59,14 +66,19 @@ const dependencies = (
   retrieve: (
     resource: PlannedResource,
     signal: AbortSignal,
+    remainingBytes: number,
   ) => Promise<Retrieval>,
 ): RunDependencies & { download: ReturnType<typeof vi.fn> } => {
   const download = vi.fn();
   return {
     discover: vi.fn(async () => coursePlan),
     retrieve: vi.fn(
-      (resource: PlannedResource, _plan: CoursePlan, signal: AbortSignal) =>
-        retrieve(resource, signal),
+      (
+        resource: PlannedResource,
+        _plan: CoursePlan,
+        signal: AbortSignal,
+        remainingBytes: number,
+      ) => retrieve(resource, signal, remainingBytes),
     ),
     archiveCss: ARCHIVE_CSS,
     now: () => "2026-08-16T12:00:00.000Z",
@@ -75,7 +87,58 @@ const dependencies = (
   };
 };
 
+const buildPageLinkedArchive = async (
+  fileOutcome: Retrieval,
+): Promise<ReturnType<typeof unzipSync>> => {
+  const coursePlan = plan([unknownFile(777), page]);
+  const fragment = sanitizePageFragment({
+    title: "Welcome",
+    body: '<p><a href="/courses/101/files/777?wrap=1">Open the page-only file</a></p>',
+    resolveLocalHref: (href) => resolveLocalHref(href, coursePlan),
+  });
+  const deps = dependencies(coursePlan, async (resource) =>
+    resource.kind === "page"
+      ? { status: "success", bytes: strToU8(fragment) }
+      : fileOutcome,
+  );
+  const result = await buildCourseArchive({
+    course: syntheticCourse,
+    plan: coursePlan,
+    combinedRoot: null,
+    signal: new AbortController().signal,
+    progress: vi.fn(),
+    dependencies: deps,
+  });
+  return unzipSync(result.zipBytes);
+};
+
 describe("runCourse", () => {
+  it("packages a successful unknown-size page-linked file under its local href", async () => {
+    const zip = await buildPageLinkedArchive({
+      status: "success",
+      bytes: strToU8("synthetic page-only bytes"),
+    });
+    const pageHtml = strFromU8(zip["pages/welcome.html"]!);
+
+    expect(strFromU8(zip["files/file-777.bin"]!)).toBe(
+      "synthetic page-only bytes",
+    );
+    expect(pageHtml).toContain('href="../files/file-777.bin"');
+    expect(pageHtml).toContain("Open the page-only file");
+  });
+
+  it("removes an unavailable unknown-size local href without removing its label", async () => {
+    const zip = await buildPageLinkedArchive({
+      status: "unavailable",
+      failureCategory: "access-denied",
+    });
+    const pageHtml = strFromU8(zip["pages/welcome.html"]!);
+
+    expect(zip["files/file-777.bin"]).toBeUndefined();
+    expect(pageHtml).not.toContain('href="../files/file-777.bin"');
+    expect(pageHtml).toContain("Open the page-only file");
+  });
+
   it("builds a discovered course plan without handing off a download", async () => {
     const deps = dependencies(plan([file(1)]), async () => ({
       status: "success",
@@ -207,13 +270,15 @@ describe("runCourse", () => {
     });
   });
 
-  it("limits retrieval concurrency to two", async () => {
+  it("allows known-size file and page retrievals to share concurrency", async () => {
     let active = 0;
     let maximum = 0;
+    const started: string[] = [];
     const releases: Array<() => void> = [];
     const deps = dependencies(
-      plan([file(1), file(2), file(3), file(4)]),
-      async () => {
+      plan([file(1), page, file(2), file(3)]),
+      async (resource) => {
+        started.push(resource.key);
         active += 1;
         maximum = Math.max(maximum, active);
         await new Promise<void>((resolve) => releases.push(resolve));
@@ -228,6 +293,7 @@ describe("runCourse", () => {
       dependencies: deps,
     });
     await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(started).toEqual(["file:1", "page:welcome"]);
     releases.splice(0).forEach((release) => release());
     await vi.waitFor(() => expect(releases).toHaveLength(2));
     releases.splice(0).forEach((release) => release());
@@ -271,6 +337,53 @@ describe("runCourse", () => {
     expect(deps.download).not.toHaveBeenCalled();
   });
 
+  it("zeroes success bytes returned by a sibling after terminal cancellation", async () => {
+    const lateBytes = new Uint8Array([7, 8]);
+    const deps = dependencies(
+      plan([file(1), file(2)]),
+      async (resource, signal) => {
+        if (resource.key === "file:1") {
+          throw new RunSafetyError("synthetic safety");
+        }
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return { status: "success", bytes: lateBytes };
+      },
+    );
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("synthetic safety");
+    expect(lateBytes).toEqual(new Uint8Array(2));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("zeroes success bytes rejected by post-retrieval path validation", async () => {
+    const invalidPath = { ...file(1), archivePath: "../escape.bin" };
+    const returnedBytes = new Uint8Array([7, 8]);
+    const deps = dependencies(plan([invalidPath]), async () => ({
+      status: "success",
+      bytes: returnedBytes,
+    }));
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Invalid planned archive path");
+    expect(returnedBytes).toEqual(new Uint8Array(2));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
   it("stops when successful resources exceed the aggregate archive-byte cap", async () => {
     const deps = dependencies(plan([file(1, 4)]), async () => ({
       status: "success",
@@ -285,6 +398,301 @@ describe("runCourse", () => {
         dependencies: deps,
       }),
     ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("passes the current remaining course budget to every retrieval", async () => {
+    const observed: Array<[string, number]> = [];
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([file(1, 2), file(2, 2), unknownFile(3)]),
+      async (resource, _signal, remainingBytes) => {
+        observed.push([resource.key, remainingBytes]);
+        return { status: "success", bytes: new Uint8Array(2) };
+      },
+    );
+    deps.maxArchiveBytes = 6;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Task 4 pre-package boundary");
+
+    expect(observed).toEqual([
+      ["file:1", 6],
+      ["file:2", 6],
+      ["file:3", 2],
+    ]);
+    expect(beforePackage).toHaveBeenCalledOnce();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("waits for an active known retrieval before authorizing an unknown remainder", async () => {
+    const knownBytes = new Uint8Array([1, 2, 3]);
+    const unknownBytes = new Uint8Array([4, 5]);
+    const started: Array<[string, number]> = [];
+    let active = 0;
+    let maximum = 0;
+    let releaseKnown!: () => void;
+    let markKnownStarted!: () => void;
+    const knownRelease = new Promise<void>((resolve) => {
+      releaseKnown = resolve;
+    });
+    const knownStarted = new Promise<void>((resolve) => {
+      markKnownStarted = resolve;
+    });
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([file(1, 3), unknownFile(2)]),
+      async (resource, _signal, remainingBytes) => {
+        started.push([resource.key, remainingBytes]);
+        active += 1;
+        maximum = Math.max(maximum, active);
+
+        try {
+          if (resource.key === "file:1") {
+            markKnownStarted();
+            await knownRelease;
+            return { status: "success", bytes: knownBytes };
+          }
+
+          return { status: "success", bytes: unknownBytes };
+        } finally {
+          active -= 1;
+        }
+      },
+    );
+    deps.maxArchiveBytes = 5;
+    deps.beforePackage = beforePackage;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await knownStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeKnownCompleted = [...started];
+    releaseKnown();
+
+    await expect(action).rejects.toThrow("Task 4 pre-package boundary");
+    expect(startedBeforeKnownCompleted).toEqual([["file:1", 5]]);
+    expect(started).toEqual([
+      ["file:1", 5],
+      ["file:2", 2],
+    ]);
+    expect(maximum).toBe(1);
+    expect(knownBytes).toEqual(new Uint8Array(knownBytes.length));
+    expect(unknownBytes).toEqual(new Uint8Array(unknownBytes.length));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("serializes overlapping unknown retrievals against the updated course remainder", async () => {
+    const firstBytes = new Uint8Array([1, 2, 3]);
+    const secondBytes = new Uint8Array([4, 5]);
+    const started: Array<[string, number]> = [];
+    let activeAuthorization = 0;
+    let maximumAuthorization = 0;
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([unknownFile(1), unknownFile(2)]),
+      async (resource, _signal, remainingBytes) => {
+        started.push([resource.key, remainingBytes]);
+        activeAuthorization += remainingBytes;
+        maximumAuthorization = Math.max(
+          maximumAuthorization,
+          activeAuthorization,
+        );
+
+        try {
+          if (resource.key === "file:1") {
+            markFirstStarted();
+            await firstRelease;
+            return { status: "success", bytes: firstBytes };
+          }
+
+          return { status: "success", bytes: secondBytes };
+        } finally {
+          activeAuthorization -= remainingBytes;
+        }
+      },
+    );
+    deps.maxArchiveBytes = 5;
+    deps.beforePackage = beforePackage;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await firstStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeFirstCompleted = [...started];
+    releaseFirst();
+
+    await expect(action).rejects.toThrow("Task 4 pre-package boundary");
+    expect(startedBeforeFirstCompleted).toEqual([["file:1", 5]]);
+    expect(started).toEqual([
+      ["file:1", 5],
+      ["file:2", 2],
+    ]);
+    expect(maximumAuthorization).toBe(5);
+    expect(firstBytes).toEqual(new Uint8Array(firstBytes.length));
+    expect(secondBytes).toEqual(new Uint8Array(secondBytes.length));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("aborts queued unknown retrievals without deadlocking after a failure", async () => {
+    const started: string[] = [];
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const deps = dependencies(
+      plan([unknownFile(1), unknownFile(2)]),
+      async (resource) => {
+        started.push(resource.key);
+        if (resource.key === "file:1") {
+          markFirstStarted();
+          await firstRelease;
+          throw new RunSafetyError("serialized unknown failure");
+        }
+
+        return { status: "success", bytes: new Uint8Array([1]) };
+      },
+    );
+    deps.maxArchiveBytes = 5;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await firstStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeFailure = [...started];
+    releaseFirst();
+
+    await expect(action).rejects.toThrow("serialized unknown failure");
+    expect(startedBeforeFailure).toEqual(["file:1"]);
+    expect(started).toEqual(["file:1"]);
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("accepts an exact-budget unknown file through the pre-package gate", async () => {
+    const resourceBytes = new Uint8Array([1, 2, 3]);
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([unknownFile(3)]),
+      async (_resource, _signal, remainingBytes) => {
+        expect(remainingBytes).toBe(3);
+        return { status: "success", bytes: resourceBytes };
+      },
+    );
+    deps.maxArchiveBytes = 3;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Task 4 pre-package boundary");
+
+    expect(beforePackage).toHaveBeenCalledOnce();
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(resourceBytes).toEqual(new Uint8Array(3));
+  });
+
+  it("keeps the aggregate cap as defense in depth and zeroes all bytes", async () => {
+    const retained = new Uint8Array([1, 2]);
+    const overflow = new Uint8Array([3, 4, 5]);
+    const beforePackage = vi.fn();
+    const observed: Array<[string, number]> = [];
+    const deps = dependencies(
+      plan([file(1, 2), unknownFile(3)]),
+      async (resource, _signal, remainingBytes) => {
+        observed.push([resource.key, remainingBytes]);
+        if (resource.key === "file:1") {
+          return { status: "success", bytes: retained };
+        }
+        return { status: "success", bytes: overflow };
+      },
+    );
+    deps.maxArchiveBytes = 4;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(observed).toEqual([
+      ["file:1", 4],
+      ["file:3", 2],
+    ]);
+    expect(retained).toEqual(new Uint8Array(2));
+    expect(overflow).toEqual(new Uint8Array(3));
+    expect(beforePackage).not.toHaveBeenCalled();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown source URL for another course before retrieval", async () => {
+    const mismatched = {
+      ...unknownFile(3),
+      sourceUrl:
+        "https://frankfurtschool.instructure.com/courses/202/files/3/download",
+    };
+    const deps = dependencies(plan([mismatched]), async () => ({
+      status: "success",
+      bytes: new Uint8Array([1]),
+    }));
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(deps.retrieve).not.toHaveBeenCalled();
     expect(deps.download).not.toHaveBeenCalled();
   });
 

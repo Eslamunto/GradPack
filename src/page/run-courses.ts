@@ -1,11 +1,16 @@
 import { CanvasSessionError } from "../canvas/http";
 import {
   buildCombinedZip,
-  combinedCourseRoot,
   type CombinedArchiveOutput,
   type CourseArchiveOutput,
 } from "../archive/combined";
-import { MAX_ARCHIVE_RESOURCES, MAX_ARCHIVE_BYTES } from "../shared/constants";
+import {
+  CLASSIC_ZIP_ENTRY_LIMIT,
+  COMBINED_CORE_ENTRY_COUNT,
+  COURSE_CORE_ENTRY_COUNT,
+  MAX_ARCHIVE_RESOURCES,
+  MAX_ARCHIVE_BYTES,
+} from "../shared/constants";
 import type {
   AggregateProgress,
   CoursePlan,
@@ -84,10 +89,6 @@ const emptyCounts = (): MultiCourseResult["counts"] => ({
   external: 0,
 });
 
-const CLASSIC_ZIP_ENTRY_LIMIT = 65_535;
-const COURSE_CORE_ENTRY_COUNT = 7;
-const COMBINED_CORE_ENTRY_COUNT = 4;
-
 const addCounts = (
   target: MultiCourseResult["counts"],
   source: RunResult["manifest"]["totals"],
@@ -125,6 +126,10 @@ const planSummary = (
   const selected = courses.map(({ course, advertisedBytes, resources }) => ({
     courseId: course.id,
     advertisedBytes,
+    unknownSizeCount: resources.filter(
+      (resource) =>
+        resource.kind === "file" && resource.advertisedBytes === null,
+    ).length,
     resourceCount: resources.length,
   }));
   const advertisedBytes = selected.reduce(
@@ -135,11 +140,16 @@ const planSummary = (
     (total, item) => total + item.resourceCount,
     0,
   );
+  const unknownSizeCount = selected.reduce(
+    (total, item) => total + item.unknownSizeCount,
+    0,
+  );
   return {
     selected,
     requestedPackaging,
     effectivePackaging,
     advertisedBytes,
+    unknownSizeCount,
     resourceCount,
     fallbackReason,
   };
@@ -181,35 +191,43 @@ export async function createRunPlan(options: {
   );
   if (
     !Number.isSafeInteger(summaryBase.advertisedBytes) ||
+    !Number.isSafeInteger(summaryBase.unknownSizeCount) ||
     !Number.isSafeInteger(summaryBase.resourceCount)
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
+  if (requestedPackaging === "combined" && summaryBase.unknownSizeCount > 0) {
+    const summary = planSummary(
+      plans,
+      requestedPackaging,
+      "per-course",
+      "unknown-size-files",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plans),
+      summary: Object.freeze(summary),
+    });
+  }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
-    plans.reduce(
-      (total, plan) => total + COURSE_CORE_ENTRY_COUNT + plan.resources.length,
-      0,
-    );
+    COURSE_CORE_ENTRY_COUNT * plans.length +
+    summaryBase.resourceCount;
   if (
-    summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
-    (requestedPackaging === "combined" &&
-      (!Number.isSafeInteger(combinedEntryCount) ||
-        combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT))
+    requestedPackaging === "combined" &&
+    (summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
+      !Number.isSafeInteger(combinedEntryCount) ||
+      combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
   ) {
-    if (requestedPackaging === "combined") {
-      const summary = planSummary(
-        plans,
-        requestedPackaging,
-        "per-course",
-        "combined-resource-limit-exceeded",
-      );
-      return Object.freeze({
-        courses: Object.freeze(plans),
-        summary: Object.freeze(summary),
-      });
-    }
-    throw new MultiCourseSafetyError("Selected course resource limit exceeded");
+    const summary = planSummary(
+      plans,
+      requestedPackaging,
+      "per-course",
+      "combined-resource-limit-exceeded",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plans),
+      summary: Object.freeze(summary),
+    });
   }
   if (
     requestedPackaging === "combined" &&
@@ -278,10 +296,7 @@ export async function runCourses(options: {
         const result = await dependencies.buildCourseArchive({
           course: coursePlan.course,
           plan: coursePlan,
-          combinedRoot:
-            plan.summary.effectivePackaging === "combined"
-              ? combinedCourseRoot(coursePlan.course)
-              : null,
+          combinedRoot: null,
           signal,
           progress: courseProgress,
           dependencies,
@@ -345,8 +360,12 @@ export async function runCourses(options: {
     if (combined) clearBytes(combined.zipBytes);
   }
 
+  const effectivePackaging =
+    plan.summary.effectivePackaging === "combined" && failedCourseIds.length > 0
+      ? "per-course"
+      : plan.summary.effectivePackaging;
   return {
-    effectivePackaging: plan.summary.effectivePackaging,
+    effectivePackaging,
     combined,
     completed,
     failedCourseIds,

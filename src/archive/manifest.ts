@@ -8,7 +8,7 @@ import type {
 } from "../shared/model";
 import { MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES } from "../shared/constants";
 
-const GRADPACK_VERSION = "0.1.0-alpha.3";
+const GRADPACK_VERSION = "0.1.0-alpha.4";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
 const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
@@ -212,6 +212,8 @@ const validateSourceUrl = (
   value: unknown,
   kind: ResourceKind,
   sourceId: string,
+  courseId: number,
+  advertisedBytes: number | null,
 ): string | null => {
   if (value === null) {
     if (kind === "file" || kind === "external") {
@@ -241,12 +243,24 @@ const validateSourceUrl = (
   ) {
     throw new TypeError("Invalid archive data");
   }
-  if (
-    kind === "file" &&
-    (url.origin !== CANVAS_ORIGIN ||
-      url.pathname !== `/files/${sourceId}/download`)
-  ) {
-    throw new TypeError("Invalid archive data");
+  if (kind === "file") {
+    if (
+      advertisedBytes === null &&
+      (!/^[1-9]\d*$/u.test(sourceId) || !Number.isSafeInteger(Number(sourceId)))
+    ) {
+      throw new TypeError("Invalid archive data");
+    }
+    const expectedPath =
+      advertisedBytes === null
+        ? `/courses/${courseId}/files/${sourceId}/download`
+        : `/files/${sourceId}/download`;
+    if (
+      url.origin !== CANVAS_ORIGIN ||
+      url.pathname !== expectedPath ||
+      (advertisedBytes === null && url.search !== "")
+    ) {
+      throw new TypeError("Invalid archive data");
+    }
   }
   if (kind === "page" || kind === "unsupported") {
     throw new TypeError("Invalid archive data");
@@ -266,7 +280,10 @@ const resourceKeys = [
   "sourceUrl",
 ] as const;
 
-const validateResource = (value: unknown): ValidatedResource => {
+const validateResource = (
+  value: unknown,
+  courseId: number,
+): ValidatedResource => {
   const record = exactRecord(value, resourceKeys);
   const key = text(valueOf(record, "key"));
   const rawKind = valueOf(record, "kind");
@@ -293,13 +310,13 @@ const validateResource = (value: unknown): ValidatedResource => {
     valueOf(record, "sourceUrl"),
     kind,
     sourceId,
+    courseId,
+    advertisedBytes,
   );
 
   if (
     (kind === "file" &&
-      (archivePath === null ||
-        !archivePath.startsWith("files/") ||
-        advertisedBytes === null)) ||
+      (archivePath === null || !archivePath.startsWith("files/"))) ||
     (kind === "page" &&
       (archivePath === null ||
         !archivePath.startsWith("pages/") ||
@@ -327,10 +344,11 @@ const outcomeKeys = [
   "failureCategory",
 ];
 
-const validateOutcome = (value: unknown): ResourceOutcome => {
+const validateOutcome = (value: unknown, courseId: number): ResourceOutcome => {
   const record = exactRecord(value, outcomeKeys);
   const resource = validateResource(
     Object.fromEntries(resourceKeys.map((key) => [key, valueOf(record, key)])),
+    courseId,
   );
   const rawStatus = valueOf(record, "status");
   if (
@@ -450,7 +468,10 @@ const validatePlan = (value: unknown): CoursePlan => {
   if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
     throw new ArchiveSafetyError("Archive resource limit exceeded");
   }
-  const resources = rawResources.map(validateResource);
+  const course = validateCourse(valueOf(record, "course"));
+  const resources = rawResources.map((resource) =>
+    validateResource(resource, course.id),
+  );
   const keys = new Set<string>();
   let advertisedBytes = 0;
   for (const resource of resources) {
@@ -473,7 +494,7 @@ const validatePlan = (value: unknown): CoursePlan => {
     }
   }
   return {
-    course: validateCourse(valueOf(record, "course")),
+    course,
     modules,
     resources,
     advertisedBytes: declared,
@@ -528,7 +549,9 @@ export function snapshotArchiveData(
   if (rawOutcomes.length > MAX_ARCHIVE_RESOURCES) {
     throw new ArchiveSafetyError("Archive resource limit exceeded");
   }
-  const validatedOutcomes = rawOutcomes.map(validateOutcome);
+  const validatedOutcomes = rawOutcomes.map((outcome) =>
+    validateOutcome(outcome, validatedPlan.course.id),
+  );
   if (validatedOutcomes.length !== validatedPlan.resources.length) {
     throw new TypeError("Incomplete resource outcomes");
   }
@@ -639,6 +662,11 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     "name",
     "courseCode",
   ]);
+  const course: ArchiveManifest["course"] = {
+    id: safeInteger(valueOf(courseRecord, "id"), 1),
+    name: text(valueOf(courseRecord, "name"), true),
+    courseCode: text(valueOf(courseRecord, "courseCode"), true),
+  };
   const rawResources = exactArray(valueOf(record, "resources"));
   if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
     throw new ArchiveSafetyError("Archive resource limit exceeded");
@@ -655,27 +683,37 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
       "actualBytes",
       "failureCategory",
     ]);
-    return validateOutcome({
-      ...Object.fromEntries(
-        [
-          "key",
-          "kind",
-          "title",
-          "sourceId",
-          "archivePath",
-          "advertisedBytes",
-          "status",
-          "actualBytes",
-          "failureCategory",
-        ].map((key) => [key, valueOf(resourceRecord, key)]),
-      ),
-      sourceUrl:
-        valueOf(resourceRecord, "kind") === "file"
-          ? `${CANVAS_ORIGIN}/files/${String(valueOf(resourceRecord, "sourceId"))}/download`
-          : valueOf(resourceRecord, "kind") === "external"
-            ? "https://reference.invalid/"
-            : null,
-    });
+    const kind = valueOf(resourceRecord, "kind");
+    const sourceId = valueOf(resourceRecord, "sourceId");
+    const advertisedBytes = valueOf(resourceRecord, "advertisedBytes");
+    return validateOutcome(
+      {
+        ...Object.fromEntries(
+          [
+            "key",
+            "kind",
+            "title",
+            "sourceId",
+            "archivePath",
+            "advertisedBytes",
+            "status",
+            "actualBytes",
+            "failureCategory",
+          ].map((key) => [key, valueOf(resourceRecord, key)]),
+        ),
+        sourceUrl:
+          kind === "file"
+            ? typeof sourceId !== "string"
+              ? null
+              : advertisedBytes === null
+                ? `${CANVAS_ORIGIN}/courses/${course.id}/files/${sourceId}/download`
+                : `${CANVAS_ORIGIN}/files/${sourceId}/download`
+            : kind === "external"
+              ? "https://reference.invalid/"
+              : null,
+      },
+      course.id,
+    );
   });
   assertArchivePathSet(resources);
   const totalsRecord = exactRecord(valueOf(record, "totals"), [
@@ -737,11 +775,7 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     gradPackVersion: GRADPACK_VERSION,
     createdAt: canonicalTimestamp(valueOf(record, "createdAt")),
     canvasHost: CANVAS_HOST,
-    course: {
-      id: safeInteger(valueOf(courseRecord, "id"), 1),
-      name: text(valueOf(courseRecord, "name"), true),
-      courseCode: text(valueOf(courseRecord, "courseCode"), true),
-    },
+    course,
     totals,
     resources: resources.map((resource) => ({
       key: resource.key,
