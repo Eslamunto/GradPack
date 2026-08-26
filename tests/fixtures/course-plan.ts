@@ -22,6 +22,7 @@ import {
 import type {
   CoursePlan,
   CourseSummary,
+  PlannedResource,
   ResourceOutcome,
 } from "../../src/shared/model";
 
@@ -208,6 +209,21 @@ export function planWithOneFile(size: number | null): CoursePlan {
         sourceUrl: "https://frankfurtschool.instructure.com/files/301/download",
       },
     ],
+  };
+}
+
+export function unknownFileResource(
+  fileId = 777,
+  course: CourseSummary = syntheticCourse,
+): PlannedResource {
+  return {
+    key: `file:${fileId}`,
+    kind: "file",
+    title: `file-${fileId}`,
+    sourceId: String(fileId),
+    archivePath: `files/file-${fileId}`,
+    advertisedBytes: null,
+    sourceUrl: `${CANVAS_ORIGIN}/courses/${course.id}/files/${fileId}/download`,
   };
 }
 
@@ -491,9 +507,14 @@ export async function runSyntheticPilot(
     dependencies: {
       discover: async (course, signal) =>
         discoverCoursePlan(new CanvasHttp(fakeFetch, signal), course),
-      retrieve: async (resource, plan, signal) => {
+      retrieve: async (resource, plan, signal, remainingBytes) => {
         if (resource.kind === "file") {
-          return fetchFileResource(resource, signal, { fetcher: fakeFetch });
+          return fetchFileResource(
+            resource,
+            signal,
+            { fetcher: fakeFetch },
+            remainingBytes,
+          );
         }
         if (resource.kind === "page") {
           return fetchPageResource(

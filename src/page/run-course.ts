@@ -57,6 +57,7 @@ export type RunDependencies = {
     resource: PlannedResource,
     plan: CoursePlan,
     signal: AbortSignal,
+    remainingBytes: number,
   ) => Promise<Retrieval>;
   archiveCss: string;
   now: () => string;
@@ -218,17 +219,33 @@ export async function buildCourseArchive(options: {
               total: immutablePlan.resources.length,
               failed,
             });
+            if (resource.kind === "file") {
+              validatedFileUrl(resource, immutablePlan.course.id);
+            }
+            const remainingBytes = byteLimit - successfulBytes;
+            if (
+              !Number.isSafeInteger(remainingBytes) ||
+              remainingBytes < 0 ||
+              remainingBytes > MAX_ARCHIVE_BYTES
+            ) {
+              throw new RunSafetyError("Invalid remaining archive byte limit");
+            }
             const result = await dependencies.retrieve(
               resource,
               immutablePlan,
               controller.signal,
+              remainingBytes,
             );
+            if (controller.signal.aborted && result.status === "success") {
+              result.bytes.fill(0);
+            }
             throwIfAborted(controller.signal);
             if (result.status === "success") {
               if (
                 !resource.archivePath ||
                 !isCanonicalArchivePath(resource.archivePath)
               ) {
+                result.bytes.fill(0);
                 throw new RunSafetyError("Invalid planned archive path");
               }
               successfulBytes += result.bytes.byteLength;
@@ -458,24 +475,56 @@ const cancelBody = async (response: Response): Promise<void> => {
   }
 };
 
-const validatedFileUrl = (resource: PlannedResource): URL => {
+const validatedFileUrl = (
+  resource: PlannedResource,
+  expectedCourseId?: number,
+): URL => {
   if (
     resource.kind !== "file" ||
     resource.sourceUrl === null ||
-    resource.advertisedBytes === null ||
-    !Number.isSafeInteger(resource.advertisedBytes) ||
-    resource.advertisedBytes <= 0
+    (resource.advertisedBytes !== null &&
+      (!Number.isSafeInteger(resource.advertisedBytes) ||
+        resource.advertisedBytes <= 0))
   ) {
     throw new RunSafetyError("Invalid planned file");
   }
-  const url = new URL(resource.sourceUrl);
+  let url: URL;
+  try {
+    url = new URL(resource.sourceUrl);
+  } catch {
+    throw new RunSafetyError("Rejected planned file URL");
+  }
   if (
     url.origin !== CANVAS_ORIGIN ||
     url.protocol !== "https:" ||
     url.username !== "" ||
     url.password !== "" ||
-    url.hash !== "" ||
-    url.pathname !== `/files/${resource.sourceId}/download`
+    url.hash !== ""
+  ) {
+    throw new RunSafetyError("Rejected planned file URL");
+  }
+  if (resource.advertisedBytes !== null) {
+    if (url.pathname !== `/files/${resource.sourceId}/download`) {
+      throw new RunSafetyError("Rejected planned file URL");
+    }
+    return url;
+  }
+  const match = /^\/courses\/([1-9]\d*)\/files\/([1-9]\d*)\/download$/u.exec(
+    url.pathname,
+  );
+  if (
+    url.search !== "" ||
+    match === null ||
+    match[2] !== resource.sourceId ||
+    (expectedCourseId !== undefined && match[1] !== String(expectedCourseId))
+  ) {
+    throw new RunSafetyError("Rejected planned file URL");
+  }
+  const courseId =
+    expectedCourseId === undefined ? match[1] : String(expectedCourseId);
+  if (
+    resource.sourceUrl !==
+    `${CANVAS_ORIGIN}/courses/${courseId}/files/${resource.sourceId}/download`
   ) {
     throw new RunSafetyError("Rejected planned file URL");
   }
@@ -486,9 +535,18 @@ export async function fetchFileResource(
   resource: PlannedResource,
   callerSignal: AbortSignal,
   transport: FileTransport = {},
+  remainingBytes: number,
 ): Promise<Retrieval> {
   const initial = validatedFileUrl(resource);
-  const advertisedBytes = resource.advertisedBytes!;
+  const advertisedBytes = resource.advertisedBytes;
+  if (
+    advertisedBytes === null &&
+    (!Number.isSafeInteger(remainingBytes) ||
+      remainingBytes < 0 ||
+      remainingBytes > MAX_ARCHIVE_BYTES)
+  ) {
+    throw new RunSafetyError("Invalid remaining archive byte limit");
+  }
   const fetcher = transport.fetcher ?? fetch;
   const sleep = transport.sleep ?? abortableDelay;
   const local = new AbortController();
@@ -574,24 +632,38 @@ export async function fetchFileResource(
         throw new RunSafetyError("Rejected file response");
       }
       const rawLength = response.headers.get("content-length");
+      let declaredBytes: number | null = null;
       if (rawLength !== null) {
-        if (!/^(?:0|[1-9]\d*)$/u.test(rawLength)) {
+        const validLength =
+          advertisedBytes === null
+            ? /^[1-9]\d*$/u.test(rawLength)
+            : /^(?:0|[1-9]\d*)$/u.test(rawLength);
+        if (!validLength) {
           await cancelBody(response);
           throw new RunSafetyError("Invalid file content length");
         }
         const declared = Number(rawLength);
-        if (!Number.isSafeInteger(declared) || declared !== advertisedBytes) {
+        if (!Number.isSafeInteger(declared)) {
+          await cancelBody(response);
+          throw new RunSafetyError("Invalid file content length");
+        }
+        if (advertisedBytes !== null && declared !== advertisedBytes) {
           await cancelBody(response);
           throw new RunSafetyError("File content length changed");
         }
+        if (advertisedBytes === null && declared > remainingBytes) {
+          await cancelBody(response);
+          throw new RunSafetyError("Archive byte limit exceeded");
+        }
+        declaredBytes = declared;
       }
       if (!response.body) {
         throw new RunSafetyError("File response body is unavailable");
       }
 
       const reader = response.body.getReader();
-      const output = new Uint8Array(advertisedBytes);
-      let offset = 0;
+      let output: Uint8Array | undefined;
+      const chunks: Uint8Array[] = [];
       let rejectReadAbort: (error: DOMException) => void = () => {};
       const readAbort = new Promise<never>((_resolve, reject) => {
         rejectReadAbort = reject;
@@ -599,22 +671,62 @@ export async function fetchFileResource(
       const onReadAbort = (): void => rejectReadAbort(abortError(local.signal));
       local.signal.addEventListener("abort", onReadAbort, { once: true });
       try {
-        for (;;) {
-          throwIfAborted(local.signal);
-          const value = await Promise.race([reader.read(), readAbort]);
-          throwIfAborted(local.signal);
-          if (value.done) break;
-          if (value.value.byteLength === 0) {
-            throw new RunSafetyError("Invalid file stream chunk");
+        if (advertisedBytes === null) {
+          let total = 0;
+          for (;;) {
+            throwIfAborted(local.signal);
+            const value = await Promise.race([reader.read(), readAbort]);
+            throwIfAborted(local.signal);
+            if (value.done) break;
+            chunks.push(value.value);
+            if (value.value.byteLength === 0) {
+              throw new RunSafetyError("Invalid file stream chunk");
+            }
+            if (value.value.byteLength > remainingBytes - total) {
+              throw new RunSafetyError("Archive byte limit exceeded");
+            }
+            if (
+              declaredBytes !== null &&
+              value.value.byteLength > declaredBytes - total
+            ) {
+              throw new RunSafetyError("File content length changed");
+            }
+            total += value.value.byteLength;
           }
-          if (value.value.byteLength > advertisedBytes - offset) {
-            throw new RunSafetyError("File stream exceeded advertised size");
+          if (total === 0) {
+            throw new RunSafetyError("File stream size changed");
           }
-          output.set(value.value, offset);
-          offset += value.value.byteLength;
-        }
-        if (offset === 0 || offset !== advertisedBytes) {
-          throw new RunSafetyError("File stream size changed");
+          if (declaredBytes !== null && total !== declaredBytes) {
+            throw new RunSafetyError("File content length changed");
+          }
+          output = new Uint8Array(total);
+          let offset = 0;
+          for (const chunk of chunks) {
+            output.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          chunks.forEach((chunk) => chunk.fill(0));
+          chunks.length = 0;
+        } else {
+          output = new Uint8Array(advertisedBytes);
+          let offset = 0;
+          for (;;) {
+            throwIfAborted(local.signal);
+            const value = await Promise.race([reader.read(), readAbort]);
+            throwIfAborted(local.signal);
+            if (value.done) break;
+            if (value.value.byteLength === 0) {
+              throw new RunSafetyError("Invalid file stream chunk");
+            }
+            if (value.value.byteLength > advertisedBytes - offset) {
+              throw new RunSafetyError("File stream exceeded advertised size");
+            }
+            output.set(value.value, offset);
+            offset += value.value.byteLength;
+          }
+          if (offset === 0 || offset !== advertisedBytes) {
+            throw new RunSafetyError("File stream size changed");
+          }
         }
         reader.releaseLock();
         return { status: "success", bytes: output };
@@ -625,7 +737,9 @@ export async function fetchFileResource(
         } catch {
           // The original terminal cause remains authoritative.
         }
-        output.fill(0);
+        output?.fill(0);
+        chunks.forEach((chunk) => chunk.fill(0));
+        chunks.length = 0;
         if (
           local.signal.reason instanceof DOMException &&
           local.signal.reason.name === "AbortError"

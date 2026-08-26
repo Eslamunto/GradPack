@@ -23,6 +23,12 @@ const file = (id: number, size = 4): PlannedResource => ({
   sourceUrl: `https://frankfurtschool.instructure.com/files/${id}/download`,
 });
 
+const unknownFile = (id: number): PlannedResource => ({
+  ...file(id),
+  advertisedBytes: null,
+  sourceUrl: `https://frankfurtschool.instructure.com/courses/${syntheticCourse.id}/files/${id}/download`,
+});
+
 const page: PlannedResource = {
   key: "page:welcome",
   kind: "page",
@@ -59,14 +65,19 @@ const dependencies = (
   retrieve: (
     resource: PlannedResource,
     signal: AbortSignal,
+    remainingBytes: number,
   ) => Promise<Retrieval>,
 ): RunDependencies & { download: ReturnType<typeof vi.fn> } => {
   const download = vi.fn();
   return {
     discover: vi.fn(async () => coursePlan),
     retrieve: vi.fn(
-      (resource: PlannedResource, _plan: CoursePlan, signal: AbortSignal) =>
-        retrieve(resource, signal),
+      (
+        resource: PlannedResource,
+        _plan: CoursePlan,
+        signal: AbortSignal,
+        remainingBytes: number,
+      ) => retrieve(resource, signal, remainingBytes),
     ),
     archiveCss: ARCHIVE_CSS,
     now: () => "2026-08-16T12:00:00.000Z",
@@ -271,6 +282,53 @@ describe("runCourse", () => {
     expect(deps.download).not.toHaveBeenCalled();
   });
 
+  it("zeroes success bytes returned by a sibling after terminal cancellation", async () => {
+    const lateBytes = new Uint8Array([7, 8]);
+    const deps = dependencies(
+      plan([file(1), file(2)]),
+      async (resource, signal) => {
+        if (resource.key === "file:1") {
+          throw new RunSafetyError("synthetic safety");
+        }
+        await new Promise<void>((resolve) => {
+          signal.addEventListener("abort", () => resolve(), { once: true });
+        });
+        return { status: "success", bytes: lateBytes };
+      },
+    );
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("synthetic safety");
+    expect(lateBytes).toEqual(new Uint8Array(2));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("zeroes success bytes rejected by post-retrieval path validation", async () => {
+    const invalidPath = { ...file(1), archivePath: "../escape.bin" };
+    const returnedBytes = new Uint8Array([7, 8]);
+    const deps = dependencies(plan([invalidPath]), async () => ({
+      status: "success",
+      bytes: returnedBytes,
+    }));
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Invalid planned archive path");
+    expect(returnedBytes).toEqual(new Uint8Array(2));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
   it("stops when successful resources exceed the aggregate archive-byte cap", async () => {
     const deps = dependencies(plan([file(1, 4)]), async () => ({
       status: "success",
@@ -285,6 +343,137 @@ describe("runCourse", () => {
         dependencies: deps,
       }),
     ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("passes the current remaining course budget to every retrieval", async () => {
+    const observed: Array<[string, number]> = [];
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([file(1, 2), file(2, 2), unknownFile(3)]),
+      async (resource, _signal, remainingBytes) => {
+        observed.push([resource.key, remainingBytes]);
+        return { status: "success", bytes: new Uint8Array(2) };
+      },
+    );
+    deps.maxArchiveBytes = 6;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Task 4 pre-package boundary");
+
+    expect(observed).toEqual([
+      ["file:1", 6],
+      ["file:2", 6],
+      ["file:3", 4],
+    ]);
+    expect(beforePackage).toHaveBeenCalledOnce();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("accepts an exact-budget unknown file through the pre-package gate", async () => {
+    const resourceBytes = new Uint8Array([1, 2, 3]);
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([unknownFile(3)]),
+      async (_resource, _signal, remainingBytes) => {
+        expect(remainingBytes).toBe(3);
+        return { status: "success", bytes: resourceBytes };
+      },
+    );
+    deps.maxArchiveBytes = 3;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Task 4 pre-package boundary");
+
+    expect(beforePackage).toHaveBeenCalledOnce();
+    expect(deps.download).not.toHaveBeenCalled();
+    expect(resourceBytes).toEqual(new Uint8Array(3));
+  });
+
+  it("keeps the aggregate cap as defense in depth and zeroes all bytes", async () => {
+    const retained = new Uint8Array([1, 2]);
+    const overflow = new Uint8Array([3, 4, 5]);
+    const beforePackage = vi.fn();
+    const observed: Array<[string, number]> = [];
+    const deps = dependencies(
+      plan([file(1, 2), file(2, 1), unknownFile(3)]),
+      async (resource, signal, remainingBytes) => {
+        observed.push([resource.key, remainingBytes]);
+        if (resource.key === "file:1") {
+          return { status: "success", bytes: retained };
+        }
+        if (resource.key === "file:2") {
+          await new Promise<void>((_resolve, reject) => {
+            signal.addEventListener(
+              "abort",
+              () => reject(new DOMException("cancelled", "AbortError")),
+              { once: true },
+            );
+          });
+        }
+        return { status: "success", bytes: overflow };
+      },
+    );
+    deps.maxArchiveBytes = 4;
+    deps.beforePackage = beforePackage;
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(observed).toEqual([
+      ["file:1", 4],
+      ["file:2", 4],
+      ["file:3", 2],
+    ]);
+    expect(retained).toEqual(new Uint8Array(2));
+    expect(overflow).toEqual(new Uint8Array(3));
+    expect(beforePackage).not.toHaveBeenCalled();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unknown source URL for another course before retrieval", async () => {
+    const mismatched = {
+      ...unknownFile(3),
+      sourceUrl:
+        "https://frankfurtschool.instructure.com/courses/202/files/3/download",
+    };
+    const deps = dependencies(plan([mismatched]), async () => ({
+      status: "success",
+      bytes: new Uint8Array([1]),
+    }));
+
+    await expect(
+      runCourse({
+        course: syntheticCourse,
+        signal: new AbortController().signal,
+        progress: vi.fn(),
+        dependencies: deps,
+      }),
+    ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(deps.retrieve).not.toHaveBeenCalled();
     expect(deps.download).not.toHaveBeenCalled();
   });
 

@@ -2,14 +2,21 @@
 import { strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { CanvasSessionError } from "../../src/canvas/http";
-import { CANVAS_PAGE_JSON_MAX_BYTES } from "../../src/shared/constants";
+import {
+  CANVAS_ORIGIN,
+  CANVAS_PAGE_JSON_MAX_BYTES,
+  MAX_ARCHIVE_BYTES,
+} from "../../src/shared/constants";
 import {
   RunSafetyError,
   fetchFileResource,
   fetchPageResource,
   resolveLocalHref,
 } from "../../src/page/run-course";
-import { syntheticArchivePlan } from "../fixtures/course-plan";
+import {
+  syntheticArchivePlan,
+  unknownFileResource,
+} from "../fixtures/course-plan";
 
 const streamResponse = (
   chunks: Uint8Array[],
@@ -45,6 +52,7 @@ describe("production file retrieval", () => {
       resource,
       new AbortController().signal,
       { fetcher, sleep: vi.fn() },
+      MAX_ARCHIVE_BYTES,
     );
     expect(result.status).toBe("success");
     if (result.status === "success") {
@@ -74,10 +82,12 @@ describe("production file retrieval", () => {
       });
       const cancel = vi.spyOn(response.body!, "cancel");
       await expect(
-        fetchFileResource(resource, new AbortController().signal, {
-          fetcher: vi.fn(async () => response),
-          sleep: vi.fn(),
-        }),
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+          MAX_ARCHIVE_BYTES,
+        ),
       ).resolves.toEqual({ status: "unavailable", failureCategory });
       expect(cancel).toHaveBeenCalledOnce();
     },
@@ -100,6 +110,7 @@ describe("production file retrieval", () => {
       resource,
       new AbortController().signal,
       { fetcher: vi.fn(async () => responses.shift()!), sleep },
+      MAX_ARCHIVE_BYTES,
     );
     expect(result).toEqual({
       status: "failed",
@@ -117,19 +128,24 @@ describe("production file retrieval", () => {
     ["https://cdn.example/login", "login redirect"],
   ])("rejects %s", async (url) => {
     await expect(
-      fetchFileResource(resource, new AbortController().signal, {
-        fetcher: vi.fn(async () =>
-          streamResponse([], {
-            status: 200,
-            headers: {
-              "content-type": "application/pdf",
-              "content-length": "19",
-            },
-            url,
-          }),
-        ),
-        sleep: vi.fn(),
-      }),
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        {
+          fetcher: vi.fn(async () =>
+            streamResponse([], {
+              status: 200,
+              headers: {
+                "content-type": "application/pdf",
+                "content-length": "19",
+              },
+              url,
+            }),
+          ),
+          sleep: vi.fn(),
+        },
+        MAX_ARCHIVE_BYTES,
+      ),
     ).rejects.toThrow();
   });
 
@@ -149,10 +165,12 @@ describe("production file retrieval", () => {
         }),
       );
       await expect(
-        fetchFileResource(resource, new AbortController().signal, {
-          fetcher,
-          sleep: vi.fn(),
-        }),
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher, sleep: vi.fn() },
+          MAX_ARCHIVE_BYTES,
+        ),
       ).rejects.toBeInstanceOf(RunSafetyError);
       expect(fetcher).toHaveBeenCalledOnce();
     },
@@ -166,18 +184,23 @@ describe("production file retrieval", () => {
     "rejects content type %s and length %s",
     async (contentType, contentLength) => {
       await expect(
-        fetchFileResource(resource, new AbortController().signal, {
-          fetcher: vi.fn(async () =>
-            streamResponse([strToU8("synthetic-file-data")], {
-              status: 200,
-              headers: {
-                "content-type": contentType,
-                "content-length": contentLength,
-              },
-            }),
-          ),
-          sleep: vi.fn(),
-        }),
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          {
+            fetcher: vi.fn(async () =>
+              streamResponse([strToU8("synthetic-file-data")], {
+                status: 200,
+                headers: {
+                  "content-type": contentType,
+                  "content-length": contentLength,
+                },
+              }),
+            ),
+            sleep: vi.fn(),
+          },
+          MAX_ARCHIVE_BYTES,
+        ),
       ).rejects.toThrow();
     },
   );
@@ -189,15 +212,20 @@ describe("production file retrieval", () => {
   ] as const)("rejects a %s stream", async (chunks, label) => {
     void label;
     await expect(
-      fetchFileResource(resource, new AbortController().signal, {
-        fetcher: vi.fn(async () =>
-          streamResponse([...chunks], {
-            status: 200,
-            headers: { "content-type": "application/pdf" },
-          }),
-        ),
-        sleep: vi.fn(),
-      }),
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        {
+          fetcher: vi.fn(async () =>
+            streamResponse([...chunks], {
+              status: 200,
+              headers: { "content-type": "application/pdf" },
+            }),
+          ),
+          sleep: vi.fn(),
+        },
+        MAX_ARCHIVE_BYTES,
+      ),
     ).rejects.toBeInstanceOf(RunSafetyError);
   });
 
@@ -213,10 +241,12 @@ describe("production file retrieval", () => {
       }),
     ]) {
       await expect(
-        fetchFileResource(resource, new AbortController().signal, {
-          fetcher: vi.fn(async () => response),
-          sleep: vi.fn(),
-        }),
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+          MAX_ARCHIVE_BYTES,
+        ),
       ).rejects.toBeInstanceOf(CanvasSessionError);
     }
   });
@@ -237,10 +267,12 @@ describe("production file retrieval", () => {
     Object.defineProperty(response, "url", {
       value: "https://cdn.example/file",
     });
-    const action = fetchFileResource(resource, controller.signal, {
-      fetcher: vi.fn(async () => response),
-      sleep: vi.fn(),
-    });
+    const action = fetchFileResource(
+      resource,
+      controller.signal,
+      { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+      MAX_ARCHIVE_BYTES,
+    );
     streamController.enqueue(strToU8("data"));
     controller.abort(new DOMException("cancelled", "AbortError"));
     await expect(action).rejects.toMatchObject({ name: "AbortError" });
@@ -251,11 +283,16 @@ describe("production file retrieval", () => {
     vi.useFakeTimers();
     try {
       const controller = new AbortController();
-      const request = fetchFileResource(resource, controller.signal, {
-        fetcher: vi.fn(async () => {
-          throw new TypeError("network");
-        }),
-      });
+      const request = fetchFileResource(
+        resource,
+        controller.signal,
+        {
+          fetcher: vi.fn(async () => {
+            throw new TypeError("network");
+          }),
+        },
+        MAX_ARCHIVE_BYTES,
+      );
       await vi.waitFor(() => expect(vi.getTimerCount()).toBe(1));
       controller.abort(new DOMException("cancelled", "AbortError"));
       await expect(request).rejects.toMatchObject({ name: "AbortError" });
@@ -263,6 +300,400 @@ describe("production file retrieval", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it.each([
+    [`${CANVAS_ORIGIN}/courses/101/files/301/download`, "course-scoped path"],
+    [`${CANVAS_ORIGIN}/files/999/download`, "mismatched source ID"],
+    [`${CANVAS_ORIGIN}/files/301/download/extra`, "extra path segment"],
+    ["https://canvas.example/files/301/download", "alternate origin"],
+  ])("rejects a known-size file with a %s", async (sourceUrl) => {
+    const fetcher = vi.fn();
+    await expect(
+      fetchFileResource(
+        { ...resource, sourceUrl },
+        new AbortController().signal,
+        { fetcher, sleep: vi.fn() },
+        MAX_ARCHIVE_BYTES,
+      ),
+    ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("unknown-size production file retrieval", () => {
+  const resource = unknownFileResource();
+  const bytes = strToU8("synthetic unknown bytes");
+
+  it.each([
+    ["with Content-Length", String(bytes.byteLength)],
+    ["without Content-Length", null],
+  ])("streams a non-empty file %s", async (_label, contentLength) => {
+    const headers = new Headers({ "content-type": "application/pdf" });
+    if (contentLength !== null) headers.set("content-length", contentLength);
+    const result = await fetchFileResource(
+      resource,
+      new AbortController().signal,
+      {
+        fetcher: vi.fn(async () =>
+          streamResponse([bytes.slice(0, 4), bytes.slice(4)], {
+            status: 200,
+            headers,
+          }),
+        ),
+        sleep: vi.fn(),
+      },
+      bytes.byteLength,
+    );
+
+    expect(result.status).toBe("success");
+    if (result.status === "success") {
+      expect(Array.from(result.bytes)).toEqual(Array.from(bytes));
+    }
+  });
+
+  it("accepts a stream exactly equal to the remaining course budget", async () => {
+    const result = await fetchFileResource(
+      resource,
+      new AbortController().signal,
+      {
+        fetcher: vi.fn(async () =>
+          streamResponse([new Uint8Array([1]), new Uint8Array([2, 3])], {
+            status: 200,
+            headers: { "content-type": "application/octet-stream" },
+          }),
+        ),
+        sleep: vi.fn(),
+      },
+      3,
+    );
+
+    expect(result).toEqual({
+      status: "success",
+      bytes: new Uint8Array([1, 2, 3]),
+    });
+  });
+
+  it("assembles shared-buffer chunk views before zeroing temporaries", async () => {
+    const shared = new Uint8Array([1, 2, 3]);
+    const result = await fetchFileResource(
+      resource,
+      new AbortController().signal,
+      {
+        fetcher: vi.fn(async () =>
+          streamResponse([shared.subarray(0, 2), shared.subarray(1, 3)], {
+            status: 200,
+            headers: { "content-type": "application/octet-stream" },
+          }),
+        ),
+        sleep: vi.fn(),
+      },
+      4,
+    );
+
+    expect(result).toEqual({
+      status: "success",
+      bytes: new Uint8Array([1, 2, 2, 3]),
+    });
+    expect(shared).toEqual(new Uint8Array(3));
+  });
+
+  it("rejects an over-budget declared length before reading the body", async () => {
+    const response = streamResponse([new Uint8Array([9, 8, 7, 6])], {
+      status: 200,
+      headers: {
+        "content-type": "application/octet-stream",
+        "content-length": "4",
+      },
+    });
+    const cancel = vi.spyOn(response.body!, "cancel");
+
+    await expect(
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+        3,
+      ),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("cancels and zeroes every retained chunk after streamed overflow", async () => {
+    const first = new Uint8Array([1, 2]);
+    const overflow = new Uint8Array([3, 4]);
+    const cancelled = vi.fn();
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(first);
+          controller.enqueue(overflow);
+        },
+        cancel: cancelled,
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      },
+    );
+    Object.defineProperty(response, "url", {
+      value: "https://cdn.example/file",
+    });
+
+    await expect(
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+        3,
+      ),
+    ).rejects.toThrow("Archive byte limit exceeded");
+    expect(cancelled).toHaveBeenCalledOnce();
+    expect(first).toEqual(new Uint8Array(2));
+    expect(overflow).toEqual(new Uint8Array(2));
+  });
+
+  it("rejects an empty stream", async () => {
+    await expect(
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        {
+          fetcher: vi.fn(async () =>
+            streamResponse([], {
+              status: 200,
+              headers: { "content-type": "application/octet-stream" },
+            }),
+          ),
+          sleep: vi.fn(),
+        },
+        3,
+      ),
+    ).rejects.toBeInstanceOf(RunSafetyError);
+  });
+
+  it.each(["0", "-1", "+1", "1.5", "not-a-number"])(
+    "rejects Content-Length %s",
+    async (contentLength) => {
+      const response = streamResponse([new Uint8Array([1])], {
+        status: 200,
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": contentLength,
+        },
+      });
+      const cancel = vi.spyOn(response.body!, "cancel");
+      await expect(
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+          3,
+        ),
+      ).rejects.toBeInstanceOf(RunSafetyError);
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    [3, new Uint8Array([1, 2])],
+    [2, new Uint8Array([1, 2, 3])],
+  ])(
+    "rejects a stream that differs from declared length %i",
+    async (contentLength, chunk) => {
+      await expect(
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          {
+            fetcher: vi.fn(async () =>
+              streamResponse([chunk], {
+                status: 200,
+                headers: {
+                  "content-type": "application/octet-stream",
+                  "content-length": String(contentLength),
+                },
+              }),
+            ),
+            sleep: vi.fn(),
+          },
+          3,
+        ),
+      ).rejects.toThrow("File content length changed");
+    },
+  );
+
+  it.each([-1, 1.5, Number.NaN, MAX_ARCHIVE_BYTES + 1])(
+    "rejects invalid remaining budget %s before fetch",
+    async (remainingBytes) => {
+      const fetcher = vi.fn();
+      await expect(
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher, sleep: vi.fn() },
+          remainingBytes,
+        ),
+      ).rejects.toBeInstanceOf(RunSafetyError);
+      expect(fetcher).not.toHaveBeenCalled();
+    },
+  );
+
+  it("cancels and zeroes retained chunks on mid-stream abort", async () => {
+    const controller = new AbortController();
+    const first = new Uint8Array([1, 2]);
+    const cancelled = vi.fn();
+    let resolveSecondPull!: () => void;
+    const secondPull = new Promise<void>((resolve) => {
+      resolveSecondPull = resolve;
+    });
+    let pulls = 0;
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        pull(streamController) {
+          pulls += 1;
+          if (pulls === 1) streamController.enqueue(first);
+          else resolveSecondPull();
+        },
+        cancel: cancelled,
+      }),
+      {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" },
+      },
+    );
+    Object.defineProperty(response, "url", {
+      value: "https://cdn.example/file",
+    });
+    const action = fetchFileResource(
+      resource,
+      controller.signal,
+      { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+      3,
+    );
+    await Promise.race([secondPull, action.catch(() => undefined)]);
+    controller.abort(new DOMException("cancelled", "AbortError"));
+
+    await expect(action).rejects.toMatchObject({ name: "AbortError" });
+    expect(cancelled).toHaveBeenCalledOnce();
+    expect(first).toEqual(new Uint8Array(2));
+  });
+
+  it.each([
+    [403, "access-denied"],
+    [404, "not-found"],
+  ] as const)(
+    "keeps the fixed unavailable outcome for status %i",
+    async (status, failureCategory) => {
+      const response = streamResponse([new Uint8Array([1])], {
+        status,
+        headers: { "content-type": "application/json" },
+      });
+      const cancel = vi.spyOn(response.body!, "cancel");
+      await expect(
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+          3,
+        ),
+      ).resolves.toEqual({ status: "unavailable", failureCategory });
+      expect(cancel).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    ["login HTML", "https://cdn.example/file", "text/html"],
+    ["HTTP redirect", "http://cdn.example/file", "application/octet-stream"],
+    [
+      "credentialed redirect",
+      "https://user:pass@cdn.example/file",
+      "application/octet-stream",
+    ],
+  ])("rejects %s", async (_label, url, contentType) => {
+    const response = streamResponse([new Uint8Array([1])], {
+      status: 200,
+      headers: { "content-type": contentType },
+      url,
+    });
+    const cancel = vi.spyOn(response.body!, "cancel");
+    await expect(
+      fetchFileResource(
+        resource,
+        new AbortController().signal,
+        { fetcher: vi.fn(async () => response), sleep: vi.fn() },
+        3,
+      ),
+    ).rejects.toThrow();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["network", "network-exhausted"],
+    ["transient", "transient-exhausted"],
+  ] as const)(
+    "preserves %s retry exhaustion",
+    async (kind, failureCategory) => {
+      const responses: Response[] = [];
+      const fetcher = vi.fn(async () => {
+        if (kind === "network") throw new TypeError("network");
+        const response = streamResponse([], {
+          status: 503,
+          headers: { "content-type": "application/json" },
+        });
+        responses.push(response);
+        return response;
+      });
+      const sleep = vi.fn<(milliseconds: number) => Promise<void>>(
+        async () => undefined,
+      );
+
+      await expect(
+        fetchFileResource(
+          resource,
+          new AbortController().signal,
+          { fetcher, sleep },
+          3,
+        ),
+      ).resolves.toEqual({ status: "failed", failureCategory });
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(sleep.mock.calls.map(([milliseconds]) => milliseconds)).toEqual([
+        250, 500,
+      ]);
+      responses.forEach((response) =>
+        expect(response.body?.locked).toBe(false),
+      );
+    },
+  );
+
+  it.each([
+    [`${CANVAS_ORIGIN}/files/777/download`, "known-size path"],
+    [`${CANVAS_ORIGIN}/courses/101/files/778/download`, "wrong file"],
+    [`${CANVAS_ORIGIN}/courses/101/files/777/download?wrap=1`, "query"],
+    [`${CANVAS_ORIGIN}/courses/101/files/777/download?`, "empty query"],
+    [`${CANVAS_ORIGIN}/courses/101/files/777/download#part`, "fragment"],
+    [`${CANVAS_ORIGIN}/courses/101/files/777/download#`, "empty fragment"],
+    [
+      "https://frankfurtschool.instructure.com:443/courses/101/files/777/download",
+      "explicit default port",
+    ],
+    [` ${CANVAS_ORIGIN}/courses/101/files/777/download`, "leading whitespace"],
+    ["https://canvas.example/courses/101/files/777/download", "origin"],
+    [
+      "https://user@frankfurtschool.instructure.com/courses/101/files/777/download",
+      "credentials",
+    ],
+  ])("rejects a source URL with the wrong %s", async (sourceUrl) => {
+    const fetcher = vi.fn();
+    await expect(
+      fetchFileResource(
+        { ...resource, sourceUrl },
+        new AbortController().signal,
+        { fetcher, sleep: vi.fn() },
+        3,
+      ),
+    ).rejects.toBeInstanceOf(RunSafetyError);
+    expect(fetcher).not.toHaveBeenCalled();
   });
 });
 

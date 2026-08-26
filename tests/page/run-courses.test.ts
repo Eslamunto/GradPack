@@ -78,10 +78,15 @@ const baseDependencies = (
   discover: MultiCourseDependencies["discover"],
 ): MultiCourseDependencies => ({
   discover,
-  retrieve: vi.fn(async () => ({
-    status: "success" as const,
-    bytes: new Uint8Array([1]),
-  })),
+  retrieve: vi.fn(
+    async (...args: Parameters<MultiCourseDependencies["retrieve"]>) => {
+      void args;
+      return {
+        status: "success" as const,
+        bytes: new Uint8Array([1]),
+      };
+    },
+  ),
   buildCourseArchive: vi.fn(async ({ course, progress }) => {
     progress({ stage: "package", completed: 1, total: 1, failed: 0 });
     return {
