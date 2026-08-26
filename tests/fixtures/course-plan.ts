@@ -8,13 +8,17 @@ import type { ArchiveInput } from "../../src/archive/build-zip";
 import {
   CanvasCourseIndexUnavailableError,
   CanvasHttp,
+  CanvasResourceUnavailableError,
 } from "../../src/canvas/http";
 import {
   fetchFileResource,
   fetchPageResource,
   runCourse,
 } from "../../src/page/run-course";
-import { CANVAS_ORIGIN } from "../../src/shared/constants";
+import {
+  CANVAS_ORIGIN,
+  CANVAS_PAGE_JSON_MAX_BYTES,
+} from "../../src/shared/constants";
 import type {
   CoursePlan,
   CourseSummary,
@@ -42,11 +46,17 @@ export type SyntheticOptions = {
   folders?: unknown[];
   pages?: unknown[];
   fileDetails?: Record<number, unknown>;
+  pageDetails?: Record<string, unknown>;
+  fileDetailStatuses?: Partial<Record<number, 403 | 404>>;
+  pageResourceStatuses?: Partial<Record<string, 403 | 404>>;
 };
 
 export type SyntheticHttp = CanvasHttp & {
   fetchAll: Mock<(url: URL) => Promise<unknown[]>>;
   json: Mock<(url: URL) => Promise<{ value: unknown }>>;
+  jsonBoundedResource: Mock<
+    (url: URL, maximumBytes: number) => Promise<{ value: unknown }>
+  >;
 };
 
 export function syntheticCanvasHttp(
@@ -139,7 +149,47 @@ export function syntheticCanvasHttp(
             }),
     };
   });
-  return { fetchAll, json } as unknown as SyntheticHttp;
+  const jsonBoundedResource = vi.fn(
+    async (url: URL, maximumBytes: number): Promise<{ value: unknown }> => {
+      await Promise.resolve();
+      if (maximumBytes !== CANVAS_PAGE_JSON_MAX_BYTES) {
+        throw new TypeError("Unexpected fixture bounded JSON limit");
+      }
+      const fileMatch = /\/files\/(\d+)$/.exec(url.pathname);
+      if (fileMatch) {
+        const id = Number(fileMatch[1]);
+        const status = options.fileDetailStatuses?.[id];
+        if (status) throw new CanvasResourceUnavailableError(status);
+        return json(url);
+      }
+      const pageMatch = /\/pages\/([a-zA-Z0-9_-]+)$/.exec(url.pathname);
+      if (pageMatch) {
+        const token = pageMatch[1]!;
+        const status = options.pageResourceStatuses?.[token];
+        if (status) throw new CanvasResourceUnavailableError(status);
+        const detail = options.pageDetails?.[token];
+        if (detail !== undefined) return { value: detail };
+        const indexed = (options.pages ?? []).find(
+          (candidate) =>
+            typeof candidate === "object" &&
+            candidate !== null &&
+            Object.hasOwn(candidate, "url") &&
+            (candidate as { url?: unknown }).url === token,
+        );
+        const title =
+          indexed &&
+          Object.hasOwn(indexed, "title") &&
+          typeof (indexed as { title?: unknown }).title === "string"
+            ? (indexed as { title: string }).title
+            : token;
+        return { value: { title, body: "" } };
+      }
+      throw new TypeError(
+        `Unexpected fixture bounded detail path: ${url.pathname}`,
+      );
+    },
+  );
+  return { fetchAll, json, jsonBoundedResource } as unknown as SyntheticHttp;
 }
 
 export function planWithOneFile(size: number | null): CoursePlan {

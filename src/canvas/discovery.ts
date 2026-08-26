@@ -1,5 +1,6 @@
 import { canonicalArchivePath, safeArchivePath } from "../archive/paths";
 import {
+  CANVAS_PAGE_JSON_MAX_BYTES,
   MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
   CANVAS_ORIGIN,
@@ -12,7 +13,13 @@ import type {
   PlannedResource,
 } from "../shared/model";
 import { canvasEndpoint } from "./endpoints";
-import { CanvasCourseIndexUnavailableError, type CanvasHttp } from "./http";
+import {
+  CanvasBodySizeError,
+  CanvasCourseIndexUnavailableError,
+  CanvasResourceUnavailableError,
+  type CanvasHttp,
+} from "./http";
+import { exactCanvasPage, pageLinkedFileIds } from "./page-links";
 
 export class PilotSizeError extends Error {}
 
@@ -152,10 +159,15 @@ const normalizeFile = (value: unknown): NormalizedFile => {
       ? null
       : positiveId(rawFolderId, "folder ID");
   const rawSize = own(value, "size");
-  const size =
-    typeof rawSize === "number" && Number.isSafeInteger(rawSize) && rawSize >= 0
-      ? rawSize
-      : null;
+  if (
+    rawSize !== null &&
+    (typeof rawSize !== "number" ||
+      !Number.isSafeInteger(rawSize) ||
+      rawSize < 0)
+  ) {
+    throw new TypeError("Invalid file size");
+  }
+  const size = rawSize;
   return {
     id,
     folderId,
@@ -555,7 +567,7 @@ export function assertPilotSize(plan: CoursePlan): void {
       throw new PilotSizeError("The plan contains an invalid resource");
     }
     const size = own(resource, "advertisedBytes");
-    if (size === null) throw new PilotSizeError("A file has unknown size");
+    if (size === null) continue;
     if (typeof size !== "number" || !Number.isSafeInteger(size) || size < 0) {
       throw new PilotSizeError("A file has invalid size");
     }
@@ -669,17 +681,72 @@ export async function discoverCoursePlan(
     }
   }
 
+  for (const [token, title] of linkedPages) {
+    if (!pages.has(token)) pages.set(token, { token, pageId: null, title });
+  }
+
+  const pageFileIds = await run.all(
+    [...pages.keys()].map((token) => async () => {
+      try {
+        const detail = await http.jsonBoundedResource<unknown>(
+          canvasEndpoint({
+            type: "coursePage",
+            courseId: course.id,
+            pageUrl: token,
+          }),
+          CANVAS_PAGE_JSON_MAX_BYTES,
+        );
+        const page = exactCanvasPage(detail.value);
+        return pageLinkedFileIds(page.body, course.id);
+      } catch (error) {
+        if (
+          error instanceof CanvasBodySizeError ||
+          (error instanceof CanvasResourceUnavailableError &&
+            (error.status === 403 || error.status === 404))
+        ) {
+          return [];
+        }
+        throw error;
+      }
+    }),
+  );
+  for (const ids of pageFileIds) {
+    for (const id of ids) linkedFileIds.add(id);
+  }
+
   await run.all(
     [...linkedFileIds]
       .filter((id) => !files.has(id))
       .map((id) => async () => {
-        const detail = await http.json<unknown>(
-          canvasEndpoint({
-            type: "courseFile",
-            courseId: course.id,
-            fileId: id,
-          }),
-        );
+        let detail: { value: unknown };
+        try {
+          detail = await http.jsonBoundedResource<unknown>(
+            canvasEndpoint({
+              type: "courseFile",
+              courseId: course.id,
+              fileId: id,
+            }),
+            CANVAS_PAGE_JSON_MAX_BYTES,
+          );
+        } catch (error) {
+          if (
+            error instanceof CanvasResourceUnavailableError &&
+            (error.status === 403 || error.status === 404)
+          ) {
+            files.set(id, {
+              id,
+              folderId: null,
+              title: `file-${id}`,
+              size: null,
+              sourceUrl: new URL(
+                `/courses/${course.id}/files/${id}/download`,
+                CANVAS_ORIGIN,
+              ).href,
+            });
+            return;
+          }
+          throw error;
+        }
         if (
           !isRecord(detail.value) ||
           positiveId(own(detail.value, "id"), "file ID") !== id
@@ -689,9 +756,6 @@ export async function discoverCoursePlan(
         addFile(files, detail.value);
       }),
   );
-  for (const [token, title] of linkedPages) {
-    if (!pages.has(token)) pages.set(token, { token, pageId: null, title });
-  }
 
   const drafts: ResourceDraft[] = [...extraDrafts.values()];
   for (const file of files.values()) {
