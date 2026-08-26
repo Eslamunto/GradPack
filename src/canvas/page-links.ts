@@ -58,7 +58,8 @@ export const pageLinkedFileIds = (body: string, courseId: number): number[] => {
       href === null ||
       href !== href.trim() ||
       href.includes("\\") ||
-      ENCODED_SEPARATOR.test(href)
+      ENCODED_SEPARATOR.test(href) ||
+      (!href.startsWith("/courses/") && !href.startsWith(`${CANVAS_ORIGIN}/`))
     ) {
       continue;
     }

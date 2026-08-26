@@ -30,17 +30,18 @@ describe("page-linked Canvas files", () => {
     const pageContent = "synthetic page content must not leak";
     const httpUrl = new URL("/courses/101/files/7?wrap=1", CANVAS_ORIGIN);
     httpUrl.protocol = "http:";
-    const credentialUrl = new URL(
-      "/courses/101/files/7?wrap=1",
-      CANVAS_ORIGIN,
-    );
+    const credentialUrl = new URL("/courses/101/files/7?wrap=1", CANVAS_ORIGIN);
     credentialUrl.username = "synthetic";
     credentialUrl.password = "synthetic";
+    const networkPathHref = `//${new URL(CANVAS_ORIGIN).host}/courses/101/files/7?wrap=1`;
     const body = [
       `<a href="${CANVAS_ORIGIN}/courses/102/files/7?wrap=1">other course</a>`,
       '<a href="https://synthetic.invalid/courses/101/files/7?wrap=1">other origin</a>',
       `<a href="${httpUrl.href}">http</a>`,
       `<a href="${credentialUrl.href}">credentials</a>`,
+      '<a href="courses/101/files/7?wrap=1">path-relative</a>',
+      '<a href="./courses/101/files/7?wrap=1">dot-relative</a>',
+      `<a href="${networkPathHref}">network-path</a>`,
       '<a href="/courses/101/files/7?wrap=1#section">fragment</a>',
       '<a href=" /courses/101/files/7?wrap=1">leading whitespace</a>',
       '<a href="/courses/101/files/7?wrap=1 ">trailing whitespace</a>',
