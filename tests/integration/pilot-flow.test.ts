@@ -230,12 +230,9 @@ describe("production pilot vertical flow", () => {
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe("Choose courses"),
     );
-    for (const checkbox of document.querySelectorAll<HTMLInputElement>(
-      'input[name="course"]',
-    )) {
-      checkbox.checked = true;
-      checkbox.dispatchEvent(new Event("change"));
-    }
+    document
+      .querySelector<HTMLInputElement>('input[name="course-all"]')!
+      .click();
     [...document.querySelectorAll<HTMLButtonElement>("button")]
       .find((candidate) => candidate.textContent === "Continue")!
       .click();

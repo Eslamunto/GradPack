@@ -41,10 +41,12 @@
 ### Task 1: Reducer-Owned Bulk Selection
 
 **Files:**
+
 - Modify: `src/sidepanel/state.ts`
 - Test: `tests/sidepanel/state.test.ts`
 
 **Interfaces:**
+
 - Consumes: `ViewState` in the `choose` state with validated `courses: CourseSummary[]` and `selectedIds: number[]`.
 - Produces: `UiEvent` variant `{ type: "SELECT_ALL" }`; reducer output containing either all current course IDs in display order or an empty array.
 
@@ -122,15 +124,15 @@ Add the event variant directly after `SELECT`:
 Add this transition after the existing single-course `SELECT` block:
 
 ```ts
-  if (event.type === "SELECT_ALL" && state.name === "choose") {
-    const allSelected =
-      state.courses.length > 0 &&
-      state.courses.every((course) => state.selectedIds.includes(course.id));
-    return {
-      ...state,
-      selectedIds: allSelected ? [] : state.courses.map((course) => course.id),
-    };
-  }
+if (event.type === "SELECT_ALL" && state.name === "choose") {
+  const allSelected =
+    state.courses.length > 0 &&
+    state.courses.every((course) => state.selectedIds.includes(course.id));
+  return {
+    ...state,
+    selectedIds: allSelected ? [] : state.courses.map((course) => course.id),
+  };
+}
 ```
 
 Do not add a course-ID payload or mutate the existing arrays.
@@ -158,12 +160,14 @@ git commit -m "feat: add reducer-owned course bulk selection"
 ### Task 2: Accessible Tri-State Course Chooser
 
 **Files:**
+
 - Modify: `src/sidepanel/main.ts`
 - Modify: `src/static/sidepanel.css`
 - Test: `tests/sidepanel/main.test.ts`
 - Test: `tests/integration/pilot-flow.test.ts`
 
 **Interfaces:**
+
 - Consumes: reducer event `{ type: "SELECT_ALL" }`, `state.courses`, and `state.selectedIds`.
 - Produces: `input[name="course-all"]`, `.selection-count`, and the existing explicit `courseIds: number[]` start-run command.
 
@@ -172,61 +176,58 @@ git commit -m "feat: add reducer-owned course bulk selection"
 In the first `tests/sidepanel/main.test.ts` flow, replace the block that manually checks every `input[name="course"]` with:
 
 ```ts
-    const continueButton = [...document.querySelectorAll("button")].find(
+const continueButton = [...document.querySelectorAll("button")].find(
+  (candidate) => candidate.textContent === "Continue",
+) as HTMLButtonElement;
+const selectAll = document.querySelector<HTMLInputElement>(
+  'input[name="course-all"]',
+);
+expect(selectAll).toBeInstanceOf(HTMLInputElement);
+expect(selectAll?.type).toBe("checkbox");
+expect(selectAll?.closest("label")?.textContent).toContain(
+  "Select all courses",
+);
+expect(selectAll?.checked).toBe(false);
+expect(selectAll?.indeterminate).toBe(false);
+expect(document.querySelector(".selection-count")?.textContent).toBe(
+  "0 of 3 courses selected.",
+);
+expect(continueButton.disabled).toBe(true);
+
+selectAll?.click();
+let courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
+  'input[name="course"]',
+);
+expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(true);
+expect(
+  document.querySelector<HTMLInputElement>('input[name="course-all"]')?.checked,
+).toBe(true);
+expect(document.querySelector(".selection-count")?.textContent).toBe(
+  "3 of 3 courses selected.",
+);
+expect(
+  (
+    [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent === "Continue",
-    ) as HTMLButtonElement;
-    const selectAll = document.querySelector<HTMLInputElement>(
-      'input[name="course-all"]',
-    );
-    expect(selectAll).toBeInstanceOf(HTMLInputElement);
-    expect(selectAll?.type).toBe("checkbox");
-    expect(selectAll?.closest("label")?.textContent).toContain(
-      "Select all courses",
-    );
-    expect(selectAll?.checked).toBe(false);
-    expect(selectAll?.indeterminate).toBe(false);
-    expect(document.querySelector(".selection-count")?.textContent).toBe(
-      "0 of 3 courses selected.",
-    );
-    expect(continueButton.disabled).toBe(true);
+    ) as HTMLButtonElement
+  ).disabled,
+).toBe(false);
 
-    selectAll?.click();
-    let courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
-      'input[name="course"]',
-    );
-    expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(
-      true,
-    );
-    expect(
-      document.querySelector<HTMLInputElement>('input[name="course-all"]')
-        ?.checked,
-    ).toBe(true);
-    expect(document.querySelector(".selection-count")?.textContent).toBe(
-      "3 of 3 courses selected.",
-    );
-    expect(
-      ([...document.querySelectorAll("button")].find(
-        (candidate) => candidate.textContent === "Continue",
-      ) as HTMLButtonElement).disabled,
-    ).toBe(false);
+courseCheckboxes[1]!.click();
+const partialSelectAll = document.querySelector<HTMLInputElement>(
+  'input[name="course-all"]',
+)!;
+expect(partialSelectAll.checked).toBe(false);
+expect(partialSelectAll.indeterminate).toBe(true);
+expect(document.querySelector(".selection-count")?.textContent).toBe(
+  "2 of 3 courses selected.",
+);
 
-    courseCheckboxes[1]!.click();
-    const partialSelectAll = document.querySelector<HTMLInputElement>(
-      'input[name="course-all"]',
-    )!;
-    expect(partialSelectAll.checked).toBe(false);
-    expect(partialSelectAll.indeterminate).toBe(true);
-    expect(document.querySelector(".selection-count")?.textContent).toBe(
-      "2 of 3 courses selected.",
-    );
-
-    partialSelectAll.click();
-    courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
-      'input[name="course"]',
-    );
-    expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(
-      true,
-    );
+partialSelectAll.click();
+courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
+  'input[name="course"]',
+);
+expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(true);
 ```
 
 Update `thirdCourse` in the same test file so the visible list spans the
@@ -246,9 +247,7 @@ const thirdCourse = {
 Use the master checkbox in `tests/integration/pilot-flow.test.ts` by replacing the loop over individual course inputs with:
 
 ```ts
-    document
-      .querySelector<HTMLInputElement>('input[name="course-all"]')!
-      .click();
+document.querySelector<HTMLInputElement>('input[name="course-all"]')!.click();
 ```
 
 The integration test's existing two-course retrieval and output assertions remain unchanged and prove that both explicit IDs entered the existing flow.
@@ -268,42 +267,36 @@ Expected: FAIL because the master checkbox and selected-count element do not exi
 Inside the `state.name === "choose"` branch in `src/sidepanel/main.ts`, after appending the legend and before iterating over courses, add:
 
 ```ts
-    const allSelected = state.courses.every((course) =>
-      state.selectedIds.includes(course.id),
-    );
-    const partiallySelected =
-      state.selectedIds.length > 0 && !allSelected;
-    const selectAllLabel = document.createElement("label");
-    selectAllLabel.className = "select-all";
-    const selectAll = document.createElement("input");
-    selectAll.type = "checkbox";
-    selectAll.name = "course-all";
-    selectAll.checked = allSelected;
-    selectAll.indeterminate = partiallySelected;
-    selectAll.addEventListener("change", () =>
-      update({ type: "SELECT_ALL" }),
-    );
-    selectAllLabel.append(
-      selectAll,
-      document.createTextNode("Select all courses"),
-    );
-    fieldset.append(selectAllLabel);
+const allSelected = state.courses.every((course) =>
+  state.selectedIds.includes(course.id),
+);
+const partiallySelected = state.selectedIds.length > 0 && !allSelected;
+const selectAllLabel = document.createElement("label");
+selectAllLabel.className = "select-all";
+const selectAll = document.createElement("input");
+selectAll.type = "checkbox";
+selectAll.name = "course-all";
+selectAll.checked = allSelected;
+selectAll.indeterminate = partiallySelected;
+selectAll.addEventListener("change", () => update({ type: "SELECT_ALL" }));
+selectAllLabel.append(selectAll, document.createTextNode("Select all courses"));
+fieldset.append(selectAllLabel);
 ```
 
 Replace the chooser body's introductory paragraph with the instruction plus an explicit count after the fieldset:
 
 ```ts
-    body.append(
-      paragraph("Select one or more accessible courses."),
-      fieldset,
-      paragraph(
-        `${state.selectedIds.length} of ${state.courses.length} courses selected.`,
-        "selection-count",
-      ),
-      button("Continue", () => update({ type: "CONFIGURE" }), {
-        disabled: state.selectedIds.length === 0,
-      }),
-    );
+body.append(
+  paragraph("Select one or more accessible courses."),
+  fieldset,
+  paragraph(
+    `${state.selectedIds.length} of ${state.courses.length} courses selected.`,
+    "selection-count",
+  ),
+  button("Continue", () => update({ type: "CONFIGURE" }), {
+    disabled: state.selectedIds.length === 0,
+  }),
+);
 ```
 
 Add this focused styling to `src/static/sidepanel.css`:
@@ -361,6 +354,7 @@ git commit -m "feat: add accessible select all course control"
 ### Task 3: Advance the Immutable Pilot to Alpha 5
 
 **Files:**
+
 - Modify: `package.json`
 - Modify: `src/manifest.json`
 - Modify: `src/archive/manifest.ts`
@@ -378,6 +372,7 @@ git commit -m "feat: add accessible select all course control"
 - Modify: `docs/pilot/TEST_CHECKLIST.md`
 
 **Interfaces:**
+
 - Consumes: completed GRAD-23 chooser behavior and the fixed `PILOT_FILES` inventory.
 - Produces: source, archive, build, package, documentation, and tests aligned on `0.1.0-alpha.5` and `gradpack-0.1.0-alpha.5.zip`.
 
@@ -392,9 +387,9 @@ const RELEASE_VERSION = "0.1.0-alpha.5";
 Add these documentation assertions beside the existing installation and checklist assertions:
 
 ```ts
-    expect(install).toContain("Select all courses");
-    expect(checklist).toContain("Select-all control: pass / fail");
-    expect(readme).toContain("Select all courses");
+expect(install).toContain("Select all courses");
+expect(checklist).toContain("Select-all control: pass / fail");
+expect(readme).toContain("Select all courses");
 ```
 
 Update all current-release fixture expectations in these test files from
@@ -413,20 +408,20 @@ In `tests/package-pilot.test.ts`, rename the stale-release test and make its
 deliberately stale manifest Alpha 4:
 
 ```ts
-  it("rejects the stale Alpha 4 release identity", async () => {
-    const buildRoot = await makeBuild();
-    await writeFile(
-      join(buildRoot, "manifest.json"),
-      '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n',
-    );
+it("rejects the stale Alpha 4 release identity", async () => {
+  const buildRoot = await makeBuild();
+  await writeFile(
+    join(buildRoot, "manifest.json"),
+    '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n',
+  );
 
-    await expect(
-      packagePilot({
-        buildRoot,
-        artifactRoot: join(buildRoot, "out"),
-      }),
-    ).rejects.toThrow("Pilot manifest identity is invalid");
-  });
+  await expect(
+    packagePilot({
+      buildRoot,
+      artifactRoot: join(buildRoot, "out"),
+    }),
+  ).rejects.toThrow("Pilot manifest identity is invalid");
+});
 ```
 
 Rename the production boundary test title in `tests/build/output.test.ts` to
@@ -471,7 +466,7 @@ export const PILOT_ARTIFACT_NAME = "gradpack-0.1.0-alpha.5.zip";
 Update the package manifest identity check to require:
 
 ```js
-manifest.version_name !== "0.1.0-alpha.5"
+manifest.version_name !== "0.1.0-alpha.5";
 ```
 
 Do not change `PILOT_FILES`, Manifest V3 version `0.1.0`, permissions, host
@@ -503,7 +498,7 @@ Change the checklist version and add the bulk-selection result directly after
 
 ```md
 - Artifact version: 0.1.0-alpha.5
-...
+  ...
 - Course list: pass / fail
 - Select-all control: pass / fail
 - Selected-course count:
@@ -546,11 +541,13 @@ git commit -m "chore: prepare GRAD-23 Alpha 5 pilot"
 ### Task 4: Full Verification and Alpha 5 Validation Package
 
 **Files:**
+
 - Verify: all tracked source and test files
 - Generate outside source control: `/private/tmp/gradpack-grad23-alpha5`
 - Generate outside source control: `GRAD-23-validation-package-0.1.0-alpha.5/`
 
 **Interfaces:**
+
 - Consumes: committed GRAD-23 source and package identity.
 - Produces: a checksum-verified Alpha 5 ZIP, sidecar, extracted extension, installation guide, and checklist for browser acceptance.
 

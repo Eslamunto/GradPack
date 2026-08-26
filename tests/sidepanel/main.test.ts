@@ -25,8 +25,10 @@ const secondCourse = {
 const thirdCourse = {
   ...syntheticCourse,
   id: 103,
-  name: "Third Course",
+  name: "Concluded Course",
   courseCode: "SYN-103",
+  workflowState: "completed",
+  concluded: true,
 };
 const sender = (
   id = "gradpack-extension",
@@ -92,14 +94,64 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector("h1")?.textContent).toBe("Choose courses");
-    const checkboxes = document.querySelectorAll<HTMLInputElement>(
+    const continueButton = [...document.querySelectorAll("button")].find(
+      (candidate) => candidate.textContent === "Continue",
+    ) as HTMLButtonElement;
+    const selectAll = document.querySelector<HTMLInputElement>(
+      'input[name="course-all"]',
+    );
+    expect(selectAll).toBeInstanceOf(HTMLInputElement);
+    expect(selectAll?.type).toBe("checkbox");
+    expect(selectAll?.closest("label")?.textContent).toContain(
+      "Select all courses",
+    );
+    expect(selectAll?.checked).toBe(false);
+    expect(selectAll?.indeterminate).toBe(false);
+    expect(document.querySelector(".selection-count")?.textContent).toBe(
+      "0 of 3 courses selected.",
+    );
+    expect(continueButton.disabled).toBe(true);
+
+    selectAll?.click();
+    let courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
       'input[name="course"]',
     );
-    expect(checkboxes).toHaveLength(3);
-    checkboxes.forEach((checkbox) => {
-      checkbox.checked = true;
-      checkbox.dispatchEvent(new Event("change"));
-    });
+    expect(courseCheckboxes).toHaveLength(3);
+    expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(
+      true,
+    );
+    expect(
+      document.querySelector<HTMLInputElement>('input[name="course-all"]')
+        ?.checked,
+    ).toBe(true);
+    expect(document.querySelector(".selection-count")?.textContent).toBe(
+      "3 of 3 courses selected.",
+    );
+    expect(
+      (
+        [...document.querySelectorAll("button")].find(
+          (candidate) => candidate.textContent === "Continue",
+        ) as HTMLButtonElement
+      ).disabled,
+    ).toBe(false);
+
+    courseCheckboxes[1]!.click();
+    const partialSelectAll = document.querySelector<HTMLInputElement>(
+      'input[name="course-all"]',
+    )!;
+    expect(partialSelectAll.checked).toBe(false);
+    expect(partialSelectAll.indeterminate).toBe(true);
+    expect(document.querySelector(".selection-count")?.textContent).toBe(
+      "2 of 3 courses selected.",
+    );
+
+    partialSelectAll.click();
+    courseCheckboxes = document.querySelectorAll<HTMLInputElement>(
+      'input[name="course"]',
+    );
+    expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(
+      true,
+    );
     clickButton("Continue");
     expect(document.querySelector("h1")?.textContent).toBe(
       "Configure archives",

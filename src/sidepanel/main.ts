@@ -107,6 +107,24 @@ const render = (): void => {
     const legend = document.createElement("legend");
     legend.textContent = "Accessible courses";
     fieldset.append(legend);
+    const selectedIds = state.selectedIds;
+    const allSelected = state.courses.every((course) =>
+      selectedIds.includes(course.id),
+    );
+    const partiallySelected = state.selectedIds.length > 0 && !allSelected;
+    const selectAllLabel = document.createElement("label");
+    selectAllLabel.className = "select-all";
+    const selectAll = document.createElement("input");
+    selectAll.type = "checkbox";
+    selectAll.name = "course-all";
+    selectAll.checked = allSelected;
+    selectAll.indeterminate = partiallySelected;
+    selectAll.addEventListener("change", () => update({ type: "SELECT_ALL" }));
+    selectAllLabel.append(
+      selectAll,
+      document.createTextNode("Select all courses"),
+    );
+    fieldset.append(selectAllLabel);
     for (const course of state.courses) {
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
@@ -123,6 +141,10 @@ const render = (): void => {
     body.append(
       paragraph("Select one or more accessible courses."),
       fieldset,
+      paragraph(
+        `${state.selectedIds.length} of ${state.courses.length} courses selected.`,
+        "selection-count",
+      ),
       button("Continue", () => update({ type: "CONFIGURE" }), {
         disabled: state.selectedIds.length === 0,
       }),
