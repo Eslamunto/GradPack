@@ -37,6 +37,7 @@ const complete = (
   message: "Your GradPack archives were downloaded.",
   packaging: "per-course",
   completedCourses: 2,
+  completedCourseIds: [42, 43],
   failedCourses: 0,
   outputCount: 2,
   success: 1,
@@ -207,6 +208,7 @@ describe("parseRunnerEvent", () => {
       type: "COMPLETE",
       packaging: "per-course",
       completedCourses: 2,
+      completedCourseIds: [42, 43],
       outputCount: 2,
     });
   });
@@ -261,6 +263,41 @@ describe("parseRunnerEvent", () => {
         }),
       ),
     ).toThrow();
+  });
+
+  it("accepts and rejects combined plans at the exact classic ZIP entry boundary", () => {
+    const event = (resourceCount: number): Record<string, unknown> => {
+      const firstCount = Math.floor(resourceCount / 2);
+      const secondCount = resourceCount - firstCount;
+      return {
+        channel: "gradpack/runner/v1",
+        type: "PLAN_READY",
+        runId: "run-12345678",
+        selected: [
+          {
+            courseId: 42,
+            advertisedBytes: 0,
+            unknownSizeCount: 0,
+            resourceCount: firstCount,
+          },
+          {
+            courseId: 43,
+            advertisedBytes: 0,
+            unknownSizeCount: 0,
+            resourceCount: secondCount,
+          },
+        ],
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount,
+        requestedPackaging: "combined",
+        effectivePackaging: "combined",
+        fallbackReason: null,
+      };
+    };
+
+    expect(() => parseRunnerEvent(event(65_517))).not.toThrow();
+    expect(() => parseRunnerEvent(event(65_518))).toThrow();
   });
 
   it("fails closed for invalid unknown-size plan summaries and fallback reasons", () => {
@@ -498,6 +535,33 @@ describe("parseRunnerEvent", () => {
     ).not.toThrow();
   });
 
+  it("accepts exact completed course IDs for a partial per-course result", () => {
+    expect(
+      parseRunnerEvent(
+        complete({
+          completedCourseIds: [42, 44],
+          failedCourses: 1,
+          success: 2,
+        }),
+      ),
+    ).toMatchObject({
+      type: "COMPLETE",
+      completedCourses: 2,
+      completedCourseIds: [42, 44],
+      failedCourses: 1,
+    });
+  });
+
+  it.each([
+    { completedCourseIds: [42, 42] },
+    { completedCourseIds: [0, 43] },
+    { completedCourseIds: [42.5, 43] },
+    { completedCourseIds: [42] },
+    { completedCourseIds: [42, 43, 44] },
+  ])("rejects malformed or inconsistent completed course IDs %#", (value) => {
+    expect(() => parseRunnerEvent(complete(value))).toThrow();
+  });
+
   it("rejects COMPLETE outcomes above the completed-course bound", () => {
     expect(() =>
       parseRunnerEvent(
@@ -515,7 +579,11 @@ describe("parseRunnerEvent", () => {
       Math.floor(Number.MAX_SAFE_INTEGER / MAX_ARCHIVE_RESOURCES) + 1;
     expect(() =>
       parseRunnerEvent(
-        complete({ completedCourses, outputCount: completedCourses }),
+        complete({
+          completedCourses,
+          completedCourseIds: [42, 43],
+          outputCount: completedCourses,
+        }),
       ),
     ).toThrow();
   });

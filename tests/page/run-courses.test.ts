@@ -409,16 +409,17 @@ describe("runCourses", () => {
       dependencies: deps,
     });
     expect(result.combined?.fileName).toBe("gradpack-combined.zip");
+    expect(result.effectivePackaging).toBe("combined");
     expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
-        combinedRoot: "courses/First Course-101",
+        combinedRoot: null,
       }),
     );
     expect(deps.buildCourseArchive).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
-        combinedRoot: "courses/Second Course-202",
+        combinedRoot: null,
       }),
     );
     expect(deps.buildCombinedZip).toHaveBeenCalledOnce();
@@ -426,6 +427,51 @@ describe("runCourses", () => {
       "gradpack-combined.zip",
       expect.any(Uint8Array),
     );
+  });
+
+  it("hands off standalone successes when one requested combined course fails", async () => {
+    const deps = baseDependencies(vi.fn(async (course) => planFor(course)));
+    deps.buildCourseArchive = vi.fn(async ({ course, combinedRoot }) => {
+      expect(combinedRoot).toBeNull();
+      if (course.id === 202) throw new RunSafetyError("course-local");
+      return {
+        manifest: manifest(course),
+        zipBytes: new Uint8Array([course.id % 256]),
+      };
+    });
+    const plan = await createRunPlan({
+      courses,
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    const result = await runCourses({
+      plan,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(deps.buildCourseArchive).toHaveBeenCalledTimes(3);
+    expect(deps.buildCombinedZip).not.toHaveBeenCalled();
+    expect(deps.download).toHaveBeenCalledTimes(2);
+    expect(deps.download).toHaveBeenNthCalledWith(
+      1,
+      "gradpack-101.zip",
+      expect.any(Uint8Array),
+    );
+    expect(deps.download).toHaveBeenNthCalledWith(
+      2,
+      "gradpack-303.zip",
+      expect.any(Uint8Array),
+    );
+    expect(result).toMatchObject({
+      effectivePackaging: "per-course",
+      combined: null,
+      failedCourseIds: [202],
+    });
+    expect(result.completed.map(({ course }) => course.id)).toEqual([101, 303]);
   });
 
   it("does not supply a combined root in per-course mode", async () => {

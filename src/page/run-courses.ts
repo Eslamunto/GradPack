@@ -1,11 +1,16 @@
 import { CanvasSessionError } from "../canvas/http";
 import {
   buildCombinedZip,
-  combinedCourseRoot,
   type CombinedArchiveOutput,
   type CourseArchiveOutput,
 } from "../archive/combined";
-import { MAX_ARCHIVE_RESOURCES, MAX_ARCHIVE_BYTES } from "../shared/constants";
+import {
+  CLASSIC_ZIP_ENTRY_LIMIT,
+  COMBINED_CORE_ENTRY_COUNT,
+  COURSE_CORE_ENTRY_COUNT,
+  MAX_ARCHIVE_RESOURCES,
+  MAX_ARCHIVE_BYTES,
+} from "../shared/constants";
 import type {
   AggregateProgress,
   CoursePlan,
@@ -83,10 +88,6 @@ const emptyCounts = (): MultiCourseResult["counts"] => ({
   unsupported: 0,
   external: 0,
 });
-
-const CLASSIC_ZIP_ENTRY_LIMIT = 65_535;
-const COURSE_CORE_ENTRY_COUNT = 7;
-const COMBINED_CORE_ENTRY_COUNT = 4;
 
 const addCounts = (
   target: MultiCourseResult["counts"],
@@ -209,10 +210,8 @@ export async function createRunPlan(options: {
   }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
-    plans.reduce(
-      (total, plan) => total + COURSE_CORE_ENTRY_COUNT + plan.resources.length,
-      0,
-    );
+    COURSE_CORE_ENTRY_COUNT * plans.length +
+    summaryBase.resourceCount;
   if (
     requestedPackaging === "combined" &&
     (summaryBase.resourceCount > MAX_ARCHIVE_RESOURCES ||
@@ -297,10 +296,7 @@ export async function runCourses(options: {
         const result = await dependencies.buildCourseArchive({
           course: coursePlan.course,
           plan: coursePlan,
-          combinedRoot:
-            plan.summary.effectivePackaging === "combined"
-              ? combinedCourseRoot(coursePlan.course)
-              : null,
+          combinedRoot: null,
           signal,
           progress: courseProgress,
           dependencies,
@@ -364,8 +360,12 @@ export async function runCourses(options: {
     if (combined) clearBytes(combined.zipBytes);
   }
 
+  const effectivePackaging =
+    plan.summary.effectivePackaging === "combined" && failedCourseIds.length > 0
+      ? "per-course"
+      : plan.summary.effectivePackaging;
   return {
-    effectivePackaging: plan.summary.effectivePackaging,
+    effectivePackaging,
     combined,
     completed,
     failedCourseIds,

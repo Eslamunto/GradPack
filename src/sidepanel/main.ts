@@ -438,12 +438,27 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
     const resolvedCourses = event.completedCourses + event.failedCourses;
+    const selectedById = new Map(
+      state.plan.selected.map((selected) => [selected.courseId, selected]),
+    );
+    const completedAreSelected = event.completedCourseIds.every((courseId) =>
+      selectedById.has(courseId),
+    );
+    const expectedOutcomeTotal = event.completedCourseIds.reduce(
+      (sum, courseId) => sum + (selectedById.get(courseId)?.resourceCount ?? 0),
+      0,
+    );
+    const expectedPackaging =
+      event.failedCourses > 0 ? "per-course" : state.plan.effectivePackaging;
     if (
       !Number.isSafeInteger(resolvedCourses) ||
-      event.packaging !== state.plan.effectivePackaging ||
+      event.packaging !== expectedPackaging ||
       resolvedCourses !== state.plan.selected.length ||
-      total > state.plan.resourceCount ||
-      (event.failedCourses === 0 && total !== state.plan.resourceCount)
+      event.failedCourses !==
+        state.plan.selected.length - event.completedCourseIds.length ||
+      !completedAreSelected ||
+      !Number.isSafeInteger(expectedOutcomeTotal) ||
+      total !== expectedOutcomeTotal
     ) {
       return;
     }
@@ -452,6 +467,7 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       type: "COMPLETE",
       packaging: event.packaging,
       completedCourses: event.completedCourses,
+      completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
       counts,

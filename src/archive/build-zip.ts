@@ -17,6 +17,7 @@ import {
   relativeArchiveHref,
   type CourseHtmlPath,
 } from "./archive-links";
+import { CLASSIC_ZIP_ENTRY_LIMIT } from "../shared/constants";
 
 const CORE_PATHS = [
   "assets/archive.css",
@@ -31,7 +32,7 @@ const CORE_CANONICAL = new Set(CORE_PATHS.map(canonicalArchivePath));
 const FIXED_ZIP_DATE = 0x2821;
 const FIXED_ZIP_TIME = 0;
 const ZIP_MTIME_SEED = "2000-01-01T12:00:00.000Z";
-export const MAX_CLASSIC_ZIP_ENTRIES = 65_535;
+export const MAX_CLASSIC_ZIP_ENTRIES = CLASSIC_ZIP_ENTRY_LIMIT;
 const MAX_TEXT_BYTES = 16 * 1024 * 1024;
 const MAX_ZIP_NAME_LENGTH = 180;
 const HTML_NAMESPACE = "http://www.w3.org/1999/xhtml";

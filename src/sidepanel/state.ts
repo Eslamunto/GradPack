@@ -27,6 +27,7 @@ export type UiEvent =
       type: "COMPLETE";
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       counts: OutcomeCounts;
@@ -60,6 +61,7 @@ export type ViewState =
       name: "complete";
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       counts: OutcomeCounts;
@@ -155,6 +157,7 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
       name: "complete",
       packaging: event.packaging,
       completedCourses: event.completedCourses,
+      completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
       counts: event.counts,

@@ -22,6 +22,12 @@ const secondCourse = {
   name: "Second Course",
   courseCode: "SYN-102",
 };
+const thirdCourse = {
+  ...syntheticCourse,
+  id: 103,
+  name: "Third Course",
+  courseCode: "SYN-103",
+};
 const sender = (
   id = "gradpack-extension",
   tabId = 17,
@@ -80,7 +86,7 @@ describe("accessible Side Panel flow", () => {
         channel: RUNNER_CHANNEL,
         type: "COURSES",
         runId: "run-12345678-1234-1234-1234-123456789abc",
-        courses: [syntheticCourse, secondCourse],
+        courses: [syntheticCourse, secondCourse, thirdCourse],
       },
       sender(),
       vi.fn(),
@@ -89,7 +95,7 @@ describe("accessible Side Panel flow", () => {
     const checkboxes = document.querySelectorAll<HTMLInputElement>(
       'input[name="course"]',
     );
-    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes).toHaveLength(3);
     checkboxes.forEach((checkbox) => {
       checkbox.checked = true;
       checkbox.dispatchEvent(new Event("change"));
@@ -109,7 +115,7 @@ describe("accessible Side Panel flow", () => {
         channel: EXTENSION_CHANNEL,
         type: "START_RUN",
         runId: "run-12345678-1234-1234-1234-123456789abc",
-        courseIds: [101, 102],
+        courseIds: [101, 102, 103],
         packaging: "combined",
       }),
     );
@@ -132,20 +138,26 @@ describe("accessible Side Panel flow", () => {
             unknownSizeCount: 0,
             resourceCount: 3,
           },
+          {
+            courseId: 103,
+            advertisedBytes: 21,
+            unknownSizeCount: 0,
+            resourceCount: 4,
+          },
         ],
-        advertisedBytes: 39,
+        advertisedBytes: 60,
         unknownSizeCount: 0,
-        resourceCount: 5,
+        resourceCount: 9,
         requestedPackaging: "combined",
-        effectivePackaging: "per-course",
-        fallbackReason: "combined-size-exceeded",
+        effectivePackaging: "combined",
+        fallbackReason: null,
       },
       sender(),
       vi.fn(),
     );
     expect(document.querySelector("h1")?.textContent).toBe("Review plan");
     expect(document.querySelector(".unknown-size-notice")).toBeNull();
-    expect(document.body.textContent).toContain("fall back");
+    expect(document.body.textContent).toContain("Discovery is complete");
     clickButton("Continue to packing");
     await vi.waitFor(() =>
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
@@ -156,7 +168,7 @@ describe("accessible Side Panel flow", () => {
     );
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
-      "course 1 of 2; 0 of 2",
+      "course 1 of 3; 0 of 2",
     );
     const cancel = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent === "Cancel",
@@ -170,7 +182,7 @@ describe("accessible Side Panel flow", () => {
         stage: "download",
         currentCourseId: 102,
         currentCourseIndex: 1,
-        totalCourses: 2,
+        totalCourses: 3,
         completedCourses: 1,
         completed: 1,
         total: 5,
@@ -180,7 +192,7 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
-      "course 1 of 2; 0 of 2",
+      "course 1 of 3; 0 of 2",
     );
     listener(
       {
@@ -190,7 +202,7 @@ describe("accessible Side Panel flow", () => {
         stage: "download",
         currentCourseId: 102,
         currentCourseIndex: 1,
-        totalCourses: 2,
+        totalCourses: 3,
         completedCourses: 1,
         completed: 1,
         total: 3,
@@ -201,7 +213,7 @@ describe("accessible Side Panel flow", () => {
     );
     expect(document.activeElement).toBe(cancel);
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
-      "course 2 of 2",
+      "course 2 of 3",
     );
     const complete = (overrides: Record<string, unknown> = {}): void => {
       listener(
@@ -211,10 +223,11 @@ describe("accessible Side Panel flow", () => {
           runId: "run-12345678-1234-1234-1234-123456789abc",
           message: "Your GradPack archives were downloaded.",
           packaging: "per-course",
-          completedCourses: 1,
+          completedCourses: 2,
+          completedCourseIds: [101, 103],
           failedCourses: 1,
-          outputCount: 1,
-          success: 2,
+          outputCount: 2,
+          success: 6,
           failed: 0,
           unavailable: 0,
           unsupported: 0,
@@ -225,25 +238,22 @@ describe("accessible Side Panel flow", () => {
         vi.fn(),
       );
     };
-    complete({ packaging: "combined", success: 5 });
+    complete({ packaging: "combined" });
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
-    complete({ completedCourses: 1, failedCourses: 0, success: 5 });
+    complete({ completedCourseIds: [101, 999] });
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
-    complete({ success: 6 });
+    complete({ completedCourseIds: [101, 101] });
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
-    complete({
-      completedCourses: 2,
-      failedCourses: 0,
-      outputCount: 2,
-      success: 4,
-    });
+    complete({ completedCourses: 1, completedCourseIds: [101] });
+    expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
+    complete({ success: 5 });
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
     complete();
     expect(document.querySelector("h1")?.textContent).toBe(
       "Archives downloaded",
     );
     expect(document.querySelector(".archive-summary")?.textContent).toContain(
-      "1 archive(s) downloaded; 1 course(s) completed; 1 course(s) failed",
+      "2 archive(s) downloaded; 2 course(s) completed; 1 course(s) failed",
     );
   });
 

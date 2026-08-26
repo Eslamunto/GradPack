@@ -97,6 +97,7 @@ describe("Side Panel state reducer", () => {
         type: "COMPLETE",
         packaging: "per-course",
         completedCourses: 1,
+        completedCourseIds: [syntheticCourse.id],
         failedCourses: 1,
         outputCount: 1,
         counts: {
@@ -107,7 +108,11 @@ describe("Side Panel state reducer", () => {
           external: 0,
         },
       }),
-    ).toMatchObject({ name: "complete", outputCount: 1 });
+    ).toMatchObject({
+      name: "complete",
+      completedCourseIds: [syntheticCourse.id],
+      outputCount: 1,
+    });
   });
 
   it("ignores impossible transitions and blocks empty or invalid runs", () => {

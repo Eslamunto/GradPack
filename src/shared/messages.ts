@@ -1,4 +1,7 @@
 import {
+  CLASSIC_ZIP_ENTRY_LIMIT,
+  COMBINED_CORE_ENTRY_COUNT,
+  COURSE_CORE_ENTRY_COUNT,
   EXTENSION_CHANNEL,
   MAX_ARCHIVE_RESOURCES,
   RUNNER_CHANNEL,
@@ -64,6 +67,7 @@ export type RunnerEvent =
       message: string;
       packaging: PackagingMode;
       completedCourses: number;
+      completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
       success: number;
@@ -280,9 +284,15 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const requestedPackaging = packaging(input.requestedPackaging);
   const effectivePackaging = packaging(input.effectivePackaging);
   const reason = fallbackReason(input.fallbackReason);
+  const combinedEntryCount =
+    COMBINED_CORE_ENTRY_COUNT +
+    COURSE_CORE_ENTRY_COUNT * selected.length +
+    resourceCount;
   if (
     effectivePackaging === "combined" &&
-    resourceCount > MAX_ARCHIVE_RESOURCES
+    (resourceCount > MAX_ARCHIVE_RESOURCES ||
+      !Number.isSafeInteger(combinedEntryCount) ||
+      combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
   ) {
     throw new TypeError("Invalid plan");
   }
@@ -429,6 +439,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       "message",
       "packaging",
       "completedCourses",
+      "completedCourseIds",
       "failedCourses",
       "outputCount",
       "success",
@@ -442,10 +453,15 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     ]);
     const packagingMode = packaging(input.packaging);
     const completedCourses = nonNegativeInteger(input.completedCourses);
+    const completedCourseIds = denseArray(input.completedCourseIds, 10_000).map(
+      (value) => positiveInteger(value, "Invalid completed course ID"),
+    );
     const failedCourses = nonNegativeInteger(input.failedCourses);
     const outputCount = nonNegativeInteger(input.outputCount);
     if (
       completedCourses === 0 ||
+      completedCourseIds.length !== completedCourses ||
+      new Set(completedCourseIds).size !== completedCourseIds.length ||
       outputCount === 0 ||
       (packagingMode === "combined" && outputCount !== 1) ||
       (packagingMode === "per-course" && outputCount !== completedCourses)
@@ -475,6 +491,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       message,
       packaging: packagingMode,
       completedCourses,
+      completedCourseIds,
       failedCourses,
       outputCount,
       ...counts,

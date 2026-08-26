@@ -3,7 +3,6 @@ import { strFromU8, strToU8, unzipSync, type Unzipped } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
   buildCombinedZip,
-  combinedCourseRoot,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
 import type { ArchiveManifest } from "../../src/archive/manifest";
@@ -228,9 +227,7 @@ describe("extracted offline archive navigation", () => {
 
     const second = course(202, "Second Course");
     const archives = await Promise.all(
-      [first, second].map((selected) =>
-        buildCourse(selected, combinedCourseRoot(selected)),
-      ),
+      [first, second].map((selected) => buildCourse(selected, null)),
     );
     const combined = buildCombinedZip({
       archives,
@@ -240,6 +237,17 @@ describe("extracted offline archive navigation", () => {
     });
     const combinedEntries = unzipSync(combined.zipBytes);
     verifyOfflineArchive(combinedEntries);
+    const nestedPage = new DOMParser().parseFromString(
+      strFromU8(
+        combinedEntries["courses/First Course-101/pages/welcome.html"]!,
+      ),
+      "text/html",
+    );
+    expect(
+      [...nestedPage.querySelectorAll("a")]
+        .filter((link) => link.textContent === "Courses")
+        .map((link) => link.getAttribute("href")),
+    ).toEqual(["../index.html", "../index.html"]);
     expect(combined.manifest.courses).toHaveLength(2);
     expect(combined.manifest.totals.success).toBe(4);
   });
