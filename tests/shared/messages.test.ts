@@ -310,6 +310,81 @@ describe("parseRunnerEvent", () => {
   });
 
   it.each([
+    "combined-size-exceeded",
+    "combined-resource-limit-exceeded",
+  ] as const)(
+    "rejects a combined plan with unknown-size files and %s fallback",
+    (fallbackReason) => {
+      expect(() =>
+        parseRunnerEvent({
+          channel: "gradpack/runner/v1",
+          type: "PLAN_READY",
+          runId: "run-12345678",
+          selected: [
+            {
+              courseId: 42,
+              advertisedBytes: 10,
+              unknownSizeCount: 1,
+              resourceCount: 2,
+            },
+            {
+              courseId: 43,
+              advertisedBytes: 20,
+              unknownSizeCount: 0,
+              resourceCount: 3,
+            },
+          ],
+          advertisedBytes: 30,
+          unknownSizeCount: 1,
+          resourceCount: 5,
+          requestedPackaging: "combined",
+          effectivePackaging: "per-course",
+          fallbackReason,
+        }),
+      ).toThrow();
+    },
+  );
+
+  it("accepts direct per-course and zero-unknown combined fallback plans", () => {
+    const selected = [
+      {
+        courseId: 42,
+        advertisedBytes: 10,
+        unknownSizeCount: 0,
+        resourceCount: 2,
+      },
+    ];
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "PLAN_READY",
+        runId: "run-12345678",
+        selected,
+        advertisedBytes: 10,
+        unknownSizeCount: 0,
+        resourceCount: 2,
+        requestedPackaging: "per-course",
+        effectivePackaging: "per-course",
+        fallbackReason: null,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "PLAN_READY",
+        runId: "run-12345678",
+        selected,
+        advertisedBytes: 10,
+        unknownSizeCount: 0,
+        resourceCount: 2,
+        requestedPackaging: "combined",
+        effectivePackaging: "per-course",
+        fallbackReason: "combined-size-exceeded",
+      }),
+    ).not.toThrow();
+  });
+
+  it.each([
     { completed: 4, total: 3, failed: 0 },
     { completed: 1, total: 3, failed: 2 },
     { completed: 0, total: 65_533, failed: 0 },

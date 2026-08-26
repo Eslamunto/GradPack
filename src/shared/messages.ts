@@ -282,7 +282,10 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     (requestedPackaging === effectivePackaging && reason !== null) ||
     (requestedPackaging !== effectivePackaging && reason === null) ||
     (effectivePackaging === "combined" && reason !== null) ||
-    (reason === "unknown-size-files" && unknownSizeCount === 0)
+    (reason === "unknown-size-files" && unknownSizeCount === 0) ||
+    (requestedPackaging === "combined" &&
+      unknownSizeCount > 0 &&
+      reason !== "unknown-size-files")
   ) {
     throw new TypeError("Invalid packaging fallback");
   }
