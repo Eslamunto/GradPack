@@ -238,10 +238,7 @@ describe("parseRunnerEvent", () => {
       },
       {
         ...event,
-        selected: [
-          { ...event.selected[0], extra: true },
-          event.selected[1],
-        ],
+        selected: [{ ...event.selected[0], extra: true }, event.selected[1]],
       },
       { ...event, fallbackReason: "unsafe-fallback" },
     ];

@@ -287,9 +287,7 @@ describe("accessible Side Panel flow", () => {
       sender(),
       vi.fn(),
     );
-    expect(document.querySelector("h1")?.textContent).toBe(
-      "Review plan",
-    );
+    expect(document.querySelector("h1")?.textContent).toBe("Review plan");
     listener(
       {
         channel: RUNNER_CHANNEL,

@@ -195,10 +195,7 @@ export async function createRunPlan(options: {
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
-  if (
-    requestedPackaging === "combined" &&
-    summaryBase.unknownSizeCount > 0
-  ) {
+  if (requestedPackaging === "combined" && summaryBase.unknownSizeCount > 0) {
     const summary = planSummary(
       plans,
       requestedPackaging,

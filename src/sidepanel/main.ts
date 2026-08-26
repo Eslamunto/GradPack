@@ -194,11 +194,13 @@ const render = (): void => {
             "fallback-notice",
           )
         : state.plan.fallbackReason
-        ? paragraph(
-            "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
-            "fallback-notice",
-          )
-        : paragraph("Discovery is complete. Confirm to begin local retrieval."),
+          ? paragraph(
+              "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+              "fallback-notice",
+            )
+          : paragraph(
+              "Discovery is complete. Confirm to begin local retrieval.",
+            ),
       button("Continue to packing", () => void confirmPlan()),
       button(
         cancelRequested ? "Cancelling…" : "Cancel",
