@@ -124,6 +124,9 @@ describe("accessible Side Panel flow", () => {
       document.querySelector<HTMLInputElement>('input[name="course-all"]')
         ?.checked,
     ).toBe(true);
+    expect(document.activeElement).toBe(
+      document.querySelector<HTMLInputElement>('input[name="course-all"]'),
+    );
     expect(document.querySelector(".selection-count")?.textContent).toBe(
       "3 of 3 courses selected.",
     );
@@ -141,6 +144,9 @@ describe("accessible Side Panel flow", () => {
     )!;
     expect(partialSelectAll.checked).toBe(false);
     expect(partialSelectAll.indeterminate).toBe(true);
+    expect(document.activeElement).toBe(
+      document.querySelectorAll<HTMLInputElement>('input[name="course"]')[1],
+    );
     expect(document.querySelector(".selection-count")?.textContent).toBe(
       "2 of 3 courses selected.",
     );
@@ -151,6 +157,9 @@ describe("accessible Side Panel flow", () => {
     );
     expect([...courseCheckboxes].every((checkbox) => checkbox.checked)).toBe(
       true,
+    );
+    expect(document.activeElement).toBe(
+      document.querySelector<HTMLInputElement>('input[name="course-all"]'),
     );
     clickButton("Continue");
     expect(document.querySelector("h1")?.textContent).toBe(

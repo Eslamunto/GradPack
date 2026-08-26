@@ -85,7 +85,10 @@ const progressText = (progress: AggregateProgress): string =>
 const packagingLabel = (packaging: PackagingMode): string =>
   packaging === "combined" ? "one combined ZIP" : "one ZIP per course";
 
-const render = (): void => {
+type RenderFocus =
+  { type: "course-all" } | { type: "course"; courseId: number } | null;
+
+const render = (focus: RenderFocus = null): void => {
   app.replaceChildren();
   const heading = document.createElement("h1");
   heading.tabIndex = -1;
@@ -270,7 +273,15 @@ const render = (): void => {
     );
   }
   app.append(heading, body);
-  heading.focus();
+  const focusTarget =
+    focus?.type === "course-all"
+      ? app.querySelector<HTMLInputElement>('input[name="course-all"]')
+      : focus?.type === "course"
+        ? [
+            ...app.querySelectorAll<HTMLInputElement>('input[name="course"]'),
+          ].find((checkbox) => checkbox.value === String(focus.courseId))
+        : null;
+  (focusTarget ?? heading).focus();
 };
 
 const update = (event: UiEvent): void => {
@@ -285,7 +296,15 @@ const update = (event: UiEvent): void => {
       return;
     }
   }
-  render();
+  const focus: RenderFocus =
+    previous.name === "choose" && next.name === "choose"
+      ? event.type === "SELECT_ALL"
+        ? { type: "course-all" }
+        : event.type === "SELECT"
+          ? { type: "course", courseId: event.courseId }
+          : null
+      : null;
+  render(focus);
 };
 
 const exactConnection = (
