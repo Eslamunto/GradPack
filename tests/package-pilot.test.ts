@@ -91,7 +91,7 @@ describe("pilot package", () => {
 
     await execFile(
       process.execPath,
-      [join(process.cwd(), "scripts/package-pilot.mjs"), artifactRoot],
+      [join(process.cwd(), "scripts/package-pilot.mjs"), "--", artifactRoot],
       { cwd: root },
     );
 
