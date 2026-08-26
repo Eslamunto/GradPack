@@ -6,13 +6,30 @@ import {
   combinedCourseRoot,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
+import type { ArchiveManifest } from "../../src/archive/manifest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
   buildCourseArchive,
   type CourseArchiveDependencies,
 } from "../../src/page/run-course";
 import type { CoursePlan, CourseSummary } from "../../src/shared/model";
-import { syntheticArchivePlan } from "../fixtures/course-plan";
+import {
+  runSyntheticPilot,
+  SYNTHETIC_PAGE_ONLY_FILE_CONTENT,
+  SYNTHETIC_PAGE_ONLY_FILE_ID,
+  syntheticArchivePlan,
+} from "../fixtures/course-plan";
+
+type PageOnlyPilotOptions = Parameters<typeof runSyntheticPilot>[0] & {
+  pageOnlyFile: true;
+};
+
+const pageOnlyPilotOptions = (
+  unavailableFile = false,
+): PageOnlyPilotOptions => ({
+  pageOnlyFile: true,
+  unavailableFile,
+});
 
 const course = (id: number, name: string): CourseSummary => ({
   id,
@@ -113,6 +130,78 @@ const verifyOfflineArchive = (entries: Unzipped): void => {
 };
 
 describe("extracted offline archive navigation", () => {
+  it("archives an unknown-size file discovered only from a synthetic page", async () => {
+    const result = await runSyntheticPilot(pageOnlyPilotOptions());
+    const entries = unzipSync(result.zipBytes);
+    const manifest = JSON.parse(
+      strFromU8(entries["manifest.json"]!),
+    ) as ArchiveManifest;
+    const page = new DOMParser().parseFromString(
+      strFromU8(entries["pages/welcome.html"]!),
+      "text/html",
+    );
+
+    verifyOfflineArchive(entries);
+    expect(Object.keys(entries)).toContain(
+      `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+    );
+    expect(
+      page.querySelector(
+        `a[href="../files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}"]`,
+      )?.textContent,
+    ).toContain("Open the page-only file");
+    expect(manifest.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: `file:${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          archivePath: `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          advertisedBytes: null,
+          status: "success",
+          actualBytes: strToU8(SYNTHETIC_PAGE_ONLY_FILE_CONTENT).byteLength,
+          failureCategory: null,
+        }),
+      ]),
+    );
+  });
+
+  it("keeps page-only unavailable file text without a broken local link", async () => {
+    const result = await runSyntheticPilot(pageOnlyPilotOptions(true));
+    const entries = unzipSync(result.zipBytes);
+    const manifest = JSON.parse(
+      strFromU8(entries["manifest.json"]!),
+    ) as ArchiveManifest;
+    const page = new DOMParser().parseFromString(
+      strFromU8(entries["pages/welcome.html"]!),
+      "text/html",
+    );
+    const status = new DOMParser().parseFromString(
+      strFromU8(entries["status.html"]!),
+      "text/html",
+    );
+
+    verifyOfflineArchive(entries);
+    expect(
+      entries[`files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`],
+    ).toBeUndefined();
+    expect(page.body.textContent).toContain("Open the page-only file");
+    expect(page.querySelector('a[href*="file-777"]')).toBeNull();
+    expect(status.body.textContent).toContain("file-777");
+    expect(status.body.textContent).toContain("unavailable");
+    expect(manifest.totals).toMatchObject({ unavailable: 1 });
+    expect(manifest.resources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: `file:${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          archivePath: `files/file-${SYNTHETIC_PAGE_ONLY_FILE_ID}`,
+          advertisedBytes: null,
+          status: "unavailable",
+          actualBytes: null,
+          failureCategory: "not-found",
+        }),
+      ]),
+    );
+  });
+
   it("resolves every individual and combined local link without network access", async () => {
     const first = course(101, "First Course");
     const individual = await buildCourse(first, null);

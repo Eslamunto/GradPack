@@ -230,6 +230,7 @@ describe("discoverCoursePlan", () => {
   it.each([
     ["session", new CanvasSessionError("session")],
     ["transient exhaustion", new CanvasTransientError("transient")],
+    ["oversized metadata body", new CanvasBodySizeError("metadata too large")],
   ])("rejects page-linked file metadata on %s", async (_name, error) => {
     const http = syntheticCanvasHttp({
       modules: [],

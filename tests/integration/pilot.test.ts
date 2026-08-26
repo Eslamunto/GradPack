@@ -29,12 +29,14 @@ describe("one-course classmate pilot Gate C", () => {
       "/api/v1/courses/101/files?per_page=100",
       "/api/v1/courses/101/folders?per_page=100",
       "/api/v1/courses/101/pages?per_page=100",
+      "/api/v1/courses/101/pages/welcome",
       "/files/301/download?verifier=synthetic-boundary-marker",
       "/api/v1/courses/101/pages/welcome",
     ]);
     expect(result.maximumConcurrency).toBeLessThanOrEqual(2);
     expect(result.maximumConcurrency).toBeGreaterThanOrEqual(2);
     expect(result.requestHeaders).toEqual([
+      [["accept", "application/json"]],
       [["accept", "application/json"]],
       [["accept", "application/json"]],
       [["accept", "application/json"]],

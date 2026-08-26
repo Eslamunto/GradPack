@@ -377,7 +377,13 @@ export const syntheticArchiveInput: ArchiveInput = {
 const fixture = <T>(name: string): T =>
   JSON.parse(readFileSync(resolve("tests/fixtures/canvas", name), "utf8")) as T;
 
-type SyntheticPilotOptions = { unavailableFile?: boolean };
+type SyntheticPilotOptions = {
+  unavailableFile?: boolean;
+  pageOnlyFile?: boolean;
+};
+
+export const SYNTHETIC_PAGE_ONLY_FILE_ID = 777;
+export const SYNTHETIC_PAGE_ONLY_FILE_CONTENT = "synthetic page-only bytes";
 
 type SyntheticPilotResult = {
   zipBytes: Uint8Array;
@@ -432,13 +438,30 @@ const responseAt = (
 export async function runSyntheticPilot(
   options: SyntheticPilotOptions = {},
 ): Promise<SyntheticPilotResult> {
-  const modules = fixture<unknown[]>("modules.json");
-  const files = fixture<unknown[]>("files.json");
+  const pageOnlyFile = options.pageOnlyFile === true;
+  const modules = pageOnlyFile
+    ? [
+        {
+          id: 201,
+          name: "Module One",
+          position: 1,
+          items: [
+            {
+              id: 301,
+              title: "Welcome Page",
+              position: 1,
+              type: "Page",
+              page_url: "welcome",
+            },
+          ],
+        },
+      ]
+    : fixture<unknown[]>("modules.json");
+  const files = pageOnlyFile ? [] : fixture<unknown[]>("files.json");
   const pages = fixture<unknown[]>("pages.json");
-  const pageBody = readFileSync(
-    resolve("tests/fixtures/canvas/page.html"),
-    "utf8",
-  );
+  const pageBody = pageOnlyFile
+    ? `<p>Welcome to the synthetic course. <a href="/courses/101/files/${SYNTHETIC_PAGE_ONLY_FILE_ID}?wrap=1">Open the page-only file</a>.</p>`
+    : readFileSync(resolve("tests/fixtures/canvas/page.html"), "utf8");
   const requestedUrls: URL[] = [];
   const requestHeaders: Array<Array<[string, string]>> = [];
   let activeRequests = 0;
@@ -482,6 +505,29 @@ export async function runSyntheticPilot(
     }
     if (route === "/api/v1/courses/101/pages/welcome") {
       return json({ title: "Welcome Page", body: pageBody });
+    }
+    if (
+      pageOnlyFile &&
+      route === `/api/v1/courses/101/files/${SYNTHETIC_PAGE_ONLY_FILE_ID}`
+    ) {
+      return responseAt(url, null, { status: 404 });
+    }
+    if (
+      pageOnlyFile &&
+      route === `/courses/101/files/${SYNTHETIC_PAGE_ONLY_FILE_ID}/download`
+    ) {
+      if (options.unavailableFile) {
+        return responseAt(url, null, { status: 404 });
+      }
+      return responseAt(url, strToU8(SYNTHETIC_PAGE_ONLY_FILE_CONTENT), {
+        status: 200,
+        headers: {
+          "content-type": "application/octet-stream",
+          "content-length": String(
+            strToU8(SYNTHETIC_PAGE_ONLY_FILE_CONTENT).byteLength,
+          ),
+        },
+      });
     }
     if (route === "/files/301/download?verifier=synthetic-boundary-marker") {
       if (options.unavailableFile) {

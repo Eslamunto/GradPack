@@ -5,6 +5,7 @@ import { ARCHIVE_CSS } from "../../src/archive/style";
 import { sanitizePageFragment } from "../../src/archive/sanitize";
 import {
   buildCourseArchive,
+  resolveLocalHref,
   RunSafetyError,
   runCourse,
   type Retrieval,
@@ -86,7 +87,58 @@ const dependencies = (
   };
 };
 
+const buildPageLinkedArchive = async (
+  fileOutcome: Retrieval,
+): Promise<ReturnType<typeof unzipSync>> => {
+  const coursePlan = plan([unknownFile(777), page]);
+  const fragment = sanitizePageFragment({
+    title: "Welcome",
+    body: '<p><a href="/courses/101/files/777?wrap=1">Open the page-only file</a></p>',
+    resolveLocalHref: (href) => resolveLocalHref(href, coursePlan),
+  });
+  const deps = dependencies(coursePlan, async (resource) =>
+    resource.kind === "page"
+      ? { status: "success", bytes: strToU8(fragment) }
+      : fileOutcome,
+  );
+  const result = await buildCourseArchive({
+    course: syntheticCourse,
+    plan: coursePlan,
+    combinedRoot: null,
+    signal: new AbortController().signal,
+    progress: vi.fn(),
+    dependencies: deps,
+  });
+  return unzipSync(result.zipBytes);
+};
+
 describe("runCourse", () => {
+  it("packages a successful unknown-size page-linked file under its local href", async () => {
+    const zip = await buildPageLinkedArchive({
+      status: "success",
+      bytes: strToU8("synthetic page-only bytes"),
+    });
+    const pageHtml = strFromU8(zip["pages/welcome.html"]!);
+
+    expect(strFromU8(zip["files/file-777.bin"]!)).toBe(
+      "synthetic page-only bytes",
+    );
+    expect(pageHtml).toContain('href="../files/file-777.bin"');
+    expect(pageHtml).toContain("Open the page-only file");
+  });
+
+  it("removes an unavailable unknown-size local href without removing its label", async () => {
+    const zip = await buildPageLinkedArchive({
+      status: "unavailable",
+      failureCategory: "access-denied",
+    });
+    const pageHtml = strFromU8(zip["pages/welcome.html"]!);
+
+    expect(zip["files/file-777.bin"]).toBeUndefined();
+    expect(pageHtml).not.toContain('href="../files/file-777.bin"');
+    expect(pageHtml).toContain("Open the page-only file");
+  });
+
   it("builds a discovered course plan without handing off a download", async () => {
     const deps = dependencies(plan([file(1)]), async () => ({
       status: "success",
