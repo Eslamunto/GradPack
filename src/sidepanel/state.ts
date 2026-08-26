@@ -17,6 +17,7 @@ export type UiEvent =
   | { type: "CONNECTING" }
   | { type: "COURSES"; courses: CourseSummary[] }
   | { type: "SELECT"; courseId: number }
+  | { type: "SELECT_ALL" }
   | { type: "CONFIGURE" }
   | { type: "SET_PACKAGING"; packaging: PackagingMode }
   | { type: "DISCOVERING" }
@@ -104,6 +105,15 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
       ? state.selectedIds.filter((id) => id !== event.courseId)
       : [...state.selectedIds, event.courseId];
     return { ...state, selectedIds };
+  }
+  if (event.type === "SELECT_ALL" && state.name === "choose") {
+    const allSelected =
+      state.courses.length > 0 &&
+      state.courses.every((course) => state.selectedIds.includes(course.id));
+    return {
+      ...state,
+      selectedIds: allSelected ? [] : state.courses.map((course) => course.id),
+    };
   }
   if (event.type === "CONFIGURE" && state.name === "choose") {
     return state.selectedIds.length > 0

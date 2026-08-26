@@ -10,6 +10,15 @@ const secondCourse = {
   courseCode: "SYN-102",
 };
 
+const concludedCourse = {
+  ...syntheticCourse,
+  id: 103,
+  name: "Concluded Course",
+  courseCode: "SYN-103",
+  workflowState: "completed",
+  concluded: true,
+};
+
 const plan: RunPlanSummary = {
   selected: [
     {
@@ -45,6 +54,41 @@ const progress: AggregateProgress = {
 };
 
 describe("Side Panel state reducer", () => {
+  it("selects and clears every displayed course from none, partial, and all", () => {
+    const choose = reduceState(initialState, {
+      type: "COURSES",
+      courses: [syntheticCourse, secondCourse, concludedCourse],
+    });
+
+    const allFromNone = reduceState(choose, { type: "SELECT_ALL" });
+    expect(allFromNone).toMatchObject({
+      name: "choose",
+      selectedIds: [101, 102, 103],
+    });
+
+    const partial = reduceState(allFromNone, {
+      type: "SELECT",
+      courseId: secondCourse.id,
+    });
+    expect(partial).toMatchObject({
+      name: "choose",
+      selectedIds: [101, 103],
+    });
+    expect(reduceState(partial, { type: "SELECT_ALL" })).toMatchObject({
+      name: "choose",
+      selectedIds: [101, 102, 103],
+    });
+
+    expect(reduceState(allFromNone, { type: "SELECT_ALL" })).toMatchObject({
+      name: "choose",
+      selectedIds: [],
+    });
+
+    expect(reduceState(initialState, { type: "SELECT_ALL" })).toBe(
+      initialState,
+    );
+  });
+
   it("models selection, review, aggregate packing, and completion", () => {
     const choose = reduceState(initialState, {
       type: "COURSES",
