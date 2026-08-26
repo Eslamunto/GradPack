@@ -1,8 +1,8 @@
 # GRAD-22 Page-Linked File Discovery Design
 
-**Status:** Approved in conversation; awaiting written-spec review
-**Issue:** GRAD-22 — Archive files linked only from Canvas page bodies
-**Date:** 2026-08-26
+- **Status:** Approved in conversation; awaiting written-spec review
+- **Issue:** GRAD-22 — Archive files linked only from Canvas page bodies
+- **Date:** 2026-08-26
 
 ## Problem
 
