@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/require-await -- async callbacks model browser fetches in focused tests */
 import { strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
-import { CanvasResponseError, CanvasSessionError } from "../../src/canvas/http";
+import { CanvasSessionError } from "../../src/canvas/http";
+import { CANVAS_PAGE_JSON_MAX_BYTES } from "../../src/shared/constants";
 import {
-  PAGE_JSON_MAX_BYTES,
   RunSafetyError,
   fetchFileResource,
   fetchPageResource,
@@ -288,11 +288,11 @@ describe("production page retrieval and local links", () => {
     }
     expect(http.jsonBoundedResource).toHaveBeenCalledWith(
       expect.any(URL),
-      PAGE_JSON_MAX_BYTES,
+      CANVAS_PAGE_JSON_MAX_BYTES,
     );
   });
 
-  it("maps bounded individual page failures and rejects hostile schema", async () => {
+  it("maps a bounded individual page failure", async () => {
     const tooLarge = {
       jsonBoundedResource: vi
         .fn()
@@ -311,21 +311,6 @@ describe("production page retrieval and local links", () => {
       status: "unavailable",
       failureCategory: "page-too-large",
     });
-    for (const value of [
-      { title: "Welcome" },
-      { title: 7, body: "x" },
-      Object.create({ title: "Welcome", body: "x" }),
-    ]) {
-      const http = { jsonBoundedResource: vi.fn(async () => ({ value })) };
-      await expect(
-        fetchPageResource(
-          page,
-          syntheticArchivePlan,
-          new AbortController().signal,
-          http as never,
-        ),
-      ).rejects.toBeInstanceOf(CanvasResponseError);
-    }
   });
 
   it("rewrites only exact same-course known file and page paths", () => {

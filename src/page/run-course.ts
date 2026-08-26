@@ -19,7 +19,9 @@ import {
   CanvasTransientError,
   type CanvasHttp,
 } from "../canvas/http";
+import { exactCanvasPage } from "../canvas/page-links";
 import {
+  CANVAS_PAGE_JSON_MAX_BYTES,
   CANVAS_ORIGIN,
   MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
@@ -32,10 +34,6 @@ import type {
   Progress,
   ResourceOutcome,
 } from "../shared/model";
-
-// Pilot-only in-memory limit for one raw Canvas page-detail JSON response.
-export const PAGE_JSON_MAX_BYTES = 5 * 1024 * 1024;
-const PAGE_TITLE_MAX_CHARACTERS = 500;
 
 export class RunSafetyError extends TypeError {
   override readonly name = "RunSafetyError";
@@ -646,26 +644,6 @@ export async function fetchFileResource(
   }
 }
 
-const exactPage = (value: unknown): { title: string; body: string } => {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new CanvasResponseError("Canvas returned an invalid page");
-  }
-  const title = Object.getOwnPropertyDescriptor(value, "title");
-  const body = Object.getOwnPropertyDescriptor(value, "body");
-  if (
-    !title ||
-    !("value" in title) ||
-    typeof title.value !== "string" ||
-    title.value.length > PAGE_TITLE_MAX_CHARACTERS ||
-    !body ||
-    !("value" in body) ||
-    typeof body.value !== "string"
-  ) {
-    throw new CanvasResponseError("Canvas returned an invalid page");
-  }
-  return { title: title.value, body: body.value };
-};
-
 const encodeArchiveHref = (path: string): string =>
   `../${path
     .split("/")
@@ -741,10 +719,10 @@ export async function fetchPageResource(
         courseId: plan.course.id,
         pageUrl: resource.sourceId,
       }),
-      PAGE_JSON_MAX_BYTES,
+      CANVAS_PAGE_JSON_MAX_BYTES,
     );
     throwIfAborted(signal);
-    const page = exactPage(response.value);
+    const page = exactCanvasPage(response.value);
     const html = sanitizePageFragment({
       title: page.title,
       body: page.body,
