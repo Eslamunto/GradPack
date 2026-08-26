@@ -195,6 +195,21 @@ export async function createRunPlan(options: {
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
+  if (
+    requestedPackaging === "combined" &&
+    summaryBase.unknownSizeCount > 0
+  ) {
+    const summary = planSummary(
+      plans,
+      requestedPackaging,
+      "per-course",
+      "unknown-size-files",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plans),
+      summary: Object.freeze(summary),
+    });
+  }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
     plans.reduce(
@@ -220,21 +235,6 @@ export async function createRunPlan(options: {
       });
     }
     throw new MultiCourseSafetyError("Selected course resource limit exceeded");
-  }
-  if (
-    requestedPackaging === "combined" &&
-    summaryBase.unknownSizeCount > 0
-  ) {
-    const summary = planSummary(
-      plans,
-      requestedPackaging,
-      "per-course",
-      "unknown-size-files",
-    );
-    return Object.freeze({
-      courses: Object.freeze(plans),
-      summary: Object.freeze(summary),
-    });
   }
   if (
     requestedPackaging === "combined" &&

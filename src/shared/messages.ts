@@ -260,6 +260,12 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   if (resourceCount > MAX_ARCHIVE_RESOURCES)
     throw new TypeError("Invalid plan");
   if (
+    unknownSizeCount > resourceCount ||
+    selected.some((item) => item.unknownSizeCount > item.resourceCount)
+  ) {
+    throw new TypeError("Invalid plan counts");
+  }
+  if (
     selected.reduce((total, item) => total + item.advertisedBytes, 0) !==
       advertisedBytes ||
     selected.reduce((total, item) => total + item.unknownSizeCount, 0) !==
@@ -275,7 +281,8 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   if (
     (requestedPackaging === effectivePackaging && reason !== null) ||
     (requestedPackaging !== effectivePackaging && reason === null) ||
-    (effectivePackaging === "combined" && reason !== null)
+    (effectivePackaging === "combined" && reason !== null) ||
+    (reason === "unknown-size-files" && unknownSizeCount === 0)
   ) {
     throw new TypeError("Invalid packaging fallback");
   }

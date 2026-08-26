@@ -251,6 +251,64 @@ describe("parseRunnerEvent", () => {
     }
   });
 
+  it("fails closed for impossible unknown-size count relationships", () => {
+    const event = {
+      channel: "gradpack/runner/v1",
+      type: "PLAN_READY",
+      runId: "run-12345678",
+      selected: [
+        {
+          courseId: 42,
+          advertisedBytes: 10,
+          unknownSizeCount: 1,
+          resourceCount: 2,
+        },
+        {
+          courseId: 43,
+          advertisedBytes: 20,
+          unknownSizeCount: 2,
+          resourceCount: 3,
+        },
+      ],
+      advertisedBytes: 30,
+      unknownSizeCount: 3,
+      resourceCount: 5,
+      requestedPackaging: "combined",
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+    };
+    const invalidEvents = [
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], unknownSizeCount: 3 },
+          event.selected[1],
+        ],
+        unknownSizeCount: 5,
+      },
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], unknownSizeCount: 3 },
+          { ...event.selected[1], unknownSizeCount: 3 },
+        ],
+        unknownSizeCount: 6,
+      },
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], unknownSizeCount: 0 },
+          { ...event.selected[1], unknownSizeCount: 0 },
+        ],
+        unknownSizeCount: 0,
+      },
+    ];
+
+    for (const invalid of invalidEvents) {
+      expect(() => parseRunnerEvent(invalid)).toThrow();
+    }
+  });
+
   it.each([
     { completed: 4, total: 3, failed: 0 },
     { completed: 1, total: 3, failed: 2 },

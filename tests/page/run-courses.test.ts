@@ -251,6 +251,43 @@ describe("createRunPlan", () => {
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
+  it("prefers the unknown-size fallback when combined ZIP entries also exceed capacity", async () => {
+    const counts = new Map([
+      [101, 32_759],
+      [202, 32_759],
+    ]);
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, 0),
+        resources: Array.from(
+          { length: counts.get(course.id)! },
+          (_, index) => ({
+            key: `file:${course.id}:${index}`,
+            kind: "file" as const,
+            title: `file-${index}.bin`,
+            sourceId: `${course.id}:${index}`,
+            archivePath: `files/file-${index}.bin`,
+            advertisedBytes: course.id === 101 && index === 0 ? null : 0,
+            sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}-${index}/download`,
+          }),
+        ),
+      })),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+      unknownSizeCount: 1,
+    });
+    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
   it("stops before retrieval when one individual course exceeds the limit", async () => {
     const deps = baseDependencies(
       vi.fn(async (course) =>
