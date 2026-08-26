@@ -125,6 +125,10 @@ const planSummary = (
   const selected = courses.map(({ course, advertisedBytes, resources }) => ({
     courseId: course.id,
     advertisedBytes,
+    unknownSizeCount: resources.filter(
+      (resource) =>
+        resource.kind === "file" && resource.advertisedBytes === null,
+    ).length,
     resourceCount: resources.length,
   }));
   const advertisedBytes = selected.reduce(
@@ -135,11 +139,16 @@ const planSummary = (
     (total, item) => total + item.resourceCount,
     0,
   );
+  const unknownSizeCount = selected.reduce(
+    (total, item) => total + item.unknownSizeCount,
+    0,
+  );
   return {
     selected,
     requestedPackaging,
     effectivePackaging,
     advertisedBytes,
+    unknownSizeCount,
     resourceCount,
     fallbackReason,
   };
@@ -181,6 +190,7 @@ export async function createRunPlan(options: {
   );
   if (
     !Number.isSafeInteger(summaryBase.advertisedBytes) ||
+    !Number.isSafeInteger(summaryBase.unknownSizeCount) ||
     !Number.isSafeInteger(summaryBase.resourceCount)
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
@@ -210,6 +220,21 @@ export async function createRunPlan(options: {
       });
     }
     throw new MultiCourseSafetyError("Selected course resource limit exceeded");
+  }
+  if (
+    requestedPackaging === "combined" &&
+    summaryBase.unknownSizeCount > 0
+  ) {
+    const summary = planSummary(
+      plans,
+      requestedPackaging,
+      "per-course",
+      "unknown-size-files",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plans),
+      summary: Object.freeze(summary),
+    });
   }
   if (
     requestedPackaging === "combined" &&

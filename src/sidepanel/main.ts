@@ -180,7 +180,20 @@ const render = (): void => {
       paragraph(
         `Advertised material: ${state.plan.advertisedBytes} bytes across ${state.plan.resourceCount} resource(s).`,
       ),
-      state.plan.fallbackReason
+      ...(state.plan.unknownSizeCount > 0
+        ? [
+            paragraph(
+              `Unknown-size files: ${state.plan.unknownSizeCount}. GradPack will stream them under the hard 250 MiB per-course cap.`,
+              "unknown-size-notice",
+            ),
+          ]
+        : []),
+      state.plan.fallbackReason === "unknown-size-files"
+        ? paragraph(
+            "The requested combined archive will be changed to separate course ZIPs because unknown-size files must be streamed under the hard 250 MiB per-course cap.",
+            "fallback-notice",
+          )
+        : state.plan.fallbackReason
         ? paragraph(
             "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
             "fallback-notice",

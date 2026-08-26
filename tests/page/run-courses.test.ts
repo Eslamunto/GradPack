@@ -34,10 +34,14 @@ const courses: CourseSummary[] = [
   },
 ];
 
-const planFor = (course: CourseSummary, advertisedBytes = 10): CoursePlan => ({
+const planFor = (
+  course: CourseSummary,
+  advertisedBytes = 10,
+  unknownSize = false,
+): CoursePlan => ({
   course: { ...course },
   modules: [],
-  advertisedBytes,
+  advertisedBytes: unknownSize ? 0 : advertisedBytes,
   resources: [
     {
       key: `file:${course.id}`,
@@ -45,7 +49,7 @@ const planFor = (course: CourseSummary, advertisedBytes = 10): CoursePlan => ({
       title: "file.bin",
       sourceId: String(course.id),
       archivePath: "files/file.bin",
-      advertisedBytes,
+      advertisedBytes: unknownSize ? null : advertisedBytes,
       sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}/download`,
     },
   ],
@@ -148,10 +152,52 @@ describe("createRunPlan", () => {
       requestedPackaging: "combined",
       effectivePackaging: "combined",
       advertisedBytes: 20,
+      unknownSizeCount: 0,
       resourceCount: 2,
       fallbackReason: null,
     });
     expect(plan.courses[0]).not.toBe(sourcePlans.get(101));
+  });
+
+  it("falls back to per-course output before retrieval for unknown file sizes", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => planFor(course, 10, course.id === 101)),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+      unknownSizeCount: 1,
+      selected: [
+        { courseId: 101, unknownSizeCount: 1 },
+        { courseId: 202, unknownSizeCount: 0 },
+      ],
+    });
+    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("keeps a direct per-course request without a fallback for unknown file sizes", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => planFor(course, 10, course.id === 101)),
+    );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: null,
+      unknownSizeCount: 1,
+    });
   });
 
   it("falls back before retrieval when combined advertised bytes exceed the limit", async () => {

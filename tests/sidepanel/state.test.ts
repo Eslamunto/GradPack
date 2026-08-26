@@ -12,12 +12,23 @@ const secondCourse = {
 
 const plan: RunPlanSummary = {
   selected: [
-    { courseId: syntheticCourse.id, advertisedBytes: 19, resourceCount: 2 },
-    { courseId: secondCourse.id, advertisedBytes: 21, resourceCount: 1 },
+    {
+      courseId: syntheticCourse.id,
+      advertisedBytes: 19,
+      unknownSizeCount: 0,
+      resourceCount: 2,
+    },
+    {
+      courseId: secondCourse.id,
+      advertisedBytes: 21,
+      unknownSizeCount: 0,
+      resourceCount: 1,
+    },
   ],
   requestedPackaging: "combined",
   effectivePackaging: "per-course",
   advertisedBytes: 40,
+  unknownSizeCount: 0,
   resourceCount: 3,
   fallbackReason: "combined-size-exceeded",
 };

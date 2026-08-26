@@ -215,7 +215,8 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
   if (
     value !== null &&
     value !== "combined-size-exceeded" &&
-    value !== "combined-resource-limit-exceeded"
+    value !== "combined-resource-limit-exceeded" &&
+    value !== "unknown-size-files"
   ) {
     throw new TypeError("Invalid fallback reason");
   }
@@ -224,10 +225,16 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
 
 const planSummary = (value: unknown): CoursePlanSummary => {
   const input = record(value);
-  exactKeys(input, ["courseId", "advertisedBytes", "resourceCount"]);
+  exactKeys(input, [
+    "courseId",
+    "advertisedBytes",
+    "unknownSizeCount",
+    "resourceCount",
+  ]);
   return {
     courseId: positiveInteger(input.courseId, "Invalid course ID"),
     advertisedBytes: nonNegativeInteger(input.advertisedBytes),
+    unknownSizeCount: nonNegativeInteger(input.unknownSizeCount),
     resourceCount: nonNegativeInteger(input.resourceCount),
   };
 };
@@ -239,6 +246,7 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     "runId",
     "selected",
     "advertisedBytes",
+    "unknownSizeCount",
     "resourceCount",
     "requestedPackaging",
     "effectivePackaging",
@@ -247,12 +255,15 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const selected = denseArray(input.selected, 10_000).map(planSummary);
   if (selected.length === 0) throw new TypeError("Invalid plan");
   const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
+  const unknownSizeCount = nonNegativeInteger(input.unknownSizeCount);
   const resourceCount = nonNegativeInteger(input.resourceCount);
   if (resourceCount > MAX_ARCHIVE_RESOURCES)
     throw new TypeError("Invalid plan");
   if (
     selected.reduce((total, item) => total + item.advertisedBytes, 0) !==
       advertisedBytes ||
+    selected.reduce((total, item) => total + item.unknownSizeCount, 0) !==
+      unknownSizeCount ||
     selected.reduce((total, item) => total + item.resourceCount, 0) !==
       resourceCount
   ) {
@@ -274,6 +285,7 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     runId: id,
     selected,
     advertisedBytes,
+    unknownSizeCount,
     resourceCount,
     requestedPackaging,
     effectivePackaging,

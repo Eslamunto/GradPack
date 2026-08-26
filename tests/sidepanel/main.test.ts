@@ -120,10 +120,21 @@ describe("accessible Side Panel flow", () => {
         type: "PLAN_READY",
         runId: "run-12345678-1234-1234-1234-123456789abc",
         selected: [
-          { courseId: 101, advertisedBytes: 19, resourceCount: 1 },
-          { courseId: 102, advertisedBytes: 20, resourceCount: 1 },
+          {
+            courseId: 101,
+            advertisedBytes: 19,
+            unknownSizeCount: 0,
+            resourceCount: 1,
+          },
+          {
+            courseId: 102,
+            advertisedBytes: 20,
+            unknownSizeCount: 0,
+            resourceCount: 1,
+          },
         ],
         advertisedBytes: 39,
+        unknownSizeCount: 0,
         resourceCount: 2,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
@@ -133,6 +144,7 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector("h1")?.textContent).toBe("Review plan");
+    expect(document.querySelector(".unknown-size-notice")).toBeNull();
     expect(document.body.textContent).toContain("fall back");
     clickButton("Continue to packing");
     await vi.waitFor(() =>
@@ -220,6 +232,42 @@ describe("accessible Side Panel flow", () => {
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event("change"));
     clickButton("Continue");
+    const combined = document.querySelector<HTMLInputElement>(
+      'input[value="combined"]',
+    )!;
+    combined.checked = true;
+    combined.dispatchEvent(new Event("change"));
+    clickButton("Discover selected courses");
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "PLAN_READY",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+        selected: [
+          {
+            courseId: 101,
+            advertisedBytes: 0,
+            unknownSizeCount: 1,
+            resourceCount: 1,
+          },
+        ],
+        advertisedBytes: 0,
+        unknownSizeCount: 1,
+        resourceCount: 1,
+        requestedPackaging: "combined",
+        effectivePackaging: "per-course",
+        fallbackReason: "unknown-size-files",
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.body.textContent).toContain("Unknown-size files: 1");
+    expect(document.body.textContent).toContain(
+      "stream them under the hard 250 MiB per-course cap",
+    );
+    expect(document.body.textContent).toContain(
+      "combined archive will be changed to separate course ZIPs",
+    );
     clickButton("Cancel");
     await vi.waitFor(() =>
       expect(
@@ -240,7 +288,7 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector("h1")?.textContent).toBe(
-      "Configure archives",
+      "Review plan",
     );
     listener(
       {

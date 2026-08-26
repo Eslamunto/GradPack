@@ -79,11 +79,17 @@ const plan = (
   ],
   summary: {
     selected: [
-      { courseId: syntheticCourse.id, advertisedBytes: 0, resourceCount: 0 },
+      {
+        courseId: syntheticCourse.id,
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount: 0,
+      },
     ],
     requestedPackaging: "combined" as const,
     effectivePackaging,
     advertisedBytes: 0,
+    unknownSizeCount: 0,
     resourceCount: 0,
     fallbackReason:
       effectivePackaging === "per-course"

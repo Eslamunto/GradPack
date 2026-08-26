@@ -136,19 +136,31 @@ describe("parseRunnerEvent", () => {
         type: "PLAN_READY",
         runId: "run-12345678",
         selected: [
-          { courseId: 42, advertisedBytes: 10, resourceCount: 2 },
-          { courseId: 43, advertisedBytes: 20, resourceCount: 3 },
+          {
+            courseId: 42,
+            advertisedBytes: 10,
+            unknownSizeCount: 1,
+            resourceCount: 2,
+          },
+          {
+            courseId: 43,
+            advertisedBytes: 20,
+            unknownSizeCount: 2,
+            resourceCount: 3,
+          },
         ],
         advertisedBytes: 30,
+        unknownSizeCount: 3,
         resourceCount: 5,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
-        fallbackReason: "combined-size-exceeded",
+        fallbackReason: "unknown-size-files",
       }),
     ).toMatchObject({
       type: "PLAN_READY",
       effectivePackaging: "per-course",
-      fallbackReason: "combined-size-exceeded",
+      unknownSizeCount: 3,
+      fallbackReason: "unknown-size-files",
     });
     expect(parseRunnerEvent(progress())).toMatchObject({
       type: "PROGRESS",
@@ -163,6 +175,80 @@ describe("parseRunnerEvent", () => {
       completedCourses: 2,
       outputCount: 2,
     });
+  });
+
+  it("fails closed for invalid unknown-size plan summaries and fallback reasons", () => {
+    const event = {
+      channel: "gradpack/runner/v1",
+      type: "PLAN_READY",
+      runId: "run-12345678",
+      selected: [
+        {
+          courseId: 42,
+          advertisedBytes: 10,
+          unknownSizeCount: 1,
+          resourceCount: 2,
+        },
+        {
+          courseId: 43,
+          advertisedBytes: 20,
+          unknownSizeCount: 2,
+          resourceCount: 3,
+        },
+      ],
+      advertisedBytes: 30,
+      unknownSizeCount: 3,
+      resourceCount: 5,
+      requestedPackaging: "combined",
+      effectivePackaging: "per-course",
+      fallbackReason: "unknown-size-files",
+    };
+    const missingUnknownSizeCount = { ...event };
+    Reflect.deleteProperty(missingUnknownSizeCount, "unknownSizeCount");
+    const invalidEvents = [
+      missingUnknownSizeCount,
+      { ...event, unknownSizeCount: -1 },
+      { ...event, unknownSizeCount: 1.5 },
+      { ...event, unknownSizeCount: 2 },
+      { ...event, unexpected: true },
+      {
+        ...event,
+        selected: [
+          {
+            courseId: 42,
+            advertisedBytes: 10,
+            resourceCount: 2,
+          },
+          event.selected[1],
+        ],
+      },
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], unknownSizeCount: -1 },
+          event.selected[1],
+        ],
+      },
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], unknownSizeCount: 1.5 },
+          event.selected[1],
+        ],
+      },
+      {
+        ...event,
+        selected: [
+          { ...event.selected[0], extra: true },
+          event.selected[1],
+        ],
+      },
+      { ...event, fallbackReason: "unsafe-fallback" },
+    ];
+
+    for (const invalid of invalidEvents) {
+      expect(() => parseRunnerEvent(invalid)).toThrow();
+    }
   });
 
   it.each([
