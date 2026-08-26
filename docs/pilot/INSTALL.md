@@ -6,7 +6,7 @@ an unpacked extension, not through the Chrome Web Store.
 ## Before installing
 
 - Use desktop Chrome 116 or newer.
-- Keep both supplied files together: `gradpack-0.1.0-alpha.4.zip` and its
+- Keep both supplied files together: `gradpack-0.1.0-alpha.5.zip` and its
   `.sha256` sidecar.
 - GradPack saves the resulting course archive locally. It has no analytics,
   telemetry, backend, or cloud upload.
@@ -28,20 +28,20 @@ supplied files. Continue only when the calculated SHA-256 matches the sidecar.
 ### macOS
 
 ```bash
-shasum -a 256 -c gradpack-0.1.0-alpha.4.zip.sha256
+shasum -a 256 -c gradpack-0.1.0-alpha.5.zip.sha256
 ```
 
 ### Linux
 
 ```bash
-sha256sum -c gradpack-0.1.0-alpha.4.zip.sha256
+sha256sum -c gradpack-0.1.0-alpha.5.zip.sha256
 ```
 
 ### Windows PowerShell
 
 ```powershell
-Get-FileHash .\gradpack-0.1.0-alpha.4.zip -Algorithm SHA256
-Get-Content .\gradpack-0.1.0-alpha.4.zip.sha256
+Get-FileHash .\gradpack-0.1.0-alpha.5.zip -Algorithm SHA256
+Get-Content .\gradpack-0.1.0-alpha.5.zip.sha256
 ```
 
 Compare the two hexadecimal values exactly. Stop and contact the maintainer if
@@ -57,8 +57,9 @@ they differ.
 5. Sign in to Frankfurt School Canvas in a normal Chrome tab.
 6. Keep that tab open, signed in, and unnavigated while GradPack works.
 7. Select GradPack in the Chrome toolbar to open its Side Panel.
-8. Select one or more accessible courses, choose combined or per-course output,
-   and start planning.
+8. Select individual courses or use **Select all courses** to select every
+   displayed active, completed, and concluded course; then choose combined or
+   per-course output and start planning.
 9. Review the plan and any packaging fallback notice, then confirm retrieval.
 10. Keep the resulting archive or archives local. Extract each ZIP before
     opening its `index.html`.

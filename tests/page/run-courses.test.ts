@@ -61,7 +61,7 @@ const planFor = (
 const manifest = (course: CourseSummary): ArchiveManifest =>
   ({
     schemaVersion: 1,
-    gradPackVersion: "0.1.0-alpha.4",
+    gradPackVersion: "0.1.0-alpha.5",
     createdAt: "2026-08-17T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },

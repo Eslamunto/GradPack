@@ -1,11 +1,12 @@
 # GradPack pilot test checklist
 
-- Artifact version: 0.1.0-alpha.4
+- Artifact version: 0.1.0-alpha.5
 - SHA-256 verified: pass / fail
 - Chrome version:
 - Operating-system version:
 - Extension installation: pass / fail
 - Course list: pass / fail
+- Select-all control: pass / fail
 - Selected-course count:
 - Requested packaging: combined / per-course
 - Effective packaging: combined / per-course

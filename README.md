@@ -16,6 +16,9 @@ archive JavaScript, and records per-resource outcomes. GradPack uses the
 student's existing signed-in Frankfurt School Canvas tab and has no analytics,
 telemetry, backend, or cloud upload.
 
+Use **Select all courses** to choose every displayed active, completed, and
+concluded course, or keep using the individual course checkboxes.
+
 ## Pilot installation
 
 Pilot testers should use the versioned artifact and checksum supplied by the

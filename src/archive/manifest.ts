@@ -8,7 +8,7 @@ import type {
 } from "../shared/model";
 import { MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES } from "../shared/constants";
 
-const GRADPACK_VERSION = "0.1.0-alpha.4";
+const GRADPACK_VERSION = "0.1.0-alpha.5";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
 const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
