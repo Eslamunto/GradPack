@@ -587,5 +587,10 @@ export async function packagePilot({
 
 const invokedPath = process.argv[1] ? resolve(process.argv[1]) : "";
 if (invokedPath === fileURLToPath(import.meta.url)) {
-  await packagePilot();
+  const argumentsList = process.argv.slice(2);
+  if (argumentsList.length > 1) {
+    throw new TypeError("Unsupported packaging arguments");
+  }
+  const artifactRoot = argumentsList[0];
+  await packagePilot(artifactRoot === undefined ? {} : { artifactRoot });
 }

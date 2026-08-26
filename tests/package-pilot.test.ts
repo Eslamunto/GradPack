@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFile as execFileCallback } from "node:child_process";
 import {
   link,
   mkdir,
@@ -13,6 +14,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { unzipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
@@ -20,6 +22,8 @@ import {
   PILOT_FILES,
   packagePilot,
 } from "../scripts/package-pilot.mjs";
+
+const execFile = promisify(execFileCallback);
 
 const makeBuild = async (): Promise<string> => {
   const root = await mkdtemp(join(tmpdir(), "gradpack-package-test-"));
@@ -71,6 +75,32 @@ const centralHeaders = (bytes: Uint8Array): Header[] => {
 };
 
 describe("pilot package", () => {
+  it("writes CLI artifacts to the requested destination", async () => {
+    const root = await mkdtemp(join(tmpdir(), "gradpack-package-cli-"));
+    const buildRoot = join(root, "dist");
+    const artifactRoot = join(root, "requested-output");
+    await mkdir(buildRoot);
+    for (const path of PILOT_FILES) {
+      await writeFile(
+        join(buildRoot, path),
+        path === "manifest.json"
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n'
+          : `synthetic:${path}\n`,
+      );
+    }
+
+    await execFile(
+      process.execPath,
+      [join(process.cwd(), "scripts/package-pilot.mjs"), artifactRoot],
+      { cwd: root },
+    );
+
+    expect((await readdir(artifactRoot)).sort()).toEqual([
+      PILOT_ARTIFACT_NAME,
+      `${PILOT_ARTIFACT_NAME}.sha256`,
+    ]);
+  });
+
   it("rejects the stale Alpha 3 release identity", async () => {
     const buildRoot = await makeBuild();
     await writeFile(
