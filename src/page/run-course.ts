@@ -210,46 +210,91 @@ export async function buildCourseArchive(options: {
       controller.abort(terminalCause);
       return cause;
     };
-    let unknownTurn = Promise.resolve();
-    let unknownTurnCount = 0;
-    const waitForUnknownTurn = async (turn: Promise<void>): Promise<void> => {
-      throwIfAborted(controller.signal);
-      let onAbort = (): void => undefined;
-      const aborted = new Promise<never>((_resolve, reject) => {
-        onAbort = () => reject(abortError(controller.signal));
-      });
-      controller.signal.addEventListener("abort", onAbort, { once: true });
-      if (controller.signal.aborted) onAbort();
-      try {
-        await Promise.race([turn, aborted]);
-      } finally {
-        controller.signal.removeEventListener("abort", onAbort);
-      }
-      throwIfAborted(controller.signal);
+    type RetrievalRelease = () => void;
+    type RetrievalWaiter = {
+      exclusive: boolean;
+      settled: boolean;
+      resolve: (release: RetrievalRelease) => void;
+      reject: (reason: unknown) => void;
+      onAbort: () => void;
     };
-    const acquireUnknownTurn = (): (() => void) | Promise<() => void> => {
-      throwIfAborted(controller.signal);
-      const shouldWait = unknownTurnCount > 0;
-      unknownTurnCount += 1;
-      const previousTurn = unknownTurn;
-      let releaseTurn = (): void => undefined;
-      unknownTurn = new Promise<void>((resolve) => {
-        releaseTurn = resolve;
-      });
+    let activeSharedRetrievals = 0;
+    let exclusiveRetrievalActive = false;
+    const retrievalWaiters: RetrievalWaiter[] = [];
+
+    function drainRetrievalWaiters(): void {
+      if (controller.signal.aborted || exclusiveRetrievalActive) return;
+      const first = retrievalWaiters[0];
+      if (!first) return;
+      if (first.exclusive) {
+        if (activeSharedRetrievals > 0) return;
+        retrievalWaiters.shift();
+        admitRetrievalWaiter(first);
+        return;
+      }
+      while (retrievalWaiters[0] && !retrievalWaiters[0].exclusive) {
+        admitRetrievalWaiter(retrievalWaiters.shift()!);
+      }
+    }
+
+    function createRetrievalRelease(exclusive: boolean): RetrievalRelease {
       let released = false;
-      const release = (): void => {
+      return (): void => {
         if (released) return;
         released = true;
-        unknownTurnCount -= 1;
-        releaseTurn();
+        if (exclusive) exclusiveRetrievalActive = false;
+        else activeSharedRetrievals -= 1;
+        drainRetrievalWaiters();
       };
-      if (!shouldWait) return release;
-      return waitForUnknownTurn(previousTurn)
-        .then(() => release)
-        .catch((error: unknown) => {
-          release();
-          throw latchTerminalCause(error);
+    }
+
+    function admitRetrieval(exclusive: boolean): RetrievalRelease {
+      if (exclusive) exclusiveRetrievalActive = true;
+      else activeSharedRetrievals += 1;
+      return createRetrievalRelease(exclusive);
+    }
+
+    function admitRetrievalWaiter(waiter: RetrievalWaiter): void {
+      if (waiter.settled) return;
+      waiter.settled = true;
+      controller.signal.removeEventListener("abort", waiter.onAbort);
+      waiter.resolve(admitRetrieval(waiter.exclusive));
+    }
+
+    const acquireRetrieval = (
+      exclusive: boolean,
+    ): RetrievalRelease | Promise<RetrievalRelease> => {
+      throwIfAborted(controller.signal);
+      if (
+        retrievalWaiters.length === 0 &&
+        !exclusiveRetrievalActive &&
+        (!exclusive || activeSharedRetrievals === 0)
+      ) {
+        return admitRetrieval(exclusive);
+      }
+      return new Promise<RetrievalRelease>((resolve, reject) => {
+        const waiter: RetrievalWaiter = {
+          exclusive,
+          settled: false,
+          resolve,
+          reject,
+          onAbort: (): void => undefined,
+        };
+        waiter.onAbort = (): void => {
+          if (waiter.settled) return;
+          waiter.settled = true;
+          const index = retrievalWaiters.indexOf(waiter);
+          if (index >= 0) retrievalWaiters.splice(index, 1);
+          controller.signal.removeEventListener("abort", waiter.onAbort);
+          waiter.reject(abortError(controller.signal));
+          drainRetrievalWaiters();
+        };
+        retrievalWaiters.push(waiter);
+        controller.signal.addEventListener("abort", waiter.onAbort, {
+          once: true,
         });
+        if (controller.signal.aborted) waiter.onAbort();
+      });
     };
 
     const work = async (): Promise<void> => {
@@ -273,16 +318,13 @@ export async function buildCourseArchive(options: {
             if (resource.kind === "file") {
               validatedFileUrl(resource, immutablePlan.course.id);
             }
-            let releaseUnknownTurn: (() => void) | undefined;
+            let releaseRetrieval: RetrievalRelease | undefined;
             try {
-              if (
-                resource.kind === "file" &&
-                resource.advertisedBytes === null
-              ) {
-                const turn = acquireUnknownTurn();
-                releaseUnknownTurn =
-                  typeof turn === "function" ? turn : await turn;
-              }
+              const exclusive =
+                resource.kind === "file" && resource.advertisedBytes === null;
+              const admission = acquireRetrieval(exclusive);
+              releaseRetrieval =
+                typeof admission === "function" ? admission : await admission;
               const remainingBytes = byteLimit - successfulBytes;
               if (
                 !Number.isSafeInteger(remainingBytes) ||
@@ -337,12 +379,12 @@ export async function buildCourseArchive(options: {
                 };
               }
             } catch (error) {
-              if (releaseUnknownTurn !== undefined) {
+              if (releaseRetrieval !== undefined) {
                 latchTerminalCause(error);
               }
               throw error;
             } finally {
-              releaseUnknownTurn?.();
+              releaseRetrieval?.();
             }
           }
           outcomes[index] = outcome;

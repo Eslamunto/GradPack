@@ -218,13 +218,15 @@ describe("runCourse", () => {
     });
   });
 
-  it("limits retrieval concurrency to two", async () => {
+  it("allows known-size file and page retrievals to share concurrency", async () => {
     let active = 0;
     let maximum = 0;
+    const started: string[] = [];
     const releases: Array<() => void> = [];
     const deps = dependencies(
-      plan([file(1), file(2), file(3), file(4)]),
-      async () => {
+      plan([file(1), page, file(2), file(3)]),
+      async (resource) => {
+        started.push(resource.key);
         active += 1;
         maximum = Math.max(maximum, active);
         await new Promise<void>((resolve) => releases.push(resolve));
@@ -239,6 +241,7 @@ describe("runCourse", () => {
       dependencies: deps,
     });
     await vi.waitFor(() => expect(releases).toHaveLength(2));
+    expect(started).toEqual(["file:1", "page:welcome"]);
     releases.splice(0).forEach((release) => release());
     await vi.waitFor(() => expect(releases).toHaveLength(2));
     releases.splice(0).forEach((release) => release());
@@ -373,9 +376,73 @@ describe("runCourse", () => {
     expect(observed).toEqual([
       ["file:1", 6],
       ["file:2", 6],
-      ["file:3", 4],
+      ["file:3", 2],
     ]);
     expect(beforePackage).toHaveBeenCalledOnce();
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("waits for an active known retrieval before authorizing an unknown remainder", async () => {
+    const knownBytes = new Uint8Array([1, 2, 3]);
+    const unknownBytes = new Uint8Array([4, 5]);
+    const started: Array<[string, number]> = [];
+    let active = 0;
+    let maximum = 0;
+    let releaseKnown!: () => void;
+    let markKnownStarted!: () => void;
+    const knownRelease = new Promise<void>((resolve) => {
+      releaseKnown = resolve;
+    });
+    const knownStarted = new Promise<void>((resolve) => {
+      markKnownStarted = resolve;
+    });
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([file(1, 3), unknownFile(2)]),
+      async (resource, _signal, remainingBytes) => {
+        started.push([resource.key, remainingBytes]);
+        active += 1;
+        maximum = Math.max(maximum, active);
+
+        try {
+          if (resource.key === "file:1") {
+            markKnownStarted();
+            await knownRelease;
+            return { status: "success", bytes: knownBytes };
+          }
+
+          return { status: "success", bytes: unknownBytes };
+        } finally {
+          active -= 1;
+        }
+      },
+    );
+    deps.maxArchiveBytes = 5;
+    deps.beforePackage = beforePackage;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await knownStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeKnownCompleted = [...started];
+    releaseKnown();
+
+    await expect(action).rejects.toThrow("Task 4 pre-package boundary");
+    expect(startedBeforeKnownCompleted).toEqual([["file:1", 5]]);
+    expect(started).toEqual([
+      ["file:1", 5],
+      ["file:2", 2],
+    ]);
+    expect(maximum).toBe(1);
+    expect(knownBytes).toEqual(new Uint8Array(knownBytes.length));
+    expect(unknownBytes).toEqual(new Uint8Array(unknownBytes.length));
     expect(deps.download).not.toHaveBeenCalled();
   });
 
@@ -524,20 +591,11 @@ describe("runCourse", () => {
     const beforePackage = vi.fn();
     const observed: Array<[string, number]> = [];
     const deps = dependencies(
-      plan([file(1, 2), file(2, 1), unknownFile(3)]),
-      async (resource, signal, remainingBytes) => {
+      plan([file(1, 2), unknownFile(3)]),
+      async (resource, _signal, remainingBytes) => {
         observed.push([resource.key, remainingBytes]);
         if (resource.key === "file:1") {
           return { status: "success", bytes: retained };
-        }
-        if (resource.key === "file:2") {
-          await new Promise<void>((_resolve, reject) => {
-            signal.addEventListener(
-              "abort",
-              () => reject(new DOMException("cancelled", "AbortError")),
-              { once: true },
-            );
-          });
         }
         return { status: "success", bytes: overflow };
       },
@@ -555,7 +613,6 @@ describe("runCourse", () => {
     ).rejects.toThrow("Archive byte limit exceeded");
     expect(observed).toEqual([
       ["file:1", 4],
-      ["file:2", 4],
       ["file:3", 2],
     ]);
     expect(retained).toEqual(new Uint8Array(2));
