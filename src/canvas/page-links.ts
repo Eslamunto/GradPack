@@ -4,6 +4,12 @@ import { CANVAS_ORIGIN } from "../shared/constants";
 const PAGE_TITLE_MAX_CHARACTERS = 500;
 const ENCODED_SEPARATOR = /%(?:2f|5c)/iu;
 
+const hasAsciiUrlWhitespaceOrControl = (value: string): boolean =>
+  Array.from(value).some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x20 || code === 0x7f;
+  });
+
 const invalidPage = (): never => {
   throw new CanvasResponseError("Canvas returned an invalid page");
 };
@@ -57,6 +63,7 @@ export const pageLinkedFileIds = (body: string, courseId: number): number[] => {
     if (
       href === null ||
       href !== href.trim() ||
+      hasAsciiUrlWhitespaceOrControl(href) ||
       href.includes("\\") ||
       ENCODED_SEPARATOR.test(href) ||
       (!href.startsWith("/courses/") && !href.startsWith(`${CANVAS_ORIGIN}/`))
