@@ -3,7 +3,7 @@
   "name": "GradPack",
   "description": "Save selected accessible Canvas courses for offline use.",
   "version": "0.1.0",
-  "version_name": "0.1.0-alpha.3",
+  "version_name": "0.1.0-alpha.4",
   "minimum_chrome_version": "116",
   "permissions": ["sidePanel", "scripting"],
   "host_permissions": ["https://frankfurtschool.instructure.com/*"],
