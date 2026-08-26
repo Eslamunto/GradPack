@@ -379,6 +379,116 @@ describe("runCourse", () => {
     expect(deps.download).not.toHaveBeenCalled();
   });
 
+  it("serializes overlapping unknown retrievals against the updated course remainder", async () => {
+    const firstBytes = new Uint8Array([1, 2, 3]);
+    const secondBytes = new Uint8Array([4, 5]);
+    const started: Array<[string, number]> = [];
+    let activeAuthorization = 0;
+    let maximumAuthorization = 0;
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const beforePackage = vi.fn(() => {
+      throw new Error("Task 4 pre-package boundary");
+    });
+    const deps = dependencies(
+      plan([unknownFile(1), unknownFile(2)]),
+      async (resource, _signal, remainingBytes) => {
+        started.push([resource.key, remainingBytes]);
+        activeAuthorization += remainingBytes;
+        maximumAuthorization = Math.max(
+          maximumAuthorization,
+          activeAuthorization,
+        );
+
+        try {
+          if (resource.key === "file:1") {
+            markFirstStarted();
+            await firstRelease;
+            return { status: "success", bytes: firstBytes };
+          }
+
+          return { status: "success", bytes: secondBytes };
+        } finally {
+          activeAuthorization -= remainingBytes;
+        }
+      },
+    );
+    deps.maxArchiveBytes = 5;
+    deps.beforePackage = beforePackage;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await firstStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeFirstCompleted = [...started];
+    releaseFirst();
+
+    await expect(action).rejects.toThrow("Task 4 pre-package boundary");
+    expect(startedBeforeFirstCompleted).toEqual([["file:1", 5]]);
+    expect(started).toEqual([
+      ["file:1", 5],
+      ["file:2", 2],
+    ]);
+    expect(maximumAuthorization).toBe(5);
+    expect(firstBytes).toEqual(new Uint8Array(firstBytes.length));
+    expect(secondBytes).toEqual(new Uint8Array(secondBytes.length));
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
+  it("aborts queued unknown retrievals without deadlocking after a failure", async () => {
+    const started: string[] = [];
+    let releaseFirst!: () => void;
+    let markFirstStarted!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    const firstStarted = new Promise<void>((resolve) => {
+      markFirstStarted = resolve;
+    });
+    const deps = dependencies(
+      plan([unknownFile(1), unknownFile(2)]),
+      async (resource) => {
+        started.push(resource.key);
+        if (resource.key === "file:1") {
+          markFirstStarted();
+          await firstRelease;
+          throw new RunSafetyError("serialized unknown failure");
+        }
+
+        return { status: "success", bytes: new Uint8Array([1]) };
+      },
+    );
+    deps.maxArchiveBytes = 5;
+
+    const action = runCourse({
+      course: syntheticCourse,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    await firstStarted;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    const startedBeforeFailure = [...started];
+    releaseFirst();
+
+    await expect(action).rejects.toThrow("serialized unknown failure");
+    expect(startedBeforeFailure).toEqual(["file:1"]);
+    expect(started).toEqual(["file:1"]);
+    expect(deps.download).not.toHaveBeenCalled();
+  });
+
   it("accepts an exact-budget unknown file through the pre-package gate", async () => {
     const resourceBytes = new Uint8Array([1, 2, 3]);
     const beforePackage = vi.fn(() => {

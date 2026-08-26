@@ -201,6 +201,57 @@ export async function buildCourseArchive(options: {
       throw new RunSafetyError("Invalid archive byte limit");
     }
 
+    const latchTerminalCause = (error: unknown): Error | DOMException => {
+      const cause =
+        error instanceof Error || error instanceof DOMException
+          ? error
+          : new RunSafetyError("Retrieval failed");
+      terminalCause ??= cause;
+      controller.abort(terminalCause);
+      return cause;
+    };
+    let unknownTurn = Promise.resolve();
+    let unknownTurnCount = 0;
+    const waitForUnknownTurn = async (turn: Promise<void>): Promise<void> => {
+      throwIfAborted(controller.signal);
+      let onAbort = (): void => undefined;
+      const aborted = new Promise<never>((_resolve, reject) => {
+        onAbort = () => reject(abortError(controller.signal));
+      });
+      controller.signal.addEventListener("abort", onAbort, { once: true });
+      if (controller.signal.aborted) onAbort();
+      try {
+        await Promise.race([turn, aborted]);
+      } finally {
+        controller.signal.removeEventListener("abort", onAbort);
+      }
+      throwIfAborted(controller.signal);
+    };
+    const acquireUnknownTurn = (): (() => void) | Promise<() => void> => {
+      throwIfAborted(controller.signal);
+      const shouldWait = unknownTurnCount > 0;
+      unknownTurnCount += 1;
+      const previousTurn = unknownTurn;
+      let releaseTurn = (): void => undefined;
+      unknownTurn = new Promise<void>((resolve) => {
+        releaseTurn = resolve;
+      });
+      let released = false;
+      const release = (): void => {
+        if (released) return;
+        released = true;
+        unknownTurnCount -= 1;
+        releaseTurn();
+      };
+      if (!shouldWait) return release;
+      return waitForUnknownTurn(previousTurn)
+        .then(() => release)
+        .catch((error: unknown) => {
+          release();
+          throw latchTerminalCause(error);
+        });
+    };
+
     const work = async (): Promise<void> => {
       for (;;) {
         if (terminalCause !== undefined || controller.signal.aborted) return;
@@ -222,56 +273,76 @@ export async function buildCourseArchive(options: {
             if (resource.kind === "file") {
               validatedFileUrl(resource, immutablePlan.course.id);
             }
-            const remainingBytes = byteLimit - successfulBytes;
-            if (
-              !Number.isSafeInteger(remainingBytes) ||
-              remainingBytes < 0 ||
-              remainingBytes > MAX_ARCHIVE_BYTES
-            ) {
-              throw new RunSafetyError("Invalid remaining archive byte limit");
-            }
-            const result = await dependencies.retrieve(
-              resource,
-              immutablePlan,
-              controller.signal,
-              remainingBytes,
-            );
-            if (controller.signal.aborted && result.status === "success") {
-              result.bytes.fill(0);
-            }
-            throwIfAborted(controller.signal);
-            if (result.status === "success") {
+            let releaseUnknownTurn: (() => void) | undefined;
+            try {
               if (
-                !resource.archivePath ||
-                !isCanonicalArchivePath(resource.archivePath)
+                resource.kind === "file" &&
+                resource.advertisedBytes === null
               ) {
-                result.bytes.fill(0);
-                throw new RunSafetyError("Invalid planned archive path");
+                const turn = acquireUnknownTurn();
+                releaseUnknownTurn =
+                  typeof turn === "function" ? turn : await turn;
               }
-              successfulBytes += result.bytes.byteLength;
+              const remainingBytes = byteLimit - successfulBytes;
               if (
-                !Number.isSafeInteger(successfulBytes) ||
-                successfulBytes > byteLimit
+                !Number.isSafeInteger(remainingBytes) ||
+                remainingBytes < 0 ||
+                remainingBytes > MAX_ARCHIVE_BYTES
               ) {
-                result.bytes.fill(0);
-                throw new RunSafetyError("Archive byte limit exceeded");
+                throw new RunSafetyError(
+                  "Invalid remaining archive byte limit",
+                );
               }
-              retained.add(result.bytes);
-              entries.set(resource.archivePath, result.bytes);
-              outcome = {
-                ...resource,
-                status: "success",
-                actualBytes: result.bytes.byteLength,
-                failureCategory: null,
-              };
-            } else {
-              failed += 1;
-              outcome = {
-                ...resource,
-                status: result.status,
-                actualBytes: null,
-                failureCategory: result.failureCategory,
-              };
+              const result = await dependencies.retrieve(
+                resource,
+                immutablePlan,
+                controller.signal,
+                remainingBytes,
+              );
+              if (controller.signal.aborted && result.status === "success") {
+                result.bytes.fill(0);
+              }
+              throwIfAborted(controller.signal);
+              if (result.status === "success") {
+                if (
+                  !resource.archivePath ||
+                  !isCanonicalArchivePath(resource.archivePath)
+                ) {
+                  result.bytes.fill(0);
+                  throw new RunSafetyError("Invalid planned archive path");
+                }
+                successfulBytes += result.bytes.byteLength;
+                if (
+                  !Number.isSafeInteger(successfulBytes) ||
+                  successfulBytes > byteLimit
+                ) {
+                  result.bytes.fill(0);
+                  throw new RunSafetyError("Archive byte limit exceeded");
+                }
+                retained.add(result.bytes);
+                entries.set(resource.archivePath, result.bytes);
+                outcome = {
+                  ...resource,
+                  status: "success",
+                  actualBytes: result.bytes.byteLength,
+                  failureCategory: null,
+                };
+              } else {
+                failed += 1;
+                outcome = {
+                  ...resource,
+                  status: result.status,
+                  actualBytes: null,
+                  failureCategory: result.failureCategory,
+                };
+              }
+            } catch (error) {
+              if (releaseUnknownTurn !== undefined) {
+                latchTerminalCause(error);
+              }
+              throw error;
+            } finally {
+              releaseUnknownTurn?.();
             }
           }
           outcomes[index] = outcome;
@@ -283,12 +354,7 @@ export async function buildCourseArchive(options: {
             failed,
           });
         } catch (error) {
-          const cause =
-            error instanceof Error || error instanceof DOMException
-              ? error
-              : new RunSafetyError("Retrieval failed");
-          terminalCause ??= cause;
-          controller.abort(terminalCause);
+          latchTerminalCause(error);
           return;
         }
       }
