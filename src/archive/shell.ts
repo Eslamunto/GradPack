@@ -12,6 +12,8 @@ export type ArchiveShellInput = Readonly<{
   contentHtml: string;
 }>;
 
+export const COURSES_HOME_LINK_CLASS = "courses-home-link";
+
 export const escapeHtml = (value: string): string =>
   value.replace(/[&<>"']/gu, (character) => {
     const entities: Record<string, string> = {
@@ -52,5 +54,5 @@ export const renderArchiveShell = (input: ArchiveShellInput): string => {
   const title = escapeHtml(input.title);
   const courseName = escapeHtml(input.course.name);
   const code = escapeHtml(input.course.courseCode);
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — GradPack</title><link rel="stylesheet" href="${relativeArchiveHref(input.pagePath, "assets/archive.css")}"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><nav class="global-rail" aria-label="Archive"><span class="gradpack-mark" aria-label="GradPack">GP</span>${archiveLink(input.pagePath, "index.html", "Archive", active === "home")}<a href="${escapeHtml(coursesHref)}">Courses</a>${archiveLink(input.pagePath, "status.html", "Status", active === "status")}</nav><nav class="course-navigation" aria-label="Course"><strong>${courseName}</strong><span class="course-code">${code}</span>${courseNav}</nav><div class="archive-workspace"><nav class="breadcrumbs" aria-label="Breadcrumb"><a href="${escapeHtml(coursesHref)}">Courses</a><span aria-hidden="true">›</span><a href="${relativeArchiveHref(input.pagePath, "index.html")}">${courseName}</a><span aria-hidden="true">›</span><span>${title}</span></nav><main id="archive-main" tabindex="-1">${input.contentHtml}</main><footer class="archive-identity">Local GradPack archive</footer></div></div></body></html>`;
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} — GradPack</title><link rel="stylesheet" href="${relativeArchiveHref(input.pagePath, "assets/archive.css")}"></head><body><a class="skip-link" href="#archive-main">Skip to content</a><div class="archive-layout"><nav class="global-rail" aria-label="Archive"><span class="gradpack-mark" aria-label="GradPack">GP</span>${archiveLink(input.pagePath, "index.html", "Archive", active === "home")}<a class="${COURSES_HOME_LINK_CLASS}" href="${escapeHtml(coursesHref)}">Courses</a>${archiveLink(input.pagePath, "status.html", "Status", active === "status")}</nav><nav class="course-navigation" aria-label="Course"><strong>${courseName}</strong><span class="course-code">${code}</span>${courseNav}</nav><div class="archive-workspace"><nav class="breadcrumbs" aria-label="Breadcrumb"><a class="${COURSES_HOME_LINK_CLASS}" href="${escapeHtml(coursesHref)}">Courses</a><span aria-hidden="true">›</span><a href="${relativeArchiveHref(input.pagePath, "index.html")}">${courseName}</a><span aria-hidden="true">›</span><span>${title}</span></nav><main id="archive-main" tabindex="-1">${input.contentHtml}</main><footer class="archive-identity">Local GradPack archive</footer></div></div></body></html>`;
 };

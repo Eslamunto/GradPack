@@ -19,6 +19,15 @@ describe("archive shell", () => {
       "Modules",
     );
     expect(document.querySelector('a[href="index.html"]')).not.toBeNull();
+    expect(
+      [...document.querySelectorAll("a.courses-home-link")].map((link) => ({
+        href: link.getAttribute("href"),
+        text: link.textContent,
+      })),
+    ).toEqual([
+      { href: "index.html", text: "Courses" },
+      { href: "index.html", text: "Courses" },
+    ]);
     expect(document.querySelector("script, style, iframe, form")).toBeNull();
     expect(document.querySelector("main")?.textContent).toContain(
       "Safe content",
@@ -42,6 +51,11 @@ describe("archive shell", () => {
     expect(
       document.querySelector('a[href="../../../index.html"]'),
     ).not.toBeNull();
+    expect(
+      [...document.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../../index.html", "../../../index.html"]);
     expect(document.querySelector('[aria-current="page"]')?.textContent).toBe(
       "Pages",
     );

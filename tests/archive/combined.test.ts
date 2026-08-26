@@ -4,11 +4,9 @@ import { buildCourseZip } from "../../src/archive/build-zip";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
   buildCombinedZip,
-  combinedCourseRoot,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
 import { renderCoursePages } from "../../src/archive/course-pages";
-import { relativeArchiveHref } from "../../src/archive/archive-links";
 import { buildArchiveNavigationModel } from "../../src/archive/navigation-model";
 import { renderSavedPageHtml } from "../../src/archive/sanitize";
 import {
@@ -28,7 +26,6 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
     },
   };
   const outcomes = structuredClone(syntheticArchiveOutcomes);
-  const root = combinedCourseRoot(plan.course);
   let model = buildArchiveNavigationModel(
     plan,
     outcomes,
@@ -47,10 +44,7 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
       pagePath,
       title: "Welcome",
       sanitizedFragment: "<p>Welcome</p>",
-      combinedHomeHref: relativeArchiveHref(
-        `${root}/${pagePath}`,
-        "index.html",
-      ),
+      combinedHomeHref: null,
     }),
   );
   entries.set(pagePath, savedPage);
@@ -62,10 +56,8 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
   );
   const manifest = model.manifest;
   const zipBytes = buildCourseZip({
-    archiveRoot: root,
-    pages: renderCoursePages(model, {
-      combinedHomeHref: relativeArchiveHref(`${root}/index.html`, "index.html"),
-    }),
+    archiveRoot: null,
+    pages: renderCoursePages(model),
     archiveCss: ARCHIVE_CSS,
     manifest,
     entries,
@@ -114,15 +106,24 @@ describe("buildCombinedZip", () => {
       "Combined archive status",
     );
     expect(strFromU8(entries["status.html"]!)).toContain("First Course status");
+    const nestedHome = new DOMParser().parseFromString(
+      strFromU8(entries["courses/First Course-101/index.html"]!),
+      "text/html",
+    );
+    expect(
+      [...nestedHome.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../index.html", "../../index.html"]);
     const savedPage = new DOMParser().parseFromString(
       strFromU8(entries["courses/First Course-101/pages/welcome.html"]!),
       "text/html",
     );
     expect(
-      [...savedPage.querySelectorAll("a")]
-        .filter((link) => link.textContent === "Courses")
-        .map((link) => link.getAttribute("href")),
-    ).toContain("../../../index.html");
+      [...savedPage.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../../index.html", "../../../index.html"]);
     expect(Object.keys(entries)).toEqual([
       "assets/archive.css",
       "courses/First Course-101/assets/archive.css",
@@ -183,6 +184,27 @@ describe("buildCombinedZip", () => {
       ),
     );
     archive.zipBytes = zipSync(entries);
+    expect(() =>
+      buildCombinedZip({
+        archives: [archive],
+        archiveCss: ARCHIVE_CSS,
+        now: () => "2026-08-17T12:00:00.000Z",
+        fileName: () => "gradpack-combined.zip",
+      }),
+    ).toThrow(TypeError);
+  });
+
+  it("rejects a nested course shell missing one Courses marker", () => {
+    const archive = courseArchive(405, "Missing Marker Course");
+    const entries = unzipSync(archive.zipBytes);
+    entries["index.html"] = strToU8(
+      strFromU8(entries["index.html"]!).replace(
+        ' class="courses-home-link"',
+        "",
+      ),
+    );
+    archive.zipBytes = zipSync(entries);
+
     expect(() =>
       buildCombinedZip({
         archives: [archive],

@@ -18,6 +18,7 @@ import {
   type CourseHtmlPath,
 } from "./archive-links";
 import { CLASSIC_ZIP_ENTRY_LIMIT } from "../shared/constants";
+import { COURSES_HOME_LINK_CLASS } from "./shell";
 
 const CORE_PATHS = [
   "assets/archive.css",
@@ -136,6 +137,7 @@ const SHELL_CLASSES = new Set([
   "course-card",
   "course-code",
   "course-grid",
+  COURSES_HOME_LINK_CLASS,
   "course-navigation",
   "global-rail",
   "gradpack-mark",

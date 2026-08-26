@@ -224,6 +224,24 @@ describe("extracted offline archive navigation", () => {
         .querySelector('.course-navigation a[aria-current="page"]')
         ?.textContent,
     ).toBe("Pages");
+    const standaloneModules = new DOMParser().parseFromString(
+      strFromU8(individualEntries["modules.html"]!),
+      "text/html",
+    );
+    expect(
+      [...standaloneModules.querySelectorAll("a.courses-home-link")].map(
+        (link) => link.getAttribute("href"),
+      ),
+    ).toEqual(["index.html", "index.html"]);
+    const standaloneSavedPage = new DOMParser().parseFromString(
+      strFromU8(individualEntries["pages/welcome.html"]!),
+      "text/html",
+    );
+    expect(
+      [...standaloneSavedPage.querySelectorAll("a.courses-home-link")].map(
+        (link) => link.getAttribute("href"),
+      ),
+    ).toEqual(["../index.html", "../index.html"]);
 
     const second = course(202, "Second Course");
     const archives = await Promise.all(
@@ -237,6 +255,15 @@ describe("extracted offline archive navigation", () => {
     });
     const combinedEntries = unzipSync(combined.zipBytes);
     verifyOfflineArchive(combinedEntries);
+    const nestedHome = new DOMParser().parseFromString(
+      strFromU8(combinedEntries["courses/First Course-101/index.html"]!),
+      "text/html",
+    );
+    expect(
+      [...nestedHome.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../index.html", "../../index.html"]);
     const nestedPage = new DOMParser().parseFromString(
       strFromU8(
         combinedEntries["courses/First Course-101/pages/welcome.html"]!,
@@ -244,10 +271,10 @@ describe("extracted offline archive navigation", () => {
       "text/html",
     );
     expect(
-      [...nestedPage.querySelectorAll("a")]
-        .filter((link) => link.textContent === "Courses")
-        .map((link) => link.getAttribute("href")),
-    ).toEqual(["../index.html", "../index.html"]);
+      [...nestedPage.querySelectorAll("a.courses-home-link")].map((link) =>
+        link.getAttribute("href"),
+      ),
+    ).toEqual(["../../../index.html", "../../../index.html"]);
     expect(combined.manifest.courses).toHaveLength(2);
     expect(combined.manifest.totals.success).toBe(4);
   });
