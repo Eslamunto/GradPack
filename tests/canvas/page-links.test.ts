@@ -28,11 +28,19 @@ describe("page-linked Canvas files", () => {
 
   it("ignores every link outside the exact page-file boundary", () => {
     const pageContent = "synthetic page content must not leak";
+    const httpUrl = new URL("/courses/101/files/7?wrap=1", CANVAS_ORIGIN);
+    httpUrl.protocol = "http:";
+    const credentialUrl = new URL(
+      "/courses/101/files/7?wrap=1",
+      CANVAS_ORIGIN,
+    );
+    credentialUrl.username = "synthetic";
+    credentialUrl.password = "synthetic";
     const body = [
       `<a href="${CANVAS_ORIGIN}/courses/102/files/7?wrap=1">other course</a>`,
       '<a href="https://synthetic.invalid/courses/101/files/7?wrap=1">other origin</a>',
-      '<a href="http://frankfurtschool.instructure.com/courses/101/files/7?wrap=1">http</a>',
-      '<a href="https://user:pass@frankfurtschool.instructure.com/courses/101/files/7?wrap=1">credentials</a>',
+      `<a href="${httpUrl.href}">http</a>`,
+      `<a href="${credentialUrl.href}">credentials</a>`,
       '<a href="/courses/101/files/7?wrap=1#section">fragment</a>',
       '<a href=" /courses/101/files/7?wrap=1">leading whitespace</a>',
       '<a href="/courses/101/files/7?wrap=1 ">trailing whitespace</a>',
