@@ -26,6 +26,17 @@ describe("page-linked Canvas files", () => {
     expect(pageLinkedFileIds(body, 101)).toEqual([7, 42]);
   });
 
+  it.each([
+    "/courses/101/files/7/download?",
+    "/courses/101/files/7/download#",
+    "/courses/101/files/7?wrap=1#",
+    `${CANVAS_ORIGIN}/courses/101/files/7/download?`,
+    `${CANVAS_ORIGIN}/courses/101/files/7/download#`,
+    `${CANVAS_ORIGIN}/courses/101/files/7?wrap=1#`,
+  ])("rejects a raw trailing URL delimiter in %s", (href) => {
+    expect(pageLinkedFileIds(`<a href="${href}">File</a>`, 101)).toEqual([]);
+  });
+
   it("ignores every link outside the exact page-file boundary", () => {
     const pageContent = "synthetic page content must not leak";
     const httpUrl = new URL("/courses/101/files/7?wrap=1", CANVAS_ORIGIN);

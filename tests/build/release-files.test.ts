@@ -51,6 +51,11 @@ describe("pilot release surface", () => {
       expect(install).toContain(token);
     }
     expect(checklist).toContain("Do not include");
+    expect(install).toContain(
+      "Unknown-size files are streamed under the hard 250 MiB per-course cap",
+    );
+    expect(install).toContain("combined request includes unknown-size files");
+    expect(install).not.toContain("requires known advertised file sizes");
     expect(checklist).not.toMatch(
       /^- (?:Course name|Filename|Canvas URL|Student identity|Screenshot|Archive):/gimu,
     );

@@ -257,11 +257,13 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
   const unknownSizeCount = nonNegativeInteger(input.unknownSizeCount);
   const resourceCount = nonNegativeInteger(input.resourceCount);
-  if (resourceCount > MAX_ARCHIVE_RESOURCES)
-    throw new TypeError("Invalid plan");
   if (
     unknownSizeCount > resourceCount ||
-    selected.some((item) => item.unknownSizeCount > item.resourceCount)
+    selected.some(
+      (item) =>
+        item.resourceCount > MAX_ARCHIVE_RESOURCES ||
+        item.unknownSizeCount > item.resourceCount,
+    )
   ) {
     throw new TypeError("Invalid plan counts");
   }
@@ -278,6 +280,12 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const requestedPackaging = packaging(input.requestedPackaging);
   const effectivePackaging = packaging(input.effectivePackaging);
   const reason = fallbackReason(input.fallbackReason);
+  if (
+    effectivePackaging === "combined" &&
+    resourceCount > MAX_ARCHIVE_RESOURCES
+  ) {
+    throw new TypeError("Invalid plan");
+  }
   if (
     (requestedPackaging === effectivePackaging && reason !== null) ||
     (requestedPackaging !== effectivePackaging && reason === null) ||

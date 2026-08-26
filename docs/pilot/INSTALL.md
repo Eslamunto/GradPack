@@ -12,8 +12,10 @@ an unpacked extension, not through the Chrome Web Store.
   telemetry, backend, or cloud upload.
 - GradPack can select one or more accessible courses and produce one
   combined archive or one ZIP per course.
-- Every selected course requires known advertised file sizes and must fit the
-  existing 250 MiB per-course limit.
+- Unknown-size files are streamed under the hard 250 MiB per-course cap.
+- If a combined request includes unknown-size files, GradPack shows the
+  packaging fallback before retrieval and falls back to per-course output
+  after confirmation.
 - If a requested combined archive exceeds its aggregate size or entry limit,
   GradPack shows the packaging fallback before retrieval and uses per-course
   output only after confirmation.

@@ -3,6 +3,7 @@ import {
   parseExtensionCommand,
   parseRunnerEvent,
 } from "../../src/shared/messages";
+import { MAX_ARCHIVE_RESOURCES } from "../../src/shared/constants";
 
 const command = (value: Record<string, unknown>): Record<string, unknown> => ({
   channel: "gradpack/extension/v1",
@@ -43,6 +44,39 @@ const complete = (
   unavailable: 0,
   unsupported: 0,
   external: 0,
+  ...value,
+});
+
+const perCourseResourceCount = Math.floor(MAX_ARCHIVE_RESOURCES / 2) + 1;
+const largePerCourseSelected = [
+  {
+    courseId: 42,
+    advertisedBytes: 10,
+    unknownSizeCount: 0,
+    resourceCount: perCourseResourceCount,
+  },
+  {
+    courseId: 43,
+    advertisedBytes: 20,
+    unknownSizeCount: 0,
+    resourceCount: perCourseResourceCount,
+  },
+];
+const largePerCourseAggregate = perCourseResourceCount * 2;
+
+const largePlanEvent = (
+  value: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  channel: "gradpack/runner/v1",
+  type: "PLAN_READY",
+  runId: "run-12345678",
+  selected: largePerCourseSelected,
+  advertisedBytes: 30,
+  unknownSizeCount: 0,
+  resourceCount: largePerCourseAggregate,
+  requestedPackaging: "per-course",
+  effectivePackaging: "per-course",
+  fallbackReason: null,
   ...value,
 });
 
@@ -175,6 +209,58 @@ describe("parseRunnerEvent", () => {
       completedCourses: 2,
       outputCount: 2,
     });
+  });
+
+  it.each([
+    ["direct", {}],
+    [
+      "combined fallback",
+      {
+        requestedPackaging: "combined",
+        fallbackReason: "combined-resource-limit-exceeded",
+      },
+    ],
+  ])(
+    "accepts a valid %s per-course plan whose safe aggregate exceeds one course cap",
+    (_name, overrides) => {
+      expect(() => parseRunnerEvent(largePlanEvent(overrides))).not.toThrow();
+    },
+  );
+
+  it("rejects an over-cap selected course in per-course mode", () => {
+    const selected = [
+      {
+        ...largePerCourseSelected[0],
+        resourceCount: MAX_ARCHIVE_RESOURCES + 1,
+      },
+    ];
+    expect(() =>
+      parseRunnerEvent(
+        largePlanEvent({
+          selected,
+          advertisedBytes: 10,
+          resourceCount: MAX_ARCHIVE_RESOURCES + 1,
+        }),
+      ),
+    ).toThrow();
+  });
+
+  it.each([
+    ["unsafe", Number.MAX_SAFE_INTEGER + 1],
+    ["inconsistent", largePerCourseAggregate + 1],
+  ])("rejects an %s aggregate resource count", (_name, resourceCount) => {
+    expect(() => parseRunnerEvent(largePlanEvent({ resourceCount }))).toThrow();
+  });
+
+  it("keeps the aggregate resource cap for combined mode", () => {
+    expect(() =>
+      parseRunnerEvent(
+        largePlanEvent({
+          requestedPackaging: "combined",
+          effectivePackaging: "combined",
+        }),
+      ),
+    ).toThrow();
   });
 
   it("fails closed for invalid unknown-size plan summaries and fallback reasons", () => {

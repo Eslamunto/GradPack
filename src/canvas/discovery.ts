@@ -160,10 +160,9 @@ const normalizeFile = (value: unknown): NormalizedFile => {
       : positiveId(rawFolderId, "folder ID");
   const rawSize = own(value, "size");
   if (
-    rawSize !== null &&
-    (typeof rawSize !== "number" ||
-      !Number.isSafeInteger(rawSize) ||
-      rawSize < 0)
+    typeof rawSize !== "number" ||
+    !Number.isSafeInteger(rawSize) ||
+    rawSize < 0
   ) {
     throw new TypeError("Invalid file size");
   }

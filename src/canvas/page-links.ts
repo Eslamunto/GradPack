@@ -70,6 +70,9 @@ export const pageLinkedFileIds = (body: string, courseId: number): number[] => {
     ) {
       continue;
     }
+    const rawCanvasPath = href.startsWith("/")
+      ? href
+      : href.slice(CANVAS_ORIGIN.length);
     let url: URL;
     try {
       url = new URL(href, CANVAS_ORIGIN);
@@ -87,6 +90,8 @@ export const pageLinkedFileIds = (body: string, courseId: number): number[] => {
     const match = expectedPath.exec(url.pathname);
     if (
       !match ||
+      rawCanvasPath !==
+        (match[0].endsWith("/download") ? match[0] : `${match[0]}?wrap=1`) ||
       (match[0].endsWith("/download")
         ? url.search !== ""
         : url.search !== "?wrap=1")

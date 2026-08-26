@@ -22,7 +22,11 @@ import {
   type SyntheticHttp,
 } from "../fixtures/course-plan";
 
-const file = (id: number, name = `file-${id}.bin`, size = id) => ({
+const file = (
+  id: number,
+  name = `file-${id}.bin`,
+  size: number | null = id,
+) => ({
   id,
   folder_id: 401,
   display_name: name,
@@ -226,6 +230,37 @@ describe("discoverCoursePlan", () => {
       expect(plan.advertisedBytes).toBe(0);
     },
   );
+
+  it("rejects an indexed file with an explicit null size", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [file(777, "indexed.pdf", null)],
+      pages: [],
+    });
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+      "Invalid file size",
+    );
+  });
+
+  it("rejects successful page-linked metadata with an explicit null size", async () => {
+    const http = syntheticCanvasHttp({
+      modules: [],
+      files: [],
+      pages: [{ page_id: 501, url: "welcome", title: "Welcome" }],
+      pageDetails: {
+        welcome: {
+          title: "Welcome",
+          body: '<a href="/courses/101/files/777?wrap=1">Preview</a>',
+        },
+      },
+      fileDetails: { 777: file(777, "successful.pdf", null) },
+    });
+
+    await expect(discoverCoursePlan(http, syntheticCourse)).rejects.toThrow(
+      "Invalid file size",
+    );
+  });
 
   it.each([
     ["session", new CanvasSessionError("session")],
