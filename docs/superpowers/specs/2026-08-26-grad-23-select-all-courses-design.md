@@ -1,6 +1,6 @@
 # GRAD-23 Select All Courses Design
 
-- **Status:** Approved in conversation; awaiting written-spec review
+- **Status:** Approved
 - **Issue:** GRAD-23 — Add Select all control to the course chooser
 - **Date:** 2026-08-26
 
