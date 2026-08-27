@@ -50,6 +50,12 @@ describe("pilot release surface", () => {
     ]) {
       expect(install).toContain(token);
     }
+    expect(install).toContain(
+      "If GradPack is already installed, select **Remove** and confirm before continuing.",
+    );
+    expect(install).toContain(
+      "Refresh the signed-in Canvas tab once after GradPack loads.",
+    );
     expect(checklist).toContain("Do not include");
     expect(install).toContain(
       "Unknown-size files are streamed under the hard 250 MiB per-course cap",
