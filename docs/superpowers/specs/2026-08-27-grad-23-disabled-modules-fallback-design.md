@@ -68,7 +68,8 @@ following are true:
 - the request is the initial request for the expected course Modules collection;
 - the final response remains on the exact approved Canvas origin and expected
   Modules path;
-- the body is JSON within the existing metadata size bound;
+- the body is valid JSON and the response satisfies the existing HTTP and
+  pagination constraints;
 - the parsed value is a plain record with exactly one own data property named
   `message`; and
 - that property's value is exactly
@@ -180,7 +181,7 @@ The disabled fallback is narrow and fail-closed:
   rejected;
 - malformed JSON, an unexpected object shape, extra properties, or different
   message text remains a safety-validation failure for that course;
-- a body exceeding the metadata cap remains rejected;
+- a body exceeding an applicable bounded-resource cap remains rejected;
 - malformed Pages, Files, Folders, page bodies, or file metadata still fail
   under their existing rules;
 - unavailable individual resources remain visible through their existing
@@ -201,7 +202,7 @@ Focused HTTP and discovery tests will verify:
   expected Modules collection request;
 - the same message on an unrelated endpoint is not reclassified;
 - extra keys, inherited/accessor properties, alternate text, malformed JSON,
-  oversized bodies, redirects, and foreign origins remain rejected;
+  redirects, and foreign origins remain rejected;
 - a disabled course makes zero module-item requests;
 - discovery continues through Pages, Files, and Folders;
 - page-linked files are still included;
