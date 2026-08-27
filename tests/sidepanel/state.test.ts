@@ -282,6 +282,35 @@ describe("Side Panel state reducer", () => {
     ).toMatchObject({ name: "blocked" });
   });
 
+  it("keeps every selected course retryable after a zero-output completion", () => {
+    const review = {
+      name: "review" as const,
+      courses: [syntheticCourse, secondCourse],
+      selectedIds: [syntheticCourse.id, secondCourse.id],
+      plan,
+    };
+    const complete = reduceState(reduceState(review, { type: "CONFIRM" }), {
+      type: "COMPLETE",
+      packaging: "per-course",
+      completedCourses: 0,
+      completedCourseIds: [],
+      failedCourses: 2,
+      outputCount: 0,
+      counts: {
+        success: 0,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
+      },
+    });
+
+    expect(complete).toMatchObject({
+      name: "complete",
+      retryCourseIds: [syntheticCourse.id, secondCourse.id],
+    });
+  });
+
   it("ignores impossible transitions and blocks empty or invalid runs", () => {
     const empty = reduceState(initialState, { type: "COURSES", courses: [] });
     expect(empty).toMatchObject({ name: "blocked" });

@@ -410,21 +410,41 @@ describe("accessible Side Panel flow", () => {
             "run-87654321-4321-4321-4321-cba987654321",
       ),
     ).toBe(false);
-  });
 
-  it("sends one cancellation command and rejects stale or mismatched events", async () => {
-    clickButton("Cancel");
+    clickButton("Continue with ready courses");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "CONFIRM_PLAN",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+      }),
+    );
     listener(
       {
         channel: RUNNER_CHANNEL,
-        type: "CANCELLED",
+        type: "COMPLETE",
         runId: "run-87654321-4321-4321-4321-cba987654321",
-        message: "Packing was cancelled.",
+        message: "No course archives were downloaded.",
+        packaging: "per-course",
+        completedCourses: 0,
+        completedCourseIds: [],
+        failedCourses: 2,
+        outputCount: 0,
+        success: 0,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
       },
       sender(),
       vi.fn(),
     );
-    clickButton("Try again");
+    const zeroOutputHeading = document.querySelector("h1")?.textContent;
+    const zeroOutputText = document.body.textContent;
+    const zeroOutputSummary =
+      document.querySelector(".archive-summary")?.textContent;
+
+    clickButton("Retry unfinished courses");
     await vi.waitFor(() =>
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
         channel: EXTENSION_CHANNEL,
@@ -437,6 +457,87 @@ describe("accessible Side Panel flow", () => {
         channel: RUNNER_CHANNEL,
         type: "COURSES",
         runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        courses: [syntheticCourse, secondCourse, thirdCourse],
+      },
+      sender(),
+      vi.fn(),
+    );
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_RUN",
+        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        courseIds: [102, 103],
+        packaging: "combined",
+      }),
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "PLAN_READY",
+        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        requestedCourseCount: 2,
+        selected: [
+          {
+            courseId: 102,
+            advertisedBytes: 20,
+            unknownSizeCount: 0,
+            resourceCount: 3,
+          },
+          {
+            courseId: 103,
+            advertisedBytes: 21,
+            unknownSizeCount: 0,
+            resourceCount: 4,
+          },
+        ],
+        skipped: [],
+        advertisedBytes: 41,
+        unknownSizeCount: 0,
+        resourceCount: 7,
+        requestedPackaging: "combined",
+        effectivePackaging: "combined",
+        fallbackReason: null,
+      },
+      sender(),
+      vi.fn(),
+    );
+    expect(document.querySelector("h1")?.textContent).toBe("Review plan");
+    expect(zeroOutputHeading).toBe("No archives downloaded");
+    expect(zeroOutputText).toContain("No course archives were downloaded.");
+    expect(zeroOutputSummary).toContain(
+      "0 archive(s) downloaded; 0 course(s) completed; 2 course(s) failed",
+    );
+    expect(zeroOutputText).toContain("2 unfinished course(s)");
+    expect(zeroOutputText).toContain("Second Course");
+    expect(zeroOutputText).toContain("Concluded Course");
+  });
+
+  it("sends one cancellation command and rejects stale or mismatched events", async () => {
+    clickButton("Cancel");
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "CANCELLED",
+        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        message: "Packing was cancelled.",
+      },
+      sender(),
+      vi.fn(),
+    );
+    clickButton("Try again");
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(17, {
+        channel: EXTENSION_CHANNEL,
+        type: "LIST_COURSES",
+        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+      }),
+    );
+    listener(
+      {
+        channel: RUNNER_CHANNEL,
+        type: "COURSES",
+        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
         courses: [syntheticCourse],
       },
       sender(),
@@ -458,7 +559,7 @@ describe("accessible Side Panel flow", () => {
       {
         channel: RUNNER_CHANNEL,
         type: "PLAN_READY",
-        runId: "run-aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
         requestedCourseCount: 1,
         selected: [],
         skipped: [{ courseId: 101, category: "unexpected-local" }],
@@ -486,14 +587,14 @@ describe("accessible Side Panel flow", () => {
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
         channel: EXTENSION_CHANNEL,
         type: "LIST_COURSES",
-        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
       }),
     );
     listener(
       {
         channel: RUNNER_CHANNEL,
         type: "COURSES",
-        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
         courses: [syntheticCourse],
       },
       sender(),
@@ -503,7 +604,7 @@ describe("accessible Side Panel flow", () => {
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
         channel: EXTENSION_CHANNEL,
         type: "START_RUN",
-        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
         courseIds: [101],
         packaging: "combined",
       }),
@@ -512,7 +613,7 @@ describe("accessible Side Panel flow", () => {
       {
         channel: RUNNER_CHANNEL,
         type: "PLAN_READY",
-        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
         requestedCourseCount: 1,
         selected: [
           {
@@ -547,7 +648,7 @@ describe("accessible Side Panel flow", () => {
           ([, command]) =>
             (command as { type?: unknown }).type === "CANCEL" &&
             (command as { runId?: unknown }).runId ===
-              "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+              "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
         ),
       ).toHaveLength(1),
     );
@@ -567,7 +668,7 @@ describe("accessible Side Panel flow", () => {
       {
         channel: RUNNER_CHANNEL,
         type: "CANCELLED",
-        runId: "run-cccccccc-cccc-cccc-cccc-cccccccccccc",
+        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
         message: "Packing was cancelled.",
       },
       sender(),
@@ -582,14 +683,14 @@ describe("accessible Side Panel flow", () => {
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
         channel: EXTENSION_CHANNEL,
         type: "LIST_COURSES",
-        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
+        runId: "run-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
       }),
     );
     listener(
       {
         channel: RUNNER_CHANNEL,
         type: "COURSES",
-        runId: "run-dddddddd-dddd-dddd-dddd-dddddddddddd",
+        runId: "run-bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
         courses: [syntheticCourse],
       },
       sender("other"),

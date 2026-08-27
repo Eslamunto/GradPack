@@ -333,7 +333,10 @@ const render = (focus: RenderFocus = null): void => {
     );
   } else if (state.name === "complete") {
     const complete = state;
-    heading.textContent = "Archives downloaded";
+    const downloaded = complete.outputCount > 0;
+    heading.textContent = downloaded
+      ? "Archives downloaded"
+      : "No archives downloaded";
     const unfinished = complete.retryCourseIds
       .map((courseId) => {
         const course = courseForId(complete.courses, courseId);
@@ -353,7 +356,11 @@ const render = (focus: RenderFocus = null): void => {
           entry !== null,
       );
     body.append(
-      paragraph("Your GradPack archives were downloaded."),
+      paragraph(
+        downloaded
+          ? "Your GradPack archives were downloaded."
+          : "No course archives were downloaded.",
+      ),
       paragraph(
         `${state.outputCount} archive(s) downloaded; ${state.completedCourses} course(s) completed; ${state.failedCourses} course(s) failed.`,
         "archive-summary",
