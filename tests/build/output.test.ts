@@ -131,7 +131,7 @@ describe("production build output", () => {
   });
 
   it(
-    "packages Alpha 5 through the pnpm script boundary",
+    "packages Alpha 6 through the pnpm script boundary",
     async () => {
       const root = await mkdtemp(join(tmpdir(), "gradpack-pnpm-package-"));
       const artifactRoot = join(root, "artifacts");
@@ -169,7 +169,7 @@ describe("production build output", () => {
         };
         expect(manifest).toMatchObject({
           version: "0.1.0",
-          version_name: "0.1.0-alpha.5",
+          version_name: "0.1.0-alpha.6",
         });
       } finally {
         await rm(root, { force: true, recursive: true });

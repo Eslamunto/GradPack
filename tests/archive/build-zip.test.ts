@@ -97,7 +97,7 @@ const manifestWithResources = (
   status: "success" | "unsupported" = "success",
 ): ArchiveManifest => ({
   schemaVersion: 1,
-  gradPackVersion: "0.1.0-alpha.5",
+  gradPackVersion: "0.1.0-alpha.6",
   createdAt: "2026-08-16T12:00:00.000Z",
   canvasHost: "frankfurtschool.instructure.com",
   course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
