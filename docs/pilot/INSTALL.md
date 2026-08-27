@@ -53,19 +53,21 @@ they differ.
    itself in Chrome.
 2. Open `chrome://extensions`.
 3. Enable **Developer mode**.
-4. Select **Load unpacked** and choose the extracted folder.
-5. Sign in to Frankfurt School Canvas in a normal Chrome tab.
-6. Keep that tab open, signed in, and unnavigated while GradPack works.
-7. Select GradPack in the Chrome toolbar to open its Side Panel.
-8. Select individual courses or use **Select all courses** to select every
-   displayed active, completed, and concluded course; then choose combined or
-   per-course output and start planning.
-9. Review the ready and skipped courses plus any packaging fallback notice,
-   then confirm retrieval for the ready courses.
-10. If GradPack reports unfinished courses after downloading the safe
+4. If GradPack is already installed, select **Remove** and confirm before continuing.
+5. Select **Load unpacked** and choose the extracted folder.
+6. Sign in to Frankfurt School Canvas in a normal Chrome tab.
+7. Refresh the signed-in Canvas tab once after GradPack loads.
+8. Keep that tab open, signed in, and unnavigated while GradPack works.
+9. Select GradPack in the Chrome toolbar to open its Side Panel.
+10. Select individual courses or use **Select all courses** to select every
+    displayed active, completed, and concluded course; then choose combined or
+    per-course output and start planning.
+11. Review the ready and skipped courses plus any packaging fallback notice,
+    then confirm retrieval for the ready courses.
+12. If GradPack reports unfinished courses after downloading the safe
     archives, select **Retry unfinished courses**. The retry checks only those
     courses again and shows a new review before retrieval.
-11. Keep the resulting archive or archives local. Extract each ZIP before
+13. Keep the resulting archive or archives local. Extract each ZIP before
     opening its `index.html`.
 
 GradPack retrieves only resources available to the signed-in Canvas session.
