@@ -8,7 +8,7 @@ import {
   syntheticArchivePlan,
 } from "../fixtures/course-plan";
 
-const RELEASE_VERSION = "0.1.0-alpha.4";
+const RELEASE_VERSION = "0.1.0-alpha.5";
 const ARTIFACT_NAME = `gradpack-${RELEASE_VERSION}.zip`;
 
 describe("pilot release identity", () => {
@@ -53,9 +53,11 @@ describe("pilot release identity", () => {
     expect(install).toContain(ARTIFACT_NAME);
     expect(install).toContain(`${ARTIFACT_NAME}.sha256`);
     expect(install).toContain("select one or more accessible courses");
+    expect(install).toContain("Select all courses");
     expect(install).toContain("combined archive or one ZIP per course");
     expect(install).toContain("packaging fallback before retrieval");
     expect(checklist).toContain(`Artifact version: ${RELEASE_VERSION}`);
+    expect(checklist).toContain("Select-all control: pass / fail");
     expect(checklist).toContain("Selected-course count:");
     expect(checklist).toContain("Requested packaging: combined / per-course");
     expect(checklist).toContain("Effective packaging: combined / per-course");
@@ -69,5 +71,6 @@ describe("pilot release identity", () => {
       "Every selected course is validated before retrieval",
     );
     expect(readme).toContain("combined-to-per-course fallback");
+    expect(readme).toContain("Select all courses");
   });
 });

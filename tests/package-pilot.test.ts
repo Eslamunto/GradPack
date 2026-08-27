@@ -31,7 +31,7 @@ const makeBuild = async (): Promise<string> => {
     await writeFile(
       join(root, path),
       path === "manifest.json"
-        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n'
+        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.5"}\n'
         : `synthetic:${path}\n`,
     );
   }
@@ -84,7 +84,7 @@ describe("pilot package", () => {
       await writeFile(
         join(buildRoot, path),
         path === "manifest.json"
-          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n'
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.5"}\n'
           : `synthetic:${path}\n`,
       );
     }
@@ -101,11 +101,11 @@ describe("pilot package", () => {
     ]);
   });
 
-  it("rejects the stale Alpha 3 release identity", async () => {
+  it("rejects the stale Alpha 4 release identity", async () => {
     const buildRoot = await makeBuild();
     await writeFile(
       join(buildRoot, "manifest.json"),
-      '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.3"}\n',
+      '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n',
     );
 
     await expect(
@@ -244,7 +244,7 @@ describe("pilot package", () => {
       await writeFile(
         join(ancestorBuild, path),
         path === "manifest.json"
-          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.4"}\n'
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.5"}\n'
           : `synthetic:${path}\n`,
       );
     }

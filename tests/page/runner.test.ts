@@ -78,7 +78,9 @@ const plan = (
       advertisedBytes: 0,
     },
   ],
+  failures: [],
   summary: {
+    requestedCourseCount: 1,
     selected: [
       {
         courseId: syntheticCourse.id,
@@ -87,6 +89,7 @@ const plan = (
         resourceCount: 0,
       },
     ],
+    skipped: [],
     requestedPackaging: "combined" as const,
     effectivePackaging,
     advertisedBytes: 0,
@@ -211,6 +214,121 @@ describe("production page runner", () => {
     postMessage.mockRestore();
   });
 
+  it("emits ordered discovery progress before a partial plan", async () => {
+    mocks.listAccessibleCourses.mockResolvedValueOnce(
+      partialCourses.slice(0, 2),
+    );
+    mocks.createRunPlan.mockImplementationOnce(async ({ onProgress }) => {
+      onProgress({ completed: 1, total: 2, currentCourseId: 101 });
+      onProgress({ completed: 2, total: 2, currentCourseId: 202 });
+      return {
+        courses: [plan().courses[0]],
+        failures: [
+          {
+            course: partialCourses[1],
+            category: "canvas-unavailable",
+          },
+        ],
+        summary: {
+          requestedCourseCount: 2,
+          selected: [
+            {
+              courseId: 101,
+              advertisedBytes: 0,
+              unknownSizeCount: 0,
+              resourceCount: 0,
+            },
+          ],
+          skipped: [{ courseId: 202, category: "canvas-unavailable" }],
+          requestedPackaging: "per-course",
+          effectivePackaging: "per-course",
+          advertisedBytes: 0,
+          unknownSizeCount: 0,
+          resourceCount: 0,
+          fallbackReason: null,
+        },
+      };
+    });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+
+    list("run-progress1");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start("run-progress1", [101, 202]);
+    await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
+
+    const emitted = postMessage.mock.calls
+      .map(([value]) => (value as RuntimeEvent).payload)
+      .filter((payload) =>
+        ["DISCOVERY_PROGRESS", "PLAN_READY"].includes(String(payload?.type)),
+      );
+    expect(emitted).toMatchObject([
+      { type: "DISCOVERY_PROGRESS", completed: 1, total: 2 },
+      { type: "DISCOVERY_PROGRESS", completed: 2, total: 2 },
+      {
+        type: "PLAN_READY",
+        requestedCourseCount: 2,
+        selected: [{ courseId: 101 }],
+        skipped: [{ courseId: 202, category: "canvas-unavailable" }],
+      },
+    ]);
+    cancel("run-progress1");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    postMessage.mockRestore();
+  });
+
+  it("publishes an all-skipped plan and refuses confirmation", async () => {
+    mocks.createRunPlan.mockResolvedValueOnce({
+      courses: [],
+      failures: [{ course: syntheticCourse, category: "unexpected-local" }],
+      summary: {
+        requestedCourseCount: 1,
+        selected: [],
+        skipped: [
+          { courseId: syntheticCourse.id, category: "unexpected-local" },
+        ],
+        requestedPackaging: "per-course",
+        effectivePackaging: "per-course",
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount: 0,
+        fallbackReason: null,
+      },
+    });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+
+    list("run-skipped01");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start("run-skipped01");
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) => (value as RuntimeEvent).payload?.type === "PLAN_READY",
+        ),
+      ).toBe(true),
+    );
+    confirm("run-skipped01");
+    await vi.waitFor(() =>
+      expect(
+        postMessage.mock.calls.some(
+          ([value]) =>
+            (value as RuntimeEvent).payload?.type === "FAILED" &&
+            (value as RuntimeEvent).payload?.message ===
+              "GradPack stopped because a safety check failed.",
+        ),
+      ).toBe(true),
+    );
+    expect(mocks.runCourses).not.toHaveBeenCalled();
+    postMessage.mockRestore();
+  });
+
   it("emits the combined fallback explanation in PLAN_READY", async () => {
     mocks.createRunPlan.mockResolvedValueOnce(plan("per-course"));
     const postMessage = vi
@@ -248,13 +366,16 @@ describe("production page runner", () => {
         resources: [],
         advertisedBytes: 0,
       })),
+      failures: [],
       summary: {
+        requestedCourseCount: 3,
         selected: partialCourses.map((course) => ({
           courseId: course.id,
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
         })),
+        skipped: [],
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         advertisedBytes: 0,

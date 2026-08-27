@@ -40,6 +40,7 @@ describe("production pilot vertical flow", () => {
     const anchorClick = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
+    let failSecondCourseDiscoveryOnce = true;
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:synthetic");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.spyOn(window, "postMessage").mockImplementation((message) => {
@@ -74,29 +75,56 @@ describe("production pilot vertical flow", () => {
             ? [
                 {
                   id: 101,
-                  name: "Synthetic Course",
+                  name: "Active Synthetic Course",
                   course_code: "SYN-101",
                   workflow_state: "available",
                   concluded: false,
                 },
+              ]
+            : [
                 {
                   id: 102,
-                  name: "Second Synthetic Course",
+                  name: "Completed Synthetic Course",
                   course_code: "SYN-102",
-                  workflow_state: "available",
+                  workflow_state: "completed",
                   concluded: false,
                 },
-              ]
-            : [],
+                {
+                  id: 103,
+                  name: "Concluded Synthetic Course",
+                  course_code: "SYN-103",
+                  workflow_state: "completed",
+                  concluded: true,
+                },
+              ],
         );
       }
-      const courseMatch = /\/api\/v1\/courses\/(101|102)\//u.exec(url.pathname);
+      const courseMatch = /\/api\/v1\/courses\/(101|102|103)\//u.exec(
+        url.pathname,
+      );
       const courseId = courseMatch ? Number(courseMatch[1]) : null;
-      const fileId = courseId === 102 ? 302 : 301;
+      const downloadMatch = /\/files\/(301|302|303)\/download$/u.exec(
+        url.pathname,
+      );
+      const fileId =
+        downloadMatch !== null
+          ? Number(downloadMatch[1])
+          : courseId === 103
+            ? 303
+            : courseId === 102
+              ? 302
+              : 301;
       if (url.pathname === `/api/v1/courses/${courseId}/modules`) {
+        if (courseId === 102 && failSecondCourseDiscoveryOnce) {
+          failSecondCourseDiscoveryOnce = false;
+          return response("{", url.href, {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return json([
           {
-            id: courseId === 102 ? 202 : 201,
+            id: courseId === 103 ? 203 : courseId === 102 ? 202 : 201,
             name: "Module One",
             position: 1,
             items: [
@@ -122,7 +150,7 @@ describe("production pilot vertical flow", () => {
         return json([
           {
             id: fileId,
-            folder_id: courseId === 102 ? 402 : 401,
+            folder_id: courseId === 103 ? 403 : courseId === 102 ? 402 : 401,
             display_name: "slides.pdf",
             filename: "slides.pdf",
             size: 19,
@@ -133,7 +161,7 @@ describe("production pilot vertical flow", () => {
       if (url.pathname === `/api/v1/courses/${courseId}/folders`) {
         return json([
           {
-            id: courseId === 102 ? 402 : 401,
+            id: courseId === 103 ? 403 : courseId === 102 ? 402 : 401,
             full_name: "course",
           },
         ]);
@@ -185,8 +213,12 @@ describe("production pilot vertical flow", () => {
       contexts.content?.(message, { id: extensionId }, vi.fn());
       return Promise.resolve(undefined);
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+    const runIds: Array<ReturnType<Crypto["randomUUID"]>> = [
       "12345678-1234-1234-1234-123456789abc",
+      "87654321-4321-4321-4321-cba987654321",
+    ];
+    vi.spyOn(crypto, "randomUUID").mockImplementation(
+      () => runIds.shift() ?? "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     );
     vi.stubGlobal("chrome", {
       runtime: {
@@ -230,12 +262,9 @@ describe("production pilot vertical flow", () => {
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe("Choose courses"),
     );
-    for (const checkbox of document.querySelectorAll<HTMLInputElement>(
-      'input[name="course"]',
-    )) {
-      checkbox.checked = true;
-      checkbox.dispatchEvent(new Event("change"));
-    }
+    document
+      .querySelector<HTMLInputElement>('input[name="course-all"]')!
+      .click();
     [...document.querySelectorAll<HTMLButtonElement>("button")]
       .find((candidate) => candidate.textContent === "Continue")!
       .click();
@@ -255,10 +284,25 @@ describe("production pilot vertical flow", () => {
       )!
       .click();
     await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(tabId, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_RUN",
+        runId: "run-12345678-1234-1234-1234-123456789abc",
+        courseIds: [101, 102, 103],
+        packaging: "combined",
+      }),
+    );
+    await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe("Review plan"),
     );
+    expect(document.body.textContent).toContain("2 courses ready; 1 skipped");
+    expect(document.body.textContent).toContain(
+      "Canvas did not provide usable course metadata.",
+    );
     [...document.querySelectorAll<HTMLButtonElement>("button")]
-      .find((candidate) => candidate.textContent === "Continue to packing")!
+      .find(
+        (candidate) => candidate.textContent === "Continue with ready courses",
+      )!
       .click();
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe(
@@ -268,6 +312,31 @@ describe("production pilot vertical flow", () => {
     expect(anchorClick).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(14);
 
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(
+        (candidate) => candidate.textContent === "Retry unfinished courses",
+      )!
+      .click();
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(tabId, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_RUN",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+        courseIds: [102],
+        packaging: "combined",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("h1")?.textContent).toBe("Review plan"),
+    );
+    expect(document.body.textContent).toContain("1 courses ready; 0 skipped");
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(
+        (candidate) => candidate.textContent === "Continue with ready courses",
+      )!
+      .click();
+    await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(2));
+
     await tabsSendMessage(tabId, {
       channel: EXTENSION_CHANNEL,
       type: "START_RUN",
@@ -276,7 +345,7 @@ describe("production pilot vertical flow", () => {
       packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledTimes(2);
 
     for (let index = 0; index < 128; index += 1) {
       await tabsSendMessage(tabId, {
@@ -302,6 +371,6 @@ describe("production pilot vertical flow", () => {
       packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledTimes(2);
   });
 });

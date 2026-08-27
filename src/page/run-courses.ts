@@ -1,4 +1,5 @@
-import { CanvasSessionError } from "../canvas/http";
+import { CanvasResponseError, CanvasSessionError } from "../canvas/http";
+import { PilotSizeError } from "../canvas/discovery";
 import {
   buildCombinedZip,
   type CombinedArchiveOutput,
@@ -13,7 +14,9 @@ import {
 } from "../shared/constants";
 import type {
   AggregateProgress,
+  CourseDiscoveryProgress,
   CoursePlan,
+  CoursePlanFailureCategory,
   CourseSummary,
   PackagingMode,
   PlanFallbackReason,
@@ -28,8 +31,14 @@ import {
   type RunResult,
 } from "./run-course";
 
+export type CoursePlanFailure = Readonly<{
+  course: Readonly<CourseSummary>;
+  category: CoursePlanFailureCategory;
+}>;
+
 export type ImmutableRunPlan = Readonly<{
   courses: readonly CoursePlan[];
+  failures: readonly CoursePlanFailure[];
   summary: Readonly<RunPlanSummary>;
 }>;
 
@@ -119,6 +128,8 @@ const progressForCourse =
 
 const planSummary = (
   courses: readonly CoursePlan[],
+  failures: readonly CoursePlanFailure[],
+  requestedCourseCount: number,
   requestedPackaging: PackagingMode,
   effectivePackaging: PackagingMode,
   fallbackReason: PlanFallbackReason | null,
@@ -145,7 +156,12 @@ const planSummary = (
     0,
   );
   return {
+    requestedCourseCount,
     selected,
+    skipped: failures.map(({ course, category }) => ({
+      courseId: course.id,
+      category,
+    })),
     requestedPackaging,
     effectivePackaging,
     advertisedBytes,
@@ -155,17 +171,32 @@ const planSummary = (
   };
 };
 
+const classifyCoursePlanFailure = (
+  error: unknown,
+): CoursePlanFailureCategory => {
+  if (error instanceof PilotSizeError) return "size-limit";
+  if (error instanceof CanvasResponseError) return "canvas-unavailable";
+  if (error instanceof RunSafetyError || error instanceof TypeError) {
+    return "safety-validation";
+  }
+  return "unexpected-local";
+};
+
 export async function createRunPlan(options: {
   courses: readonly CourseSummary[];
   requestedPackaging: PackagingMode;
   signal: AbortSignal;
   dependencies: Pick<MultiCourseDependencies, "discover">;
+  onProgress?: (progress: CourseDiscoveryProgress) => void;
 }): Promise<ImmutableRunPlan> {
-  const { courses, requestedPackaging, signal, dependencies } = options;
+  const { courses, requestedPackaging, signal, dependencies, onProgress } =
+    options;
   if (courses.length === 0)
     throw new MultiCourseSafetyError("No courses selected");
   const plans: CoursePlan[] = [];
-  for (const course of courses) {
+  const failures: CoursePlanFailure[] = [];
+  for (let index = 0; index < courses.length; index += 1) {
+    const course = courses[index]!;
     throwIfAborted(signal);
     try {
       const discovered = await dependencies.discover({ ...course }, signal);
@@ -177,14 +208,23 @@ export async function createRunPlan(options: {
       plans.push(freezeCoursePlan(discovered));
     } catch (error) {
       if (isAbort(error)) throw error;
-      if (error instanceof MultiCourseSafetyError) throw error;
-      throw new MultiCourseSafetyError(
-        `Course ${course.id} failed pre-retrieval safety validation`,
+      failures.push(
+        Object.freeze({
+          course: Object.freeze({ ...course }),
+          category: classifyCoursePlanFailure(error),
+        }),
       );
     }
+    onProgress?.({
+      completed: index + 1,
+      total: courses.length,
+      currentCourseId: course.id,
+    });
   }
   const summaryBase = planSummary(
     plans,
+    failures,
+    courses.length,
     requestedPackaging,
     requestedPackaging,
     null,
@@ -199,12 +239,15 @@ export async function createRunPlan(options: {
   if (requestedPackaging === "combined" && summaryBase.unknownSizeCount > 0) {
     const summary = planSummary(
       plans,
+      failures,
+      courses.length,
       requestedPackaging,
       "per-course",
       "unknown-size-files",
     );
     return Object.freeze({
       courses: Object.freeze(plans),
+      failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
@@ -220,12 +263,15 @@ export async function createRunPlan(options: {
   ) {
     const summary = planSummary(
       plans,
+      failures,
+      courses.length,
       requestedPackaging,
       "per-course",
       "combined-resource-limit-exceeded",
     );
     return Object.freeze({
       courses: Object.freeze(plans),
+      failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
@@ -235,17 +281,21 @@ export async function createRunPlan(options: {
   ) {
     const summary = planSummary(
       plans,
+      failures,
+      courses.length,
       requestedPackaging,
       "per-course",
       "combined-size-exceeded",
     );
     return Object.freeze({
       courses: Object.freeze(plans),
+      failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
   return Object.freeze({
     courses: Object.freeze(plans),
+    failures: Object.freeze(failures),
     summary: Object.freeze(summaryBase),
   });
 }

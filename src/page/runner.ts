@@ -365,6 +365,20 @@ if (scope[marker] !== true) {
           requestedPackaging: command.packaging,
           signal: controller.signal,
           dependencies: productionDependencies(controller.signal),
+          onProgress: (value) => {
+            if (
+              planning === owned &&
+              !owned.terminal &&
+              !controller.signal.aborted
+            ) {
+              post({
+                channel: RUNNER_CHANNEL,
+                type: "DISCOVERY_PROGRESS",
+                runId: command.runId,
+                ...value,
+              });
+            }
+          },
         });
         if (planning !== owned || owned.terminal || controller.signal.aborted)
           return;
@@ -410,6 +424,11 @@ if (scope[marker] !== true) {
     }
     const pending = pendingPlan;
     pendingPlan = null;
+    if (pending.plan.courses.length === 0) {
+      pending.owned.terminal = true;
+      postFailure(command.runId, FIXED.safety);
+      return;
+    }
     await runSelectedCourses(command.runId, pending.plan, pending.owned);
   };
 

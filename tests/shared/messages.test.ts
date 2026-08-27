@@ -71,13 +71,40 @@ const largePlanEvent = (
   channel: "gradpack/runner/v1",
   type: "PLAN_READY",
   runId: "run-12345678",
+  requestedCourseCount: 2,
   selected: largePerCourseSelected,
+  skipped: [],
   advertisedBytes: 30,
   unknownSizeCount: 0,
   resourceCount: largePerCourseAggregate,
   requestedPackaging: "per-course",
   effectivePackaging: "per-course",
   fallbackReason: null,
+  ...value,
+});
+
+const resilientPlanEvent = (
+  value: Record<string, unknown> = {},
+): Record<string, unknown> => ({
+  channel: "gradpack/runner/v1",
+  type: "PLAN_READY",
+  runId: "run-12345678",
+  requestedCourseCount: 2,
+  selected: [
+    {
+      courseId: 42,
+      advertisedBytes: 10,
+      unknownSizeCount: 1,
+      resourceCount: 2,
+    },
+  ],
+  skipped: [{ courseId: 43, category: "canvas-unavailable" }],
+  advertisedBytes: 10,
+  unknownSizeCount: 1,
+  resourceCount: 2,
+  requestedPackaging: "combined",
+  effectivePackaging: "per-course",
+  fallbackReason: "unknown-size-files",
   ...value,
 });
 
@@ -143,6 +170,101 @@ describe("parseExtensionCommand", () => {
 });
 
 describe("parseRunnerEvent", () => {
+  it("accepts strict discovery progress", () => {
+    expect(
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "DISCOVERY_PROGRESS",
+        runId: "run-12345678",
+        completed: 2,
+        total: 5,
+        currentCourseId: 43,
+      }),
+    ).toMatchObject({
+      type: "DISCOVERY_PROGRESS",
+      completed: 2,
+      total: 5,
+      currentCourseId: 43,
+    });
+  });
+
+  it.each([
+    { completed: -1, total: 5, currentCourseId: 43 },
+    { completed: 6, total: 5, currentCourseId: 43 },
+    { completed: 0, total: 0, currentCourseId: 43 },
+    { completed: 1, total: 5, currentCourseId: 0 },
+    { completed: 1, total: 5, currentCourseId: 43, error: "private" },
+  ])("rejects invalid discovery progress %#", (values) => {
+    expect(() =>
+      parseRunnerEvent({
+        channel: "gradpack/runner/v1",
+        type: "DISCOVERY_PROGRESS",
+        runId: "run-12345678",
+        ...values,
+      }),
+    ).toThrow();
+  });
+
+  it("accepts partial and all-skipped resilient plans", () => {
+    expect(parseRunnerEvent(resilientPlanEvent())).toMatchObject({
+      requestedCourseCount: 2,
+      selected: [{ courseId: 42 }],
+      skipped: [{ courseId: 43, category: "canvas-unavailable" }],
+    });
+    expect(
+      parseRunnerEvent(
+        resilientPlanEvent({
+          requestedCourseCount: 2,
+          selected: [],
+          skipped: [
+            { courseId: 42, category: "size-limit" },
+            { courseId: 43, category: "safety-validation" },
+          ],
+          advertisedBytes: 0,
+          unknownSizeCount: 0,
+          resourceCount: 0,
+          requestedPackaging: "per-course",
+          effectivePackaging: "per-course",
+          fallbackReason: null,
+        }),
+      ),
+    ).toMatchObject({
+      selected: [],
+      skipped: [
+        { courseId: 42, category: "size-limit" },
+        { courseId: 43, category: "safety-validation" },
+      ],
+    });
+  });
+
+  it.each([
+    { requestedCourseCount: 3 },
+    { requestedCourseCount: 1 },
+    { skipped: [{ courseId: 42, category: "canvas-unavailable" }] },
+    {
+      skipped: [
+        { courseId: 43, category: "canvas-unavailable" },
+        { courseId: 43, category: "unexpected-local" },
+      ],
+      requestedCourseCount: 3,
+    },
+    { skipped: [{ courseId: 43, category: "raw-exception" }] },
+    {
+      skipped: [
+        {
+          courseId: 43,
+          category: "canvas-unavailable",
+          message: "private",
+        },
+      ],
+    },
+    { advertisedBytes: 11 },
+    { unknownSizeCount: 0 },
+    { resourceCount: 3 },
+  ])("rejects invalid resilient plans %#", (values) => {
+    expect(() => parseRunnerEvent(resilientPlanEvent(values))).toThrow();
+  });
+
   it("normalizes course values into a new event", () => {
     const pageEvent = {
       channel: "gradpack/runner/v1",
@@ -170,6 +292,7 @@ describe("parseRunnerEvent", () => {
         channel: "gradpack/runner/v1",
         type: "PLAN_READY",
         runId: "run-12345678",
+        requestedCourseCount: 2,
         selected: [
           {
             courseId: 42,
@@ -184,6 +307,7 @@ describe("parseRunnerEvent", () => {
             resourceCount: 3,
           },
         ],
+        skipped: [],
         advertisedBytes: 30,
         unknownSizeCount: 3,
         resourceCount: 5,
@@ -273,6 +397,7 @@ describe("parseRunnerEvent", () => {
         channel: "gradpack/runner/v1",
         type: "PLAN_READY",
         runId: "run-12345678",
+        requestedCourseCount: 2,
         selected: [
           {
             courseId: 42,
@@ -287,6 +412,7 @@ describe("parseRunnerEvent", () => {
             resourceCount: secondCount,
           },
         ],
+        skipped: [],
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount,
@@ -305,6 +431,7 @@ describe("parseRunnerEvent", () => {
       channel: "gradpack/runner/v1",
       type: "PLAN_READY",
       runId: "run-12345678",
+      requestedCourseCount: 2,
       selected: [
         {
           courseId: 42,
@@ -319,6 +446,7 @@ describe("parseRunnerEvent", () => {
           resourceCount: 3,
         },
       ],
+      skipped: [],
       advertisedBytes: 30,
       unknownSizeCount: 3,
       resourceCount: 5,
@@ -376,6 +504,7 @@ describe("parseRunnerEvent", () => {
       channel: "gradpack/runner/v1",
       type: "PLAN_READY",
       runId: "run-12345678",
+      requestedCourseCount: 2,
       selected: [
         {
           courseId: 42,
@@ -390,6 +519,7 @@ describe("parseRunnerEvent", () => {
           resourceCount: 3,
         },
       ],
+      skipped: [],
       advertisedBytes: 30,
       unknownSizeCount: 3,
       resourceCount: 5,
@@ -440,6 +570,7 @@ describe("parseRunnerEvent", () => {
           channel: "gradpack/runner/v1",
           type: "PLAN_READY",
           runId: "run-12345678",
+          requestedCourseCount: 2,
           selected: [
             {
               courseId: 42,
@@ -454,6 +585,7 @@ describe("parseRunnerEvent", () => {
               resourceCount: 3,
             },
           ],
+          skipped: [],
           advertisedBytes: 30,
           unknownSizeCount: 1,
           resourceCount: 5,
@@ -479,7 +611,9 @@ describe("parseRunnerEvent", () => {
         channel: "gradpack/runner/v1",
         type: "PLAN_READY",
         runId: "run-12345678",
+        requestedCourseCount: 1,
         selected,
+        skipped: [],
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,
@@ -493,7 +627,9 @@ describe("parseRunnerEvent", () => {
         channel: "gradpack/runner/v1",
         type: "PLAN_READY",
         runId: "run-12345678",
+        requestedCourseCount: 1,
         selected,
+        skipped: [],
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,

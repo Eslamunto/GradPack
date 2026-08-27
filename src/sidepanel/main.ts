@@ -6,11 +6,11 @@ import {
 } from "../shared/messages";
 import type {
   AggregateProgress,
+  CoursePlanFailureCategory,
   CourseSummary,
   PackagingMode,
 } from "../shared/model";
 import {
-  coursesForState,
   initialState,
   reduceState,
   type OutcomeCounts,
@@ -85,7 +85,41 @@ const progressText = (progress: AggregateProgress): string =>
 const packagingLabel = (packaging: PackagingMode): string =>
   packaging === "combined" ? "one combined ZIP" : "one ZIP per course";
 
-const render = (): void => {
+const COURSE_PLAN_FAILURE_MESSAGES: Readonly<
+  Record<CoursePlanFailureCategory, string>
+> = Object.freeze({
+  "size-limit": "This course exceeds the 250 MiB safety limit.",
+  "canvas-unavailable": "Canvas did not provide usable course metadata.",
+  "safety-validation": "Course metadata did not pass GradPack's safety checks.",
+  "unexpected-local": "A local course operation could not be completed.",
+});
+
+const courseForId = (
+  courses: readonly CourseSummary[],
+  courseId: number,
+): CourseSummary | undefined =>
+  courses.find((course) => course.id === courseId);
+
+const courseList = (
+  className: string,
+  entries: readonly { course: CourseSummary; detail?: string }[],
+): HTMLUListElement => {
+  const list = document.createElement("ul");
+  list.className = className;
+  for (const { course, detail } of entries) {
+    const item = document.createElement("li");
+    item.textContent = detail
+      ? `${courseLabel(course)} — ${detail}`
+      : courseLabel(course);
+    list.append(item);
+  }
+  return list;
+};
+
+type RenderFocus =
+  { type: "course-all" } | { type: "course"; courseId: number } | null;
+
+const render = (focus: RenderFocus = null): void => {
   app.replaceChildren();
   const heading = document.createElement("h1");
   heading.tabIndex = -1;
@@ -107,6 +141,24 @@ const render = (): void => {
     const legend = document.createElement("legend");
     legend.textContent = "Accessible courses";
     fieldset.append(legend);
+    const selectedIds = state.selectedIds;
+    const allSelected = state.courses.every((course) =>
+      selectedIds.includes(course.id),
+    );
+    const partiallySelected = state.selectedIds.length > 0 && !allSelected;
+    const selectAllLabel = document.createElement("label");
+    selectAllLabel.className = "select-all";
+    const selectAll = document.createElement("input");
+    selectAll.type = "checkbox";
+    selectAll.name = "course-all";
+    selectAll.checked = allSelected;
+    selectAll.indeterminate = partiallySelected;
+    selectAll.addEventListener("change", () => update({ type: "SELECT_ALL" }));
+    selectAllLabel.append(
+      selectAll,
+      document.createTextNode("Select all courses"),
+    );
+    fieldset.append(selectAllLabel);
     for (const course of state.courses) {
       const label = document.createElement("label");
       const checkbox = document.createElement("input");
@@ -123,6 +175,10 @@ const render = (): void => {
     body.append(
       paragraph("Select one or more accessible courses."),
       fieldset,
+      paragraph(
+        `${state.selectedIds.length} of ${state.courses.length} courses selected.`,
+        "selection-count",
+      ),
       button("Continue", () => update({ type: "CONFIGURE" }), {
         disabled: state.selectedIds.length === 0,
       }),
@@ -150,10 +206,23 @@ const render = (): void => {
       label.append(radio, document.createTextNode(labelText));
       fieldset.append(label);
     }
+    const discoveryStatus = state.busy
+      ? paragraph(
+          state.discoveryProgress
+            ? `Checking course ${state.discoveryProgress.completed} of ${state.discoveryProgress.total}`
+            : `Preparing to check ${state.selectedIds.length} course(s)`,
+          "discovery-progress",
+        )
+      : null;
+    if (discoveryStatus) {
+      discoveryStatus.setAttribute("role", "status");
+      discoveryStatus.setAttribute("aria-live", "polite");
+    }
     body.append(
       paragraph(`${state.selectedIds.length} course(s) selected.`),
       fieldset,
       notices(),
+      ...(discoveryStatus ? [discoveryStatus] : []),
       button(
         state.busy ? "Discovering…" : "Discover selected courses",
         () => void startRun(),
@@ -166,10 +235,45 @@ const render = (): void => {
       ),
     );
   } else if (state.name === "review") {
+    const review = state;
     heading.textContent = "Review plan";
-    const names = coursesForState(state).map(courseLabel).join("; ");
+    const readyCourses = review.plan.selected
+      .map(({ courseId }) => courseForId(review.courses, courseId))
+      .filter((course): course is CourseSummary => course !== undefined);
+    const skippedCourses = review.plan.skipped
+      .map((failure) => {
+        const course = courseForId(review.courses, failure.courseId);
+        return course
+          ? {
+              course,
+              detail: COURSE_PLAN_FAILURE_MESSAGES[failure.category],
+            }
+          : null;
+      })
+      .filter(
+        (entry): entry is { course: CourseSummary; detail: string } =>
+          entry !== null,
+      );
     body.append(
-      paragraph(names, "selected-courses"),
+      paragraph(
+        `${readyCourses.length} courses ready; ${skippedCourses.length} skipped.`,
+        "plan-summary",
+      ),
+      ...(readyCourses.length > 0
+        ? [
+            paragraph("Ready courses", "list-heading"),
+            courseList(
+              "ready-courses",
+              readyCourses.map((course) => ({ course })),
+            ),
+          ]
+        : []),
+      ...(skippedCourses.length > 0
+        ? [
+            paragraph("Skipped courses", "list-heading"),
+            courseList("skipped-courses", skippedCourses),
+          ]
+        : []),
       paragraph(
         `Requested packaging: ${packagingLabel(state.plan.requestedPackaging)}.`,
       ),
@@ -198,9 +302,13 @@ const render = (): void => {
               "fallback-notice",
             )
           : paragraph(
-              "Discovery is complete. Confirm to begin local retrieval.",
+              readyCourses.length > 0
+                ? "Discovery is complete. Confirm to begin local retrieval."
+                : "No course is ready for retrieval. Retry the skipped courses.",
             ),
-      button("Continue to packing", () => void confirmPlan()),
+      ...(readyCourses.length > 0
+        ? [button("Continue with ready courses", () => void confirmPlan())]
+        : [button("Retry skipped courses", () => void retryUnfinished())]),
       button(
         cancelRequested ? "Cancelling…" : "Cancel",
         () => void cancelRun(),
@@ -224,7 +332,26 @@ const render = (): void => {
       ),
     );
   } else if (state.name === "complete") {
+    const complete = state;
     heading.textContent = "Archives downloaded";
+    const unfinished = complete.retryCourseIds
+      .map((courseId) => {
+        const course = courseForId(complete.courses, courseId);
+        if (!course) return null;
+        const planningFailure = complete.plan.skipped.find(
+          (failure) => failure.courseId === courseId,
+        );
+        return {
+          course,
+          detail: planningFailure
+            ? COURSE_PLAN_FAILURE_MESSAGES[planningFailure.category]
+            : "Archive creation did not complete.",
+        };
+      })
+      .filter(
+        (entry): entry is { course: CourseSummary; detail: string } =>
+          entry !== null,
+      );
     body.append(
       paragraph("Your GradPack archives were downloaded."),
       paragraph(
@@ -238,6 +365,16 @@ const render = (): void => {
       paragraph(
         "Review manifest.json in each ZIP for the resource outcome list.",
       ),
+      ...(unfinished.length > 0
+        ? [
+            paragraph(
+              `${unfinished.length} unfinished course(s) can be retried.`,
+              "unfinished-summary",
+            ),
+            courseList("unfinished-courses", unfinished),
+            button("Retry unfinished courses", () => void retryUnfinished()),
+          ]
+        : []),
       button("Start again", () => void connect()),
     );
   } else {
@@ -248,7 +385,15 @@ const render = (): void => {
     );
   }
   app.append(heading, body);
-  heading.focus();
+  const focusTarget =
+    focus?.type === "course-all"
+      ? app.querySelector<HTMLInputElement>('input[name="course-all"]')
+      : focus?.type === "course"
+        ? [
+            ...app.querySelectorAll<HTMLInputElement>('input[name="course"]'),
+          ].find((checkbox) => checkbox.value === String(focus.courseId))
+        : null;
+  (focusTarget ?? heading).focus();
 };
 
 const update = (event: UiEvent): void => {
@@ -263,7 +408,15 @@ const update = (event: UiEvent): void => {
       return;
     }
   }
-  render();
+  const focus: RenderFocus =
+    previous.name === "choose" && next.name === "choose"
+      ? event.type === "SELECT_ALL"
+        ? { type: "course-all" }
+        : event.type === "SELECT"
+          ? { type: "course", courseId: event.courseId }
+          : null
+      : null;
+  render(focus);
 };
 
 const exactConnection = (
@@ -347,7 +500,13 @@ async function startRun(): Promise<void> {
 async function confirmPlan(): Promise<void> {
   const tabId = activeTabId;
   const runId = activeRunId;
-  if (tabId === null || state.name !== "review" || cancelRequested) return;
+  if (
+    tabId === null ||
+    state.name !== "review" ||
+    state.plan.selected.length === 0 ||
+    cancelRequested
+  )
+    return;
   cancelRequested = false;
   update({ type: "CONFIRM" });
   try {
@@ -398,6 +557,18 @@ async function cancelRun(): Promise<void> {
   }
 }
 
+async function retryUnfinished(): Promise<void> {
+  const retryable =
+    (state.name === "review" &&
+      state.plan.selected.length === 0 &&
+      state.plan.skipped.length > 0) ||
+    (state.name === "complete" && state.retryCourseIds.length > 0);
+  if (!retryable) return;
+  if (state.name === "review") await cancelRun();
+  update({ type: "RETRY" });
+  if (state.name === "connect") await connect();
+}
+
 chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
   if (
     sender.id !== chrome.runtime.id ||
@@ -413,8 +584,35 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
   }
   if (event.runId !== activeRunId || terminalReceived) return;
   if (event.type === "COURSES") {
+    const retrying = state.name === "connect" && state.retry !== null;
     update({ type: "COURSES", courses: event.courses });
+    if (retrying && state.name === "configure") void startRun();
+  } else if (event.type === "DISCOVERY_PROGRESS") {
+    if (
+      state.name !== "configure" ||
+      !state.busy ||
+      event.total !== state.selectedIds.length ||
+      event.completed === 0 ||
+      state.selectedIds[event.completed - 1] !== event.currentCourseId
+    ) {
+      return;
+    }
+    update({ type: "DISCOVERY_PROGRESS", progress: event });
   } else if (event.type === "PLAN_READY") {
+    if (state.name !== "configure" || !state.busy) return;
+    const plannedIds = [
+      ...event.selected.map(({ courseId }) => courseId),
+      ...event.skipped.map(({ courseId }) => courseId),
+    ];
+    if (
+      event.requestedCourseCount !== state.selectedIds.length ||
+      event.requestedPackaging !== state.packaging ||
+      plannedIds.length !== state.selectedIds.length ||
+      new Set(plannedIds).size !== plannedIds.length ||
+      !state.selectedIds.every((courseId) => plannedIds.includes(courseId))
+    ) {
+      return;
+    }
     update({ type: "PLAN_READY", plan: event });
   } else if (event.type === "PROGRESS") {
     if (state.name !== "packing") return;

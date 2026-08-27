@@ -7,7 +7,12 @@ import {
   type MultiCourseDependencies,
 } from "../../src/page/run-courses";
 import { RunSafetyError } from "../../src/page/run-course";
-import type { CoursePlan, CourseSummary } from "../../src/shared/model";
+import type {
+  CourseDiscoveryProgress,
+  CoursePlan,
+  CourseSummary,
+} from "../../src/shared/model";
+import { CanvasResponseError, CanvasSessionError } from "../../src/canvas/http";
 import {
   MAX_ARCHIVE_BYTES,
   MAX_ARCHIVE_RESOURCES,
@@ -61,7 +66,7 @@ const planFor = (
 const manifest = (course: CourseSummary): ArchiveManifest =>
   ({
     schemaVersion: 1,
-    gradPackVersion: "0.1.0-alpha.4",
+    gradPackVersion: "0.1.0-alpha.5",
     createdAt: "2026-08-17T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },
@@ -333,12 +338,103 @@ describe("createRunPlan", () => {
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
-  it("stops before retrieval when one individual course exceeds the limit", async () => {
+  it("skips an oversized course and keeps later safe plans", async () => {
     const deps = baseDependencies(
       vi.fn(async (course) =>
-        planFor(course, course.id === 202 ? MAX_ARCHIVE_BYTES + 1 : 10),
+        course.id === 101
+          ? planFor(course, MAX_ARCHIVE_BYTES + 1)
+          : planFor(course, 10),
       ),
     );
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.summary).toMatchObject({
+      requestedCourseCount: 2,
+      selected: [{ courseId: 202 }],
+      skipped: [{ courseId: 101, category: "size-limit" }],
+      advertisedBytes: 10,
+      resourceCount: 1,
+    });
+    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("classifies course-local failures and reports ordered progress", async () => {
+    const failures = new Map<number, unknown>([
+      [101, new CanvasResponseError("private Canvas response")],
+      [202, new RunSafetyError("private safety detail")],
+      [303, new Error("private local detail")],
+    ]);
+    const deps = baseDependencies(
+      vi.fn<MultiCourseDependencies["discover"]>(async (course) => {
+        const failure = failures.get(course.id);
+        if (!(failure instanceof Error)) {
+          throw new Error("Missing synthetic discovery failure");
+        }
+        throw failure;
+      }),
+    );
+    const onProgress = vi.fn<(progress: CourseDiscoveryProgress) => void>();
+
+    const plan = await createRunPlan({
+      courses,
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+      onProgress,
+    });
+
+    expect(plan.courses).toEqual([]);
+    expect(plan.summary).toMatchObject({
+      requestedCourseCount: 3,
+      selected: [],
+      skipped: [
+        { courseId: 101, category: "canvas-unavailable" },
+        { courseId: 202, category: "safety-validation" },
+        { courseId: 303, category: "unexpected-local" },
+      ],
+      advertisedBytes: 0,
+      resourceCount: 0,
+    });
+    expect(onProgress.mock.calls.map(([value]) => value)).toEqual([
+      { completed: 1, total: 3, currentCourseId: 101 },
+      { completed: 2, total: 3, currentCourseId: 202 },
+      { completed: 3, total: 3, currentCourseId: 303 },
+    ]);
+  });
+
+  it("turns mismatched discovery IDs into a local safety failure", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) =>
+        course.id === 101 ? planFor(courses[1]!) : planFor(course),
+      ),
+    );
+
+    const plan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.summary.skipped).toEqual([
+      { courseId: 101, category: "safety-validation" },
+    ]);
+  });
+
+  it.each([
+    ["session", new CanvasSessionError("private session detail")],
+    ["cancellation", new DOMException("cancelled", "AbortError")],
+  ])("stops globally on %s", async (_name, failure) => {
+    const discover = vi.fn(async () => Promise.reject(failure));
+    const deps = baseDependencies(discover);
+
     await expect(
       createRunPlan({
         courses: courses.slice(0, 2),
@@ -346,8 +442,8 @@ describe("createRunPlan", () => {
         signal: new AbortController().signal,
         dependencies: deps,
       }),
-    ).rejects.toThrow("202");
-    expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+    ).rejects.toBe(failure);
+    expect(discover).toHaveBeenCalledTimes(1);
   });
 });
 
