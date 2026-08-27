@@ -27,8 +27,27 @@ export type CoursePlanSummary = {
   resourceCount: number;
 };
 
+export type CoursePlanFailureCategory =
+  | "size-limit"
+  | "canvas-unavailable"
+  | "safety-validation"
+  | "unexpected-local";
+
+export type CoursePlanFailureSummary = {
+  courseId: number;
+  category: CoursePlanFailureCategory;
+};
+
+export type CourseDiscoveryProgress = {
+  completed: number;
+  total: number;
+  currentCourseId: number;
+};
+
 export type RunPlanSummary = {
+  requestedCourseCount: number;
   selected: CoursePlanSummary[];
+  skipped: CoursePlanFailureSummary[];
   requestedPackaging: PackagingMode;
   effectivePackaging: PackagingMode;
   advertisedBytes: number;

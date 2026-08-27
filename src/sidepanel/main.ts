@@ -514,6 +514,8 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       counts,
     });
     terminalReceived = state !== previous;
+  } else if (event.type === "DISCOVERY_PROGRESS") {
+    return;
   } else {
     const previous = state;
     update({ type: "FAILED", message: event.message });

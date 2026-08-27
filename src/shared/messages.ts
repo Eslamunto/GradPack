@@ -8,6 +8,9 @@ import {
 } from "./constants";
 import type {
   AggregateProgress,
+  CourseDiscoveryProgress,
+  CoursePlanFailureCategory,
+  CoursePlanFailureSummary,
   CoursePlanSummary,
   CourseSummary,
   PackagingMode,
@@ -50,6 +53,11 @@ export type RunnerEvent =
       runId: string;
       courses: CourseSummary[];
     }
+  | ({
+      channel: typeof RUNNER_CHANNEL;
+      type: "DISCOVERY_PROGRESS";
+      runId: string;
+    } & CourseDiscoveryProgress)
   | ({
       channel: typeof RUNNER_CHANNEL;
       type: "PLAN_READY";
@@ -243,12 +251,37 @@ const planSummary = (value: unknown): CoursePlanSummary => {
   };
 };
 
+const coursePlanFailureCategory = (
+  value: unknown,
+): CoursePlanFailureCategory => {
+  if (
+    value !== "size-limit" &&
+    value !== "canvas-unavailable" &&
+    value !== "safety-validation" &&
+    value !== "unexpected-local"
+  ) {
+    throw new TypeError("Invalid course plan failure category");
+  }
+  return value;
+};
+
+const coursePlanFailure = (value: unknown): CoursePlanFailureSummary => {
+  const input = record(value);
+  exactKeys(input, ["courseId", "category"]);
+  return {
+    courseId: positiveInteger(input.courseId, "Invalid course ID"),
+    category: coursePlanFailureCategory(input.category),
+  };
+};
+
 const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   exactKeys(input, [
     "channel",
     "type",
     "runId",
+    "requestedCourseCount",
     "selected",
+    "skipped",
     "advertisedBytes",
     "unknownSizeCount",
     "resourceCount",
@@ -256,8 +289,23 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     "effectivePackaging",
     "fallbackReason",
   ]);
+  const requestedCourseCount = positiveInteger(
+    input.requestedCourseCount,
+    "Invalid requested course count",
+  );
   const selected = denseArray(input.selected, 10_000).map(planSummary);
-  if (selected.length === 0) throw new TypeError("Invalid plan");
+  const skipped = denseArray(input.skipped, 10_000).map(coursePlanFailure);
+  const selectedIds = selected.map((item) => item.courseId);
+  const skippedIds = skipped.map((item) => item.courseId);
+  if (
+    selected.length + skipped.length !== requestedCourseCount ||
+    selected.length + skipped.length === 0 ||
+    new Set(selectedIds).size !== selectedIds.length ||
+    new Set(skippedIds).size !== skippedIds.length ||
+    selectedIds.some((courseId) => skippedIds.includes(courseId))
+  ) {
+    throw new TypeError("Invalid plan courses");
+  }
   const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
   const unknownSizeCount = nonNegativeInteger(input.unknownSizeCount);
   const resourceCount = nonNegativeInteger(input.resourceCount);
@@ -311,13 +359,43 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     channel: RUNNER_CHANNEL,
     type: "PLAN_READY",
     runId: id,
+    requestedCourseCount,
     selected,
+    skipped,
     advertisedBytes,
     unknownSizeCount,
     resourceCount,
     requestedPackaging,
     effectivePackaging,
     fallbackReason: reason,
+  };
+};
+
+const discoveryProgress = (
+  input: Record<string, unknown>,
+  id: string,
+): RunnerEvent => {
+  exactKeys(input, [
+    "channel",
+    "type",
+    "runId",
+    "completed",
+    "total",
+    "currentCourseId",
+  ]);
+  const completed = nonNegativeInteger(input.completed);
+  const total = positiveInteger(input.total, "Invalid course count");
+  if (completed > total) throw new TypeError("Invalid discovery progress");
+  return {
+    channel: RUNNER_CHANNEL,
+    type: "DISCOVERY_PROGRESS",
+    runId: id,
+    completed,
+    total,
+    currentCourseId: positiveInteger(
+      input.currentCourseId,
+      "Invalid course ID",
+    ),
   };
 };
 
@@ -430,6 +508,9 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     };
   }
   if (input.type === "PLAN_READY") return planEvent(input, id);
+  if (input.type === "DISCOVERY_PROGRESS") {
+    return discoveryProgress(input, id);
+  }
   if (input.type === "PROGRESS") return aggregateProgress(input, id);
   if (input.type === "COMPLETE") {
     exactKeys(input, [

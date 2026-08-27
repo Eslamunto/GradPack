@@ -145,7 +145,9 @@ const planSummary = (
     0,
   );
   return {
+    requestedCourseCount: selected.length,
     selected,
+    skipped: [],
     requestedPackaging,
     effectivePackaging,
     advertisedBytes,

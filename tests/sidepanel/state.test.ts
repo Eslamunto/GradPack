@@ -20,6 +20,7 @@ const concludedCourse = {
 };
 
 const plan: RunPlanSummary = {
+  requestedCourseCount: 2,
   selected: [
     {
       courseId: syntheticCourse.id,
@@ -34,6 +35,7 @@ const plan: RunPlanSummary = {
       resourceCount: 1,
     },
   ],
+  skipped: [],
   requestedPackaging: "combined",
   effectivePackaging: "per-course",
   advertisedBytes: 40,
