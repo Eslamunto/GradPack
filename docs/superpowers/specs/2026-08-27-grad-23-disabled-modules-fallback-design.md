@@ -1,6 +1,6 @@
 # GRAD-23 Disabled Modules Fallback Design
 
-- **Status:** Draft for review
+- **Status:** Approved
 - **Issue:** GRAD-23 follow-up — archive courses when Modules are disabled
 - **Date:** 2026-08-27
 
