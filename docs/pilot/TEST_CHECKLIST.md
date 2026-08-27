@@ -28,6 +28,8 @@
 - Retry unfinished courses offered: pass / fail / not-shown
 - Retry contains only unfinished courses: pass / fail / not-tested
 - Retry requires a new review confirmation: pass / fail / not-tested
+- Zero-output retry keeps all unfinished courses: pass / fail / not-tested
+- Zero-output screen says no archives downloaded: pass / fail / not-tested
 - Sanitized defect description (optional):
 
 Do not include course names, filenames, Canvas IDs or URLs, screenshots,
