@@ -83,4 +83,5 @@ delete them separately.
 Return only the coarse fields in [TEST_CHECKLIST.md](TEST_CHECKLIST.md). Do not
 send course names, filenames, IDs, URLs, screenshots, archives, page text,
 request or response data, cookies, headers, or student identity. For a security
-issue, follow the repository [security policy](../../SECURITY.md).
+issue, contact the maintainer privately through the same channel that delivered
+the pilot. Do not put vulnerability details or sensitive data in a public issue.

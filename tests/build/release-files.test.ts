@@ -55,6 +55,11 @@ describe("pilot release surface", () => {
       "Unknown-size files are streamed under the hard 250 MiB per-course cap",
     );
     expect(install).toContain("combined request includes unknown-size files");
+    expect(install).toMatch(
+      /contact the maintainer privately through the same channel that delivered\s+the pilot/u,
+    );
+    expect(install).not.toContain("](../../SECURITY.md)");
+    expect(install).not.toContain("github.com/Eslamunto/GradPack/security");
     expect(install).not.toContain("requires known advertised file sizes");
     expect(checklist).not.toMatch(
       /^- (?:Course name|Filename|Canvas URL|Student identity|Screenshot|Archive):/gimu,
