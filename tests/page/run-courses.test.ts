@@ -7,11 +7,12 @@ import {
   type MultiCourseDependencies,
 } from "../../src/page/run-courses";
 import { RunSafetyError } from "../../src/page/run-course";
-import type { CoursePlan, CourseSummary } from "../../src/shared/model";
-import {
-  CanvasResponseError,
-  CanvasSessionError,
-} from "../../src/canvas/http";
+import type {
+  CourseDiscoveryProgress,
+  CoursePlan,
+  CourseSummary,
+} from "../../src/shared/model";
+import { CanvasResponseError, CanvasSessionError } from "../../src/canvas/http";
 import {
   MAX_ARCHIVE_BYTES,
   MAX_ARCHIVE_RESOURCES,
@@ -370,9 +371,15 @@ describe("createRunPlan", () => {
       [303, new Error("private local detail")],
     ]);
     const deps = baseDependencies(
-      vi.fn(async (course) => Promise.reject(failures.get(course.id))),
+      vi.fn<MultiCourseDependencies["discover"]>(async (course) => {
+        const failure = failures.get(course.id);
+        if (!(failure instanceof Error)) {
+          throw new Error("Missing synthetic discovery failure");
+        }
+        throw failure;
+      }),
     );
-    const onProgress = vi.fn();
+    const onProgress = vi.fn<(progress: CourseDiscoveryProgress) => void>();
 
     const plan = await createRunPlan({
       courses,

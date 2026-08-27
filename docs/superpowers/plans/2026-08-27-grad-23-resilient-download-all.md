@@ -165,7 +165,9 @@ export const createRunPlan = async (
   requestedPackaging: PackagingMode,
   signal: AbortSignal,
   onProgress?: (progress: CourseDiscoveryProgress) => void,
-): Promise<ImmutableRunPlan> => { /* ... */ };
+): Promise<ImmutableRunPlan> => {
+  /* ... */
+};
 ```
 
 - [ ] **Step 1: Add failing planner tests**

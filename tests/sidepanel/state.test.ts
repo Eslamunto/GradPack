@@ -233,11 +233,7 @@ describe("Side Panel state reducer", () => {
     const review = {
       name: "review" as const,
       courses: [syntheticCourse, secondCourse, concludedCourse],
-      selectedIds: [
-        syntheticCourse.id,
-        secondCourse.id,
-        concludedCourse.id,
-      ],
+      selectedIds: [syntheticCourse.id, secondCourse.id, concludedCourse.id],
       plan: partialPlan,
     };
     const packing = reduceState(review, { type: "CONFIRM" });

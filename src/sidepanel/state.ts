@@ -175,9 +175,7 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
     return { ...state, busy: true, discoveryProgress: null };
   }
   if (event.type === "DISCOVERY_PROGRESS" && state.name === "configure") {
-    return state.busy
-      ? { ...state, discoveryProgress: event.progress }
-      : state;
+    return state.busy ? { ...state, discoveryProgress: event.progress } : state;
   }
   if (event.type === "PLAN_READY" && state.name === "configure") {
     return {
@@ -216,9 +214,7 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
     const unresolvedIds = new Set([
       ...state.plan.skipped.map(({ courseId }) => courseId),
       ...state.plan.selected
-        .filter(
-          ({ courseId }) => !event.completedCourseIds.includes(courseId),
-        )
+        .filter(({ courseId }) => !event.completedCourseIds.includes(courseId))
         .map(({ courseId }) => courseId),
     ]);
     return {
@@ -249,9 +245,7 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
         busy: false,
         retry: {
           courseIds: state.selectedIds.filter((courseId) =>
-            state.plan.skipped.some(
-              (failure) => failure.courseId === courseId,
-            ),
+            state.plan.skipped.some((failure) => failure.courseId === courseId),
           ),
           packaging: state.plan.requestedPackaging,
         },

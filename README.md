@@ -19,6 +19,14 @@ telemetry, backend, or cloud upload.
 Use **Select all courses** to choose every displayed active, completed, and
 concluded course, or keep using the individual course checkboxes.
 
+GradPack checks selected courses sequentially before downloading anything. If
+one course cannot be planned safely, the review screen identifies it as
+skipped with a fixed privacy-safe reason while keeping the other safe courses
+ready for download. After the ready archives finish, **Retry unfinished
+courses** refreshes Canvas access and rediscovers only skipped or packing-failed
+courses under a new run. Every retry still requires review and confirmation
+before retrieval.
+
 ## Pilot installation
 
 Pilot testers should use the versioned artifact and checksum supplied by the
@@ -58,6 +66,11 @@ local session. It is not an end-user feature.
 ### Pilot memory limits
 
 Every selected course is validated before retrieval.
+
+A course-local Canvas response, size-limit, safety-validation, or unexpected
+local planning failure does not weaken validation and does not stop other safe
+courses. Canvas session loss, tab navigation or closure, cancellation, invalid
+extension messages, and run-wide safety failures still stop the operation.
 
 Unknown-size files are streamed under the hard 250 MiB per-course cap. When
 they are present, a combined request falls back to per-course output before

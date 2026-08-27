@@ -1,7 +1,4 @@
-import {
-  CanvasResponseError,
-  CanvasSessionError,
-} from "../canvas/http";
+import { CanvasResponseError, CanvasSessionError } from "../canvas/http";
 import { PilotSizeError } from "../canvas/discovery";
 import {
   buildCombinedZip,
@@ -192,13 +189,8 @@ export async function createRunPlan(options: {
   dependencies: Pick<MultiCourseDependencies, "discover">;
   onProgress?: (progress: CourseDiscoveryProgress) => void;
 }): Promise<ImmutableRunPlan> {
-  const {
-    courses,
-    requestedPackaging,
-    signal,
-    dependencies,
-    onProgress,
-  } = options;
+  const { courses, requestedPackaging, signal, dependencies, onProgress } =
+    options;
   if (courses.length === 0)
     throw new MultiCourseSafetyError("No courses selected");
   const plans: CoursePlan[] = [];

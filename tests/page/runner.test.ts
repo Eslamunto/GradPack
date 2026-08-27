@@ -215,7 +215,9 @@ describe("production page runner", () => {
   });
 
   it("emits ordered discovery progress before a partial plan", async () => {
-    mocks.listAccessibleCourses.mockResolvedValueOnce(partialCourses.slice(0, 2));
+    mocks.listAccessibleCourses.mockResolvedValueOnce(
+      partialCourses.slice(0, 2),
+    );
     mocks.createRunPlan.mockImplementationOnce(async ({ onProgress }) => {
       onProgress({ completed: 1, total: 2, currentCourseId: 101 });
       onProgress({ completed: 2, total: 2, currentCourseId: 202 });
@@ -237,9 +239,7 @@ describe("production page runner", () => {
               resourceCount: 0,
             },
           ],
-          skipped: [
-            { courseId: 202, category: "canvas-unavailable" },
-          ],
+          skipped: [{ courseId: 202, category: "canvas-unavailable" }],
           requestedPackaging: "per-course",
           effectivePackaging: "per-course",
           advertisedBytes: 0,
@@ -283,9 +283,7 @@ describe("production page runner", () => {
   it("publishes an all-skipped plan and refuses confirmation", async () => {
     mocks.createRunPlan.mockResolvedValueOnce({
       courses: [],
-      failures: [
-        { course: syntheticCourse, category: "unexpected-local" },
-      ],
+      failures: [{ course: syntheticCourse, category: "unexpected-local" }],
       summary: {
         requestedCourseCount: 1,
         selected: [],
@@ -312,8 +310,7 @@ describe("production page runner", () => {
     await vi.waitFor(() =>
       expect(
         postMessage.mock.calls.some(
-          ([value]) =>
-            (value as RuntimeEvent).payload?.type === "PLAN_READY",
+          ([value]) => (value as RuntimeEvent).payload?.type === "PLAN_READY",
         ),
       ).toBe(true),
     );
