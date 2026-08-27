@@ -446,6 +446,91 @@ describe("production page runner", () => {
     postMessage.mockRestore();
   });
 
+  it("emits a parser-accepted zero-output COMPLETE when every selected course fails", async () => {
+    mocks.listAccessibleCourses.mockResolvedValueOnce(partialCourses);
+    mocks.createRunPlan.mockResolvedValueOnce({
+      courses: partialCourses.map((course) => ({
+        course,
+        modules: [],
+        resources: [],
+        advertisedBytes: 0,
+      })),
+      failures: [],
+      summary: {
+        requestedCourseCount: 3,
+        selected: partialCourses.map((course) => ({
+          courseId: course.id,
+          advertisedBytes: 0,
+          unknownSizeCount: 0,
+          resourceCount: 0,
+        })),
+        skipped: [],
+        requestedPackaging: "combined",
+        effectivePackaging: "combined",
+        advertisedBytes: 0,
+        unknownSizeCount: 0,
+        resourceCount: 0,
+        fallbackReason: null,
+      },
+    });
+    mocks.runCourses.mockResolvedValueOnce({
+      effectivePackaging: "per-course",
+      combined: null,
+      completed: [],
+      failedCourseIds: partialCourses.map(({ id }) => id),
+      counts: {
+        success: 0,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
+      },
+    });
+    const postMessage = vi
+      .spyOn(window, "postMessage")
+      .mockImplementation(() => {});
+
+    list("run-plan0008");
+    await vi.waitFor(() =>
+      expect(mocks.listAccessibleCourses).toHaveBeenCalledOnce(),
+    );
+    start(
+      "run-plan0008",
+      partialCourses.map(({ id }) => id),
+      "combined",
+    );
+    await vi.waitFor(() => expect(mocks.createRunPlan).toHaveBeenCalledOnce());
+    confirm("run-plan0008");
+    await vi.waitFor(() => expect(mocks.runCourses).toHaveBeenCalledOnce());
+    try {
+      const completePayload = await vi.waitFor(() => {
+        const payload = postMessage.mock.calls
+          .map(([value]) => (value as RuntimeEvent).payload)
+          .find((value) => value?.type === "COMPLETE");
+        expect(payload).toBeDefined();
+        return payload!;
+      });
+
+      expect(() => parseRunnerEvent(completePayload)).not.toThrow();
+      expect(completePayload).toMatchObject({
+        type: "COMPLETE",
+        message: "No course archives were downloaded.",
+        packaging: "per-course",
+        completedCourses: 0,
+        completedCourseIds: [],
+        failedCourses: 3,
+        outputCount: 0,
+        success: 0,
+        failed: 0,
+        unavailable: 0,
+        unsupported: 0,
+        external: 0,
+      });
+    } finally {
+      postMessage.mockRestore();
+    }
+  });
+
   it("rejects stale confirmations and unlisted starts without running", async () => {
     const postMessage = vi
       .spyOn(window, "postMessage")

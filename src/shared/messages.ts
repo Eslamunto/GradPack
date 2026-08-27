@@ -23,6 +23,7 @@ export const RUNNER_TERMINAL_MESSAGES = Object.freeze({
   active: "Another GradPack operation is already active in this tab.",
   cancelled: "Packing was cancelled.",
   complete: "Your GradPack archives were downloaded.",
+  noArchives: "No course archives were downloaded.",
   connection: "Open a signed-in Frankfurt School Canvas tab and try again.",
   navigation: "The Canvas tab navigated or closed. Reopen it and try again.",
   response: "Canvas returned an unavailable or invalid response.",
@@ -531,6 +532,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     ]);
     const message = terminalMessage(input.message, [
       RUNNER_TERMINAL_MESSAGES.complete,
+      RUNNER_TERMINAL_MESSAGES.noArchives,
     ]);
     const packagingMode = packaging(input.packaging);
     const completedCourses = nonNegativeInteger(input.completedCourses);
@@ -539,13 +541,23 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     );
     const failedCourses = nonNegativeInteger(input.failedCourses);
     const outputCount = nonNegativeInteger(input.outputCount);
+    const zeroOutput = completedCourses === 0;
+    const validZeroOutput =
+      zeroOutput &&
+      message === RUNNER_TERMINAL_MESSAGES.noArchives &&
+      packagingMode === "per-course" &&
+      completedCourseIds.length === 0 &&
+      failedCourses > 0 &&
+      outputCount === 0;
     if (
-      completedCourses === 0 ||
-      completedCourseIds.length !== completedCourses ||
-      new Set(completedCourseIds).size !== completedCourseIds.length ||
-      outputCount === 0 ||
-      (packagingMode === "combined" && outputCount !== 1) ||
-      (packagingMode === "per-course" && outputCount !== completedCourses)
+      (zeroOutput && !validZeroOutput) ||
+      (!zeroOutput &&
+        (message !== RUNNER_TERMINAL_MESSAGES.complete ||
+          completedCourseIds.length !== completedCourses ||
+          new Set(completedCourseIds).size !== completedCourseIds.length ||
+          outputCount === 0 ||
+          (packagingMode === "combined" && outputCount !== 1) ||
+          (packagingMode === "per-course" && outputCount !== completedCourses)))
     ) {
       throw new TypeError("Invalid terminal course counts");
     }
@@ -563,6 +575,9 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       !Number.isSafeInteger(total) ||
       total > maximumTotal
     ) {
+      throw new TypeError("Invalid terminal counts");
+    }
+    if (validZeroOutput && total !== 0) {
       throw new TypeError("Invalid terminal counts");
     }
     return {

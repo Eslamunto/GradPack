@@ -48,6 +48,24 @@ const complete = (
   ...value,
 });
 
+const zeroOutputComplete = (
+  value: Record<string, unknown> = {},
+): Record<string, unknown> =>
+  complete({
+    message: "No course archives were downloaded.",
+    packaging: "per-course",
+    completedCourses: 0,
+    completedCourseIds: [],
+    failedCourses: 2,
+    outputCount: 0,
+    success: 0,
+    failed: 0,
+    unavailable: 0,
+    unsupported: 0,
+    external: 0,
+    ...value,
+  });
+
 const perCourseResourceCount = Math.floor(MAX_ARCHIVE_RESOURCES / 2) + 1;
 const largePerCourseSelected = [
   {
@@ -335,6 +353,41 @@ describe("parseRunnerEvent", () => {
       completedCourseIds: [42, 43],
       outputCount: 2,
     });
+  });
+
+  it("accepts a strict zero-output completion", () => {
+    expect(parseRunnerEvent(zeroOutputComplete())).toMatchObject({
+      type: "COMPLETE",
+      message: "No course archives were downloaded.",
+      packaging: "per-course",
+      completedCourses: 0,
+      completedCourseIds: [],
+      failedCourses: 2,
+      outputCount: 0,
+      success: 0,
+      failed: 0,
+      unavailable: 0,
+      unsupported: 0,
+      external: 0,
+    });
+  });
+
+  it.each([
+    ["zero failed courses", { failedCourses: 0 }],
+    ["combined packaging", { packaging: "combined" }],
+    [
+      "download-success message",
+      { message: "Your GradPack archives were downloaded." },
+    ],
+    ["non-empty completed IDs", { completedCourseIds: [42] }],
+    ["positive success count", { success: 1 }],
+    ["positive failed count", { failed: 1 }],
+    ["positive unavailable count", { unavailable: 1 }],
+    ["positive unsupported count", { unsupported: 1 }],
+    ["positive external count", { external: 1 }],
+    ["mismatched output count", { outputCount: 1 }],
+  ] as const)("rejects zero-output completion with %s", (_name, value) => {
+    expect(() => parseRunnerEvent(zeroOutputComplete(value))).toThrow();
   });
 
   it.each([

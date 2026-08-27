@@ -171,20 +171,11 @@ if (scope[marker] !== true) {
       owned.terminal = true;
       if (!markTerminal(runId)) return;
       const outputCount = result.combined ? 1 : result.completed.length;
-      if (outputCount === 0) {
-        post({
-          channel: RUNNER_CHANNEL,
-          type: "FAILED",
-          runId,
-          message: FIXED.safety,
-        });
-        return;
-      }
       post({
         channel: RUNNER_CHANNEL,
         type: "COMPLETE",
         runId,
-        message: FIXED.complete,
+        message: outputCount === 0 ? FIXED.noArchives : FIXED.complete,
         packaging: result.effectivePackaging,
         completedCourses: result.completed.length,
         completedCourseIds: result.completed.map(({ course }) => course.id),
