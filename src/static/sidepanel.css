@@ -43,6 +43,9 @@ fieldset,
 .notices,
 .selected-course,
 .progress,
+.discovery-progress,
+.plan-summary,
+.unfinished-summary,
 .outcome-summary {
   border: 1px solid #d9dcec;
   border-radius: 0.75rem;
@@ -61,8 +64,28 @@ fieldset,
 
 .selected-course,
 .progress,
+.discovery-progress,
+.plan-summary,
+.unfinished-summary,
 .outcome-summary {
   padding: 0.85rem;
+}
+
+.list-heading {
+  margin-block-end: 0.25rem;
+  font-weight: 700;
+}
+
+.ready-courses,
+.skipped-courses,
+.unfinished-courses {
+  margin-block-start: 0.25rem;
+  padding-left: 1.25rem;
+}
+
+.skipped-courses,
+.unfinished-courses {
+  color: #5e2f17;
 }
 
 label {

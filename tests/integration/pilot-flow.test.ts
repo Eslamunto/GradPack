@@ -40,6 +40,7 @@ describe("production pilot vertical flow", () => {
     const anchorClick = vi
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
+    let failSecondCourseDiscoveryOnce = true;
     vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:synthetic");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.spyOn(window, "postMessage").mockImplementation((message) => {
@@ -114,6 +115,13 @@ describe("production pilot vertical flow", () => {
               ? 302
               : 301;
       if (url.pathname === `/api/v1/courses/${courseId}/modules`) {
+        if (courseId === 102 && failSecondCourseDiscoveryOnce) {
+          failSecondCourseDiscoveryOnce = false;
+          return response("{", url.href, {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          });
+        }
         return json([
           {
             id: courseId === 103 ? 203 : courseId === 102 ? 202 : 201,
@@ -205,8 +213,12 @@ describe("production pilot vertical flow", () => {
       contexts.content?.(message, { id: extensionId }, vi.fn());
       return Promise.resolve(undefined);
     });
-    vi.spyOn(crypto, "randomUUID").mockReturnValue(
+    const runIds: Array<ReturnType<Crypto["randomUUID"]>> = [
       "12345678-1234-1234-1234-123456789abc",
+      "87654321-4321-4321-4321-cba987654321",
+    ];
+    vi.spyOn(crypto, "randomUUID").mockImplementation(
+      () => runIds.shift() ?? "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     );
     vi.stubGlobal("chrome", {
       runtime: {
@@ -283,8 +295,14 @@ describe("production pilot vertical flow", () => {
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe("Review plan"),
     );
+    expect(document.body.textContent).toContain("2 courses ready; 1 skipped");
+    expect(document.body.textContent).toContain(
+      "Canvas did not provide usable course metadata.",
+    );
     [...document.querySelectorAll<HTMLButtonElement>("button")]
-      .find((candidate) => candidate.textContent === "Continue to packing")!
+      .find(
+        (candidate) => candidate.textContent === "Continue with ready courses",
+      )!
       .click();
     await vi.waitFor(() =>
       expect(document.querySelector("h1")?.textContent).toBe(
@@ -294,6 +312,31 @@ describe("production pilot vertical flow", () => {
     expect(anchorClick).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(14);
 
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(
+        (candidate) => candidate.textContent === "Retry unfinished courses",
+      )!
+      .click();
+    await vi.waitFor(() =>
+      expect(tabsSendMessage).toHaveBeenCalledWith(tabId, {
+        channel: EXTENSION_CHANNEL,
+        type: "START_RUN",
+        runId: "run-87654321-4321-4321-4321-cba987654321",
+        courseIds: [102],
+        packaging: "combined",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(document.querySelector("h1")?.textContent).toBe("Review plan"),
+    );
+    expect(document.body.textContent).toContain("1 courses ready; 0 skipped");
+    [...document.querySelectorAll<HTMLButtonElement>("button")]
+      .find(
+        (candidate) => candidate.textContent === "Continue with ready courses",
+      )!
+      .click();
+    await vi.waitFor(() => expect(anchorClick).toHaveBeenCalledTimes(2));
+
     await tabsSendMessage(tabId, {
       channel: EXTENSION_CHANNEL,
       type: "START_RUN",
@@ -302,7 +345,7 @@ describe("production pilot vertical flow", () => {
       packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledTimes(2);
 
     for (let index = 0; index < 128; index += 1) {
       await tabsSendMessage(tabId, {
@@ -328,6 +371,6 @@ describe("production pilot vertical flow", () => {
       packaging: "per-course",
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(anchorClick).toHaveBeenCalledOnce();
+    expect(anchorClick).toHaveBeenCalledTimes(2);
   });
 });
