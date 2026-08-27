@@ -336,6 +336,9 @@ describe("accessible Side Panel flow", () => {
     expect(document.querySelector(".archive-summary")?.textContent).toContain(
       "1 archive(s) downloaded; 1 course(s) completed; 1 course(s) failed",
     );
+    expect(document.body.textContent).toContain(
+      "Review manifest.json in each ZIP for the resource outcome list.",
+    );
     expect(document.body.textContent).toContain("2 unfinished course(s)");
     expect(document.body.textContent).toContain("Second Course");
     expect(document.body.textContent).toContain("Concluded Course");
@@ -505,6 +508,9 @@ describe("accessible Side Panel flow", () => {
     expect(document.querySelector("h1")?.textContent).toBe("Review plan");
     expect(zeroOutputHeading).toBe("No archives downloaded");
     expect(zeroOutputText).toContain("No course archives were downloaded.");
+    expect(zeroOutputText).not.toContain(
+      "Review manifest.json in each ZIP for the resource outcome list.",
+    );
     expect(zeroOutputSummary).toContain(
       "0 archive(s) downloaded; 0 course(s) completed; 2 course(s) failed",
     );

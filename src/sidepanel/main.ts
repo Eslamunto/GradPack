@@ -369,9 +369,13 @@ const render = (focus: RenderFocus = null): void => {
         `${state.counts.success} successful; ${state.counts.failed} failed; ${state.counts.unavailable} unavailable; ${state.counts.unsupported} unsupported; ${state.counts.external} external.`,
         "outcome-summary",
       ),
-      paragraph(
-        "Review manifest.json in each ZIP for the resource outcome list.",
-      ),
+      ...(downloaded
+        ? [
+            paragraph(
+              "Review manifest.json in each ZIP for the resource outcome list.",
+            ),
+          ]
+        : []),
       ...(unfinished.length > 0
         ? [
             paragraph(
