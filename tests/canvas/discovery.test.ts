@@ -50,6 +50,51 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("discoverCoursePlan", () => {
+  it("archives accessible pages and files when Modules are disabled", async () => {
+    const http = syntheticCanvasHttp({
+      modulesDisabled: true,
+      files: [file(301, "reading.pdf", 19)],
+      pages: [{ page_id: 501, url: "day-1", title: "Day 1" }],
+      pageDetails: {
+        "day-1": {
+          title: "Day 1",
+          body: '<a href="/courses/101/files/302/download">Reading</a>',
+        },
+      },
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan.moduleDiscovery).toBe("disabled");
+    expect(plan.modules).toEqual([]);
+    expect(plan.resources.map(({ key }) => key)).toEqual([
+      "file:301",
+      "file:302",
+      "page:day-1",
+    ]);
+    expect(
+      http.fetchAll.mock.calls.map(([url]) => url.pathname),
+    ).not.toContain("/api/v1/courses/101/modules/201/items");
+  });
+
+  it("creates an accurate empty plan when disabled Modules indexes are empty", async () => {
+    const http = syntheticCanvasHttp({
+      modulesDisabled: true,
+      files: [],
+      folders: [],
+      pages: [],
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan).toMatchObject({
+      moduleDiscovery: "disabled",
+      modules: [],
+      resources: [],
+      advertisedBytes: 0,
+    });
+  });
+
   it("falls back to module-linked files when the broad index has an accepted optional error", async () => {
     const response = (body: unknown, url: URL, status = 200): Response => {
       const value = new Response(JSON.stringify(body), {
@@ -141,6 +186,7 @@ describe("discoverCoursePlan", () => {
 
     const plan = await discoverCoursePlan(http, syntheticCourse);
 
+    expect(plan.moduleDiscovery).toBe("available");
     expect(plan.resources.map(({ key }) => key)).toEqual([
       "file:301",
       "file:302",

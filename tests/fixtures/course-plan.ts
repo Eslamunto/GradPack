@@ -7,6 +7,7 @@ import { discoverCoursePlan } from "../../src/canvas/discovery";
 import type { ArchiveInput } from "../../src/archive/build-zip";
 import {
   CanvasCourseIndexUnavailableError,
+  CanvasCourseModulesDisabledError,
   CanvasHttp,
   CanvasResourceUnavailableError,
 } from "../../src/canvas/http";
@@ -36,6 +37,7 @@ export const syntheticCourse: CourseSummary = {
 
 export type SyntheticOptions = {
   moduleItemsInline?: boolean;
+  modulesDisabled?: boolean;
   duplicateFileId?: boolean;
   pageToken?: string;
   unsupportedItemType?: string;
@@ -91,6 +93,11 @@ export function syntheticCanvasHttp(
   const fetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
     await Promise.resolve();
     if (url.pathname.endsWith("/modules")) {
+      if (options.modulesDisabled) {
+        throw new CanvasCourseModulesDisabledError(
+          "Canvas course Modules are disabled",
+        );
+      }
       return options.modules ?? [module];
     }
     if (url.pathname.endsWith("/modules/201/items")) return [item];

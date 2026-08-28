@@ -145,7 +145,14 @@ describe("createRunPlan", () => {
   it("discovers every selected course before retrieval and freezes copied plans", async () => {
     const calls: string[] = [];
     const sourcePlans = new Map(
-      courses.map((course) => [course.id, planFor(course)]),
+      courses.map((course) => [
+        course.id,
+        {
+          ...planFor(course),
+          moduleDiscovery:
+            course.id === 202 ? ("disabled" as const) : ("available" as const),
+        },
+      ]),
     );
     const deps = baseDependencies(
       vi.fn(async (course) => {
@@ -171,6 +178,16 @@ describe("createRunPlan", () => {
       resourceCount: 2,
       fallbackReason: null,
     });
+    expect(plan.summary.selected).toEqual([
+      expect.objectContaining({
+        courseId: 101,
+        moduleDiscovery: "available",
+      }),
+      expect.objectContaining({
+        courseId: 202,
+        moduleDiscovery: "disabled",
+      }),
+    ]);
     expect(plan.courses[0]).not.toBe(sourcePlans.get(101));
   });
 

@@ -9,6 +9,7 @@ import type {
   CourseModule,
   CoursePlan,
   CourseSummary,
+  ModuleDiscovery,
   ModuleItem,
   PlannedResource,
 } from "../shared/model";
@@ -16,6 +17,7 @@ import { canvasEndpoint } from "./endpoints";
 import {
   CanvasBodySizeError,
   CanvasCourseIndexUnavailableError,
+  CanvasCourseModulesDisabledError,
   CanvasResourceUnavailableError,
   type CanvasHttp,
 } from "./http";
@@ -353,15 +355,35 @@ const normalizeItem = (
   };
 };
 
+type LoadedModules = {
+  moduleDiscovery: ModuleDiscovery;
+  parsedModules: ParsedModule[];
+};
+
 const loadModules = async (
   http: CanvasHttp,
   run: DiscoveryRun,
   courseId: number,
-): Promise<ParsedModule[]> => {
-  const rawModules = await run.one(() =>
-    http.fetchAll<unknown>(canvasEndpoint({ type: "courseModules", courseId })),
-  );
-  const descriptors = rawModules.map((value) => {
+): Promise<LoadedModules> => {
+  const initial = await run.one(async () => {
+    try {
+      return {
+        moduleDiscovery: "available" as const,
+        rawModules: await http.fetchAll<unknown>(
+          canvasEndpoint({ type: "courseModules", courseId }),
+        ),
+      };
+    } catch (error) {
+      if (error instanceof CanvasCourseModulesDisabledError) {
+        return { moduleDiscovery: "disabled" as const, rawModules: [] };
+      }
+      throw error;
+    }
+  });
+  if (initial.moduleDiscovery === "disabled") {
+    return { moduleDiscovery: "disabled", parsedModules: [] };
+  }
+  const descriptors = initial.rawModules.map((value) => {
     if (!isRecord(value)) throw new TypeError("Invalid module record");
     const id = positiveId(own(value, "id"), "module ID");
     const inline = own(value, "items");
@@ -404,7 +426,7 @@ const loadModules = async (
     if (ids.has(module.id)) throw new TypeError("Duplicate module ID");
     ids.add(module.id);
   }
-  return loaded;
+  return { moduleDiscovery: "available", parsedModules: loaded };
 };
 
 const sameFile = (left: NormalizedFile, right: NormalizedFile): boolean =>
@@ -595,7 +617,11 @@ export async function discoverCoursePlan(
 ): Promise<CoursePlan> {
   const course = validateCourse(selectedCourse);
   const run = new DiscoveryRun(options.abort);
-  const parsedModules = await loadModules(http, run, course.id);
+  const { moduleDiscovery, parsedModules } = await loadModules(
+    http,
+    run,
+    course.id,
+  );
 
   const indexes = await run.all<unknown[] | null>([
     () =>
@@ -807,7 +833,7 @@ export async function discoverCoursePlan(
   }
   const plan: CoursePlan = {
     course,
-    moduleDiscovery: "available",
+    moduleDiscovery,
     modules: parsedModules.map(({ module }) => module),
     resources,
     advertisedBytes,
