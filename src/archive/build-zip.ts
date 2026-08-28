@@ -141,6 +141,7 @@ const SHELL_CLASSES = new Set([
   "course-navigation",
   "global-rail",
   "gradpack-mark",
+  "modules-unavailable",
   "panel",
   "resource-list",
   "saved-page-content",

@@ -30,4 +30,28 @@ describe("course pages", () => {
       true,
     );
   });
+
+  it("discloses disabled module navigation throughout the archive", () => {
+    const plan = {
+      ...structuredClone(syntheticArchivePlan),
+      moduleDiscovery: "disabled" as const,
+      modules: [],
+    };
+    const pages = renderCoursePages(
+      buildArchiveNavigationModel(
+        plan,
+        structuredClone(syntheticArchiveOutcomes),
+        "2026-08-21T12:00:00.000Z",
+      ),
+    );
+    const notice =
+      "Module navigation is unavailable; GradPack archived accessible pages and files instead.";
+
+    expect(pages.get("index.html")).toContain(notice);
+    expect(pages.get("modules.html")).toContain(notice);
+    expect(pages.get("status.html")).toContain(notice);
+    expect(pages.get("modules.html")).not.toContain("No modules were listed.");
+    expect(pages.get("pages.html")).toContain("Welcome");
+    expect(pages.get("files.html")).toContain("slides.pdf");
+  });
 });

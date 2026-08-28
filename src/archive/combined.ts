@@ -136,7 +136,11 @@ const rootIndex = (
   const cards = archives
     .map((archive, index) => {
       const root = roots[index]!;
-      return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${archive.moduleCount} modules · ${archive.itemCount} module items · ${archive.manifest.totals.success} saved resources</p><p><a href="${encodedPath(`${root}/status.html`)}">View archive status</a></p></article>`;
+      const inventory =
+        archive.manifest.moduleDiscovery === "disabled"
+          ? `Module navigation unavailable · ${archive.manifest.totals.success} saved resources`
+          : `${archive.moduleCount} modules · ${archive.itemCount} module items · ${archive.manifest.totals.success} saved resources`;
+      return `<article class="course-card panel"><p class="eyebrow">${escapeHtml(archive.course.courseCode)}</p><h2><a href="${encodedPath(`${root}/index.html`)}">${escapeHtml(archive.course.name)}</a></h2><p>${escapeHtml(inventory)}</p><p><a href="${encodedPath(`${root}/status.html`)}">View archive status</a></p></article>`;
     })
     .join("");
   return document(

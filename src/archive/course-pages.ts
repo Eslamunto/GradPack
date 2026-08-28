@@ -86,11 +86,14 @@ export const renderCoursePages = (
     )
     .join("");
   const totals = model.manifest.totals;
-  const home = `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>${escapeHtml(model.manifest.course.name)}</h1><p>Browse this saved course without Canvas.</p></header><section class="panel"><h2>Course content</h2><p><a href="modules.html">View modules</a>, <a href="pages.html">pages</a>, <a href="files.html">files</a>, or <a href="status.html">archive status</a>.</p></section>`;
+  const modulesUnavailable = model.manifest.moduleDiscovery === "disabled";
+  const modulesNotice =
+    '<aside class="panel modules-unavailable"><h2>Module navigation unavailable</h2><p>Module navigation is unavailable; GradPack archived accessible pages and files instead.</p></aside>';
+  const home = `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>${escapeHtml(model.manifest.course.name)}</h1><p>Browse this saved course without Canvas.</p></header><section class="panel"><h2>Course content</h2><p><a href="modules.html">View modules</a>, <a href="pages.html">pages</a>, <a href="files.html">files</a>, or <a href="status.html">archive status</a>.</p></section>${modulesUnavailable ? modulesNotice : ""}`;
   const outcomes = model.resources
     .map((resource) => row("status.html", resource, resource.title))
     .join("");
-  const statusPage = `<h1>Archive status</h1><section class="status-grid"><div class="panel"><strong>${totals.success}</strong><br>Saved</div><div class="panel"><strong>${totals.failed}</strong><br>Failed</div><div class="panel"><strong>${totals.unavailable}</strong><br>Unavailable</div><div class="panel"><strong>${totals.unsupported}</strong><br>Unsupported</div><div class="panel"><strong>${totals.external}</strong><br>External</div></section><h2>Resource outcomes</h2><ul class="resource-list">${outcomes || "<li>No resources were listed.</li>"}</ul><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`;
+  const statusPage = `<h1>Archive status</h1><section class="status-grid"><div class="panel"><strong>${totals.success}</strong><br>Saved</div><div class="panel"><strong>${totals.failed}</strong><br>Failed</div><div class="panel"><strong>${totals.unavailable}</strong><br>Unavailable</div><div class="panel"><strong>${totals.unsupported}</strong><br>Unsupported</div><div class="panel"><strong>${totals.external}</strong><br>External</div></section>${modulesUnavailable ? modulesNotice : ""}<h2>Resource outcomes</h2><ul class="resource-list">${outcomes || "<li>No resources were listed.</li>"}</ul><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`;
   return new Map([
     [
       "files.html",
@@ -121,7 +124,11 @@ export const renderCoursePages = (
         "modules.html",
         "modules",
         "Modules",
-        `<h1>Modules</h1>${modules || "<p>No modules were listed.</p>"}`,
+        `<h1>Modules</h1>${
+          modulesUnavailable
+            ? modulesNotice
+            : modules || "<p>No modules were listed.</p>"
+        }`,
         combined,
       ),
     ],
