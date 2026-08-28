@@ -72,9 +72,9 @@ describe("discoverCoursePlan", () => {
       "file:302",
       "page:day-1",
     ]);
-    expect(
-      http.fetchAll.mock.calls.map(([url]) => url.pathname),
-    ).not.toContain("/api/v1/courses/101/modules/201/items");
+    expect(http.fetchAll.mock.calls.map(([url]) => url.pathname)).not.toContain(
+      "/api/v1/courses/101/modules/201/items",
+    );
   });
 
   it("creates an accurate empty plan when disabled Modules indexes are empty", async () => {

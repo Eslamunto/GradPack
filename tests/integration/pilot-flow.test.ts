@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/require-await -- synthetic fetch responses model the browser network seam */
-import { strToU8 } from "fflate";
+import { strFromU8, strToU8, unzipSync } from "fflate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { EXTENSION_CHANNEL } from "../../src/shared/constants";
 
@@ -41,7 +41,9 @@ describe("production pilot vertical flow", () => {
       .spyOn(HTMLAnchorElement.prototype, "click")
       .mockImplementation(() => {});
     let failSecondCourseDiscoveryOnce = true;
-    vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:synthetic");
+    const createObjectUrl = vi
+      .spyOn(URL, "createObjectURL")
+      .mockReturnValue("blob:synthetic");
     vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
     vi.spyOn(window, "postMessage").mockImplementation((message) => {
       queueMicrotask(() =>
@@ -120,6 +122,11 @@ describe("production pilot vertical flow", () => {
           return response("{", url.href, {
             status: 200,
             headers: { "content-type": "application/json" },
+          });
+        }
+        if (courseId === 103) {
+          return json({
+            message: "That page has been disabled for this course",
           });
         }
         return json([
@@ -299,6 +306,9 @@ describe("production pilot vertical flow", () => {
     expect(document.body.textContent).toContain(
       "Canvas did not provide usable course metadata.",
     );
+    expect(document.body.textContent).toContain(
+      "Module navigation is unavailable; GradPack will archive accessible pages and files instead.",
+    );
     [...document.querySelectorAll<HTMLButtonElement>("button")]
       .find(
         (candidate) => candidate.textContent === "Continue with ready courses",
@@ -311,6 +321,25 @@ describe("production pilot vertical flow", () => {
     );
     expect(anchorClick).toHaveBeenCalledOnce();
     expect(fetcher.mock.calls.length).toBeGreaterThanOrEqual(14);
+    const combinedBlob = createObjectUrl.mock.calls[0]?.[0];
+    expect(combinedBlob).toBeInstanceOf(Blob);
+    const combinedEntries = unzipSync(
+      new Uint8Array(await (combinedBlob as Blob).arrayBuffer()),
+    );
+    const disabledRoot = "courses/Concluded Synthetic Course-103";
+    const disabledManifest = JSON.parse(
+      strFromU8(combinedEntries[`${disabledRoot}/manifest.json`]!),
+    ) as { moduleDiscovery?: unknown };
+    expect(disabledManifest.moduleDiscovery).toBe("disabled");
+    expect(
+      strFromU8(combinedEntries[`${disabledRoot}/modules.html`]!),
+    ).toContain("Module navigation unavailable");
+    expect(strFromU8(combinedEntries[`${disabledRoot}/pages.html`]!)).toContain(
+      "Welcome",
+    );
+    expect(strFromU8(combinedEntries[`${disabledRoot}/files.html`]!)).toContain(
+      "slides.pdf",
+    );
 
     [...document.querySelectorAll<HTMLButtonElement>("button")]
       .find(

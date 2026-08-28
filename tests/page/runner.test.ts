@@ -73,6 +73,7 @@ const plan = (
   courses: [
     {
       course: syntheticCourse,
+      moduleDiscovery: "available" as const,
       modules: [],
       resources: [],
       advertisedBytes: 0,
@@ -84,6 +85,7 @@ const plan = (
     selected: [
       {
         courseId: syntheticCourse.id,
+        moduleDiscovery: "available" as const,
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
@@ -234,6 +236,7 @@ describe("production page runner", () => {
           selected: [
             {
               courseId: 101,
+              moduleDiscovery: "available",
               advertisedBytes: 0,
               unknownSizeCount: 0,
               resourceCount: 0,
@@ -362,6 +365,7 @@ describe("production page runner", () => {
     mocks.createRunPlan.mockResolvedValueOnce({
       courses: partialCourses.map((course) => ({
         course,
+        moduleDiscovery: "available" as const,
         modules: [],
         resources: [],
         advertisedBytes: 0,
@@ -371,6 +375,7 @@ describe("production page runner", () => {
         requestedCourseCount: 3,
         selected: partialCourses.map((course) => ({
           courseId: course.id,
+          moduleDiscovery: "available" as const,
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
@@ -451,6 +456,7 @@ describe("production page runner", () => {
     mocks.createRunPlan.mockResolvedValueOnce({
       courses: partialCourses.map((course) => ({
         course,
+        moduleDiscovery: "available" as const,
         modules: [],
         resources: [],
         advertisedBytes: 0,
@@ -460,6 +466,7 @@ describe("production page runner", () => {
         requestedCourseCount: 3,
         selected: partialCourses.map((course) => ({
           courseId: course.id,
+          moduleDiscovery: "available" as const,
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
