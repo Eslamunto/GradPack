@@ -101,6 +101,7 @@ const manifestWithResources = (
   createdAt: "2026-08-16T12:00:00.000Z",
   canvasHost: "frankfurtschool.instructure.com",
   course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+  moduleDiscovery: "available",
   totals: {
     success: status === "success" ? count : 0,
     failed: 0,

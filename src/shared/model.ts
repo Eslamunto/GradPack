@@ -20,8 +20,11 @@ export type PlanFallbackReason =
   | "combined-resource-limit-exceeded"
   | "unknown-size-files";
 
+export type ModuleDiscovery = "available" | "disabled";
+
 export type CoursePlanSummary = {
   courseId: number;
+  moduleDiscovery: ModuleDiscovery;
   advertisedBytes: number;
   unknownSizeCount: number;
   resourceCount: number;
@@ -95,6 +98,7 @@ export type CourseModule = {
 
 export type CoursePlan = {
   course: CourseSummary;
+  moduleDiscovery: ModuleDiscovery;
   modules: CourseModule[];
   resources: PlannedResource[];
   advertisedBytes: number;

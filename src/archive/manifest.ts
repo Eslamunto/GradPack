@@ -1,6 +1,7 @@
 import { assertArchivePathSet, isCanonicalArchivePath } from "./paths";
 import type {
   CoursePlan,
+  ModuleDiscovery,
   OutcomeStatus,
   PlannedResource,
   ResourceKind,
@@ -53,6 +54,7 @@ export type ArchiveManifest = {
   createdAt: string;
   canvasHost: typeof CANVAS_HOST;
   course: { id: number; name: string; courseCode: string };
+  moduleDiscovery: ModuleDiscovery;
   totals: Record<OutcomeStatus, number> & {
     advertisedBytes: number;
     archivedBytes: number;
@@ -457,9 +459,17 @@ const validateModules = (value: unknown): CoursePlan["modules"] =>
     };
   });
 
+const moduleDiscovery = (value: unknown): ModuleDiscovery => {
+  if (value !== "available" && value !== "disabled") {
+    throw new TypeError("Invalid archive data");
+  }
+  return value;
+};
+
 const validatePlan = (value: unknown): CoursePlan => {
   const record = exactRecord(value, [
     "course",
+    "moduleDiscovery",
     "modules",
     "resources",
     "advertisedBytes",
@@ -495,6 +505,7 @@ const validatePlan = (value: unknown): CoursePlan => {
   }
   return {
     course,
+    moduleDiscovery: moduleDiscovery(valueOf(record, "moduleDiscovery")),
     modules,
     resources,
     advertisedBytes: declared,
@@ -625,6 +636,7 @@ export function buildManifestFromSnapshot(
       name: validatedPlan.course.name,
       courseCode: validatedPlan.course.courseCode,
     },
+    moduleDiscovery: validatedPlan.moduleDiscovery,
     totals,
     resources,
   });
@@ -647,6 +659,7 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     "createdAt",
     "canvasHost",
     "course",
+    "moduleDiscovery",
     "totals",
     "resources",
   ]);
@@ -776,6 +789,7 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     createdAt: canonicalTimestamp(valueOf(record, "createdAt")),
     canvasHost: CANVAS_HOST,
     course,
+    moduleDiscovery: moduleDiscovery(valueOf(record, "moduleDiscovery")),
     totals,
     resources: resources.map((resource) => ({
       key: resource.key,

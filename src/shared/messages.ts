@@ -13,6 +13,7 @@ import type {
   CoursePlanFailureSummary,
   CoursePlanSummary,
   CourseSummary,
+  ModuleDiscovery,
   PackagingMode,
   PlanFallbackReason,
   RunPlanSummary,
@@ -236,16 +237,25 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
   return value;
 };
 
+const moduleDiscovery = (value: unknown): ModuleDiscovery => {
+  if (value !== "available" && value !== "disabled") {
+    throw new TypeError("Invalid module discovery state");
+  }
+  return value;
+};
+
 const planSummary = (value: unknown): CoursePlanSummary => {
   const input = record(value);
   exactKeys(input, [
     "courseId",
+    "moduleDiscovery",
     "advertisedBytes",
     "unknownSizeCount",
     "resourceCount",
   ]);
   return {
     courseId: positiveInteger(input.courseId, "Invalid course ID"),
+    moduleDiscovery: moduleDiscovery(input.moduleDiscovery),
     advertisedBytes: nonNegativeInteger(input.advertisedBytes),
     unknownSizeCount: nonNegativeInteger(input.unknownSizeCount),
     resourceCount: nonNegativeInteger(input.resourceCount),

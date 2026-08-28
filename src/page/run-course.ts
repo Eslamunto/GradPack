@@ -86,6 +86,7 @@ const throwIfAborted = (signal: AbortSignal): void => {
 export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
   const clone: CoursePlan = {
     course: { ...plan.course },
+    moduleDiscovery: plan.moduleDiscovery,
     modules: plan.modules.map((module) => ({
       ...module,
       items: module.items.map((item) => ({ ...item })),

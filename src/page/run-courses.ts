@@ -134,15 +134,18 @@ const planSummary = (
   effectivePackaging: PackagingMode,
   fallbackReason: PlanFallbackReason | null,
 ): RunPlanSummary => {
-  const selected = courses.map(({ course, advertisedBytes, resources }) => ({
-    courseId: course.id,
-    advertisedBytes,
-    unknownSizeCount: resources.filter(
-      (resource) =>
-        resource.kind === "file" && resource.advertisedBytes === null,
-    ).length,
-    resourceCount: resources.length,
-  }));
+  const selected = courses.map(
+    ({ course, moduleDiscovery, advertisedBytes, resources }) => ({
+      courseId: course.id,
+      moduleDiscovery,
+      advertisedBytes,
+      unknownSizeCount: resources.filter(
+        (resource) =>
+          resource.kind === "file" && resource.advertisedBytes === null,
+      ).length,
+      resourceCount: resources.length,
+    }),
+  );
   const advertisedBytes = selected.reduce(
     (total, item) => total + item.advertisedBytes,
     0,

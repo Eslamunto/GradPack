@@ -24,12 +24,14 @@ const plan: RunPlanSummary = {
   selected: [
     {
       courseId: syntheticCourse.id,
+      moduleDiscovery: "available",
       advertisedBytes: 19,
       unknownSizeCount: 0,
       resourceCount: 2,
     },
     {
       courseId: secondCourse.id,
+      moduleDiscovery: "available",
       advertisedBytes: 21,
       unknownSizeCount: 0,
       resourceCount: 1,

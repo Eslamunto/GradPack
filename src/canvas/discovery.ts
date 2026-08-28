@@ -807,6 +807,7 @@ export async function discoverCoursePlan(
   }
   const plan: CoursePlan = {
     course,
+    moduleDiscovery: "available",
     modules: parsedModules.map(({ module }) => module),
     resources,
     advertisedBytes,

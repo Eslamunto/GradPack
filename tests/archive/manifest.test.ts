@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { buildManifest } from "../../src/archive/manifest";
+import {
+  buildManifest,
+  normalizeArchiveManifest,
+} from "../../src/archive/manifest";
 import type { CoursePlan, ResourceOutcome } from "../../src/shared/model";
 import {
   syntheticArchiveInput,
@@ -15,6 +18,20 @@ const copyOutcomes = (): ResourceOutcome[] =>
   structuredClone(syntheticArchiveOutcomes);
 
 describe("buildManifest", () => {
+  it("preserves and validates disabled module discovery", () => {
+    const plan = { ...copyPlan(), moduleDiscovery: "disabled" as const };
+
+    const manifest = buildManifest(plan, copyOutcomes(), CREATED_AT);
+
+    expect(manifest.moduleDiscovery).toBe("disabled");
+    expect(() =>
+      normalizeArchiveManifest({ ...manifest, moduleDiscovery: "unknown" }),
+    ).toThrow(TypeError);
+    const missing = { ...manifest } as Record<string, unknown>;
+    Reflect.deleteProperty(missing, "moduleDiscovery");
+    expect(() => normalizeArchiveManifest(missing)).toThrow(TypeError);
+  });
+
   it.each([
     ["success", 25, null],
     ["unavailable", null, "not-found"],
@@ -24,6 +41,7 @@ describe("buildManifest", () => {
       const resource = unknownFileResource();
       const plan: CoursePlan = {
         course: structuredClone(syntheticArchivePlan.course),
+        moduleDiscovery: "available",
         modules: [],
         resources: [resource],
         advertisedBytes: 0,
@@ -70,6 +88,7 @@ describe("buildManifest", () => {
     const resource = { ...unknownFileResource(), sourceUrl };
     const plan: CoursePlan = {
       course: structuredClone(syntheticArchivePlan.course),
+      moduleDiscovery: "available",
       modules: [],
       resources: [resource],
       advertisedBytes: 0,
@@ -99,6 +118,7 @@ describe("buildManifest", () => {
       };
       const plan: CoursePlan = {
         course: structuredClone(syntheticArchivePlan.course),
+        moduleDiscovery: "available",
         modules: [],
         resources: [resource],
         advertisedBytes: 0,
@@ -127,6 +147,7 @@ describe("buildManifest", () => {
       createdAt: CREATED_AT,
       canvasHost: "frankfurtschool.instructure.com",
       course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+      moduleDiscovery: "available",
       totals: {
         success: 2,
         failed: 0,
@@ -395,6 +416,7 @@ describe("buildManifest", () => {
     const count = 65_533;
     const plan: CoursePlan = {
       course: structuredClone(syntheticArchivePlan.course),
+      moduleDiscovery: "available",
       modules: [],
       advertisedBytes: 0,
       resources: Array.from({ length: count }, (_, index) => ({

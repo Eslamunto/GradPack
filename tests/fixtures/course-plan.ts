@@ -196,6 +196,7 @@ export function syntheticCanvasHttp(
 export function planWithOneFile(size: number | null): CoursePlan {
   return {
     course: syntheticCourse,
+    moduleDiscovery: "available",
     modules: [],
     advertisedBytes: size ?? 0,
     resources: [
@@ -229,6 +230,7 @@ export function unknownFileResource(
 
 export const syntheticArchivePlan: CoursePlan = {
   course: syntheticCourse,
+  moduleDiscovery: "available",
   advertisedBytes: 19,
   resources: [
     {
@@ -347,6 +349,7 @@ export const syntheticArchiveInput: ArchiveInput = {
     createdAt: "2026-08-16T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+    moduleDiscovery: "available",
     totals: {
       success: 2,
       failed: 0,

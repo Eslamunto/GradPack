@@ -70,12 +70,14 @@ const perCourseResourceCount = Math.floor(MAX_ARCHIVE_RESOURCES / 2) + 1;
 const largePerCourseSelected = [
   {
     courseId: 42,
+    moduleDiscovery: "available",
     advertisedBytes: 10,
     unknownSizeCount: 0,
     resourceCount: perCourseResourceCount,
   },
   {
     courseId: 43,
+    moduleDiscovery: "available",
     advertisedBytes: 20,
     unknownSizeCount: 0,
     resourceCount: perCourseResourceCount,
@@ -111,6 +113,7 @@ const resilientPlanEvent = (
   selected: [
     {
       courseId: 42,
+      moduleDiscovery: "available",
       advertisedBytes: 10,
       unknownSizeCount: 1,
       resourceCount: 2,
@@ -226,7 +229,7 @@ describe("parseRunnerEvent", () => {
   it("accepts partial and all-skipped resilient plans", () => {
     expect(parseRunnerEvent(resilientPlanEvent())).toMatchObject({
       requestedCourseCount: 2,
-      selected: [{ courseId: 42 }],
+      selected: [{ courseId: 42, moduleDiscovery: "available" }],
       skipped: [{ courseId: 43, category: "canvas-unavailable" }],
     });
     expect(
@@ -254,6 +257,16 @@ describe("parseRunnerEvent", () => {
       ],
     });
   });
+
+  it.each([undefined, null, "", "unavailable", false])(
+    "rejects selected-course module discovery state %s",
+    (moduleDiscovery) => {
+      const event = resilientPlanEvent();
+      const selected = event.selected as Record<string, unknown>[];
+      selected[0] = { ...selected[0], moduleDiscovery };
+      expect(() => parseRunnerEvent(event)).toThrow(TypeError);
+    },
+  );
 
   it.each([
     { requestedCourseCount: 3 },
@@ -314,12 +327,14 @@ describe("parseRunnerEvent", () => {
         selected: [
           {
             courseId: 42,
+            moduleDiscovery: "available",
             advertisedBytes: 10,
             unknownSizeCount: 1,
             resourceCount: 2,
           },
           {
             courseId: 43,
+            moduleDiscovery: "available",
             advertisedBytes: 20,
             unknownSizeCount: 2,
             resourceCount: 3,
@@ -454,12 +469,14 @@ describe("parseRunnerEvent", () => {
         selected: [
           {
             courseId: 42,
+            moduleDiscovery: "available",
             advertisedBytes: 0,
             unknownSizeCount: 0,
             resourceCount: firstCount,
           },
           {
             courseId: 43,
+            moduleDiscovery: "available",
             advertisedBytes: 0,
             unknownSizeCount: 0,
             resourceCount: secondCount,
@@ -488,12 +505,14 @@ describe("parseRunnerEvent", () => {
       selected: [
         {
           courseId: 42,
+          moduleDiscovery: "available",
           advertisedBytes: 10,
           unknownSizeCount: 1,
           resourceCount: 2,
         },
         {
           courseId: 43,
+          moduleDiscovery: "available",
           advertisedBytes: 20,
           unknownSizeCount: 2,
           resourceCount: 3,
@@ -520,6 +539,7 @@ describe("parseRunnerEvent", () => {
         selected: [
           {
             courseId: 42,
+            moduleDiscovery: "available",
             advertisedBytes: 10,
             resourceCount: 2,
           },
@@ -561,12 +581,14 @@ describe("parseRunnerEvent", () => {
       selected: [
         {
           courseId: 42,
+          moduleDiscovery: "available",
           advertisedBytes: 10,
           unknownSizeCount: 1,
           resourceCount: 2,
         },
         {
           courseId: 43,
+          moduleDiscovery: "available",
           advertisedBytes: 20,
           unknownSizeCount: 2,
           resourceCount: 3,
@@ -627,12 +649,14 @@ describe("parseRunnerEvent", () => {
           selected: [
             {
               courseId: 42,
+              moduleDiscovery: "available",
               advertisedBytes: 10,
               unknownSizeCount: 1,
               resourceCount: 2,
             },
             {
               courseId: 43,
+              moduleDiscovery: "available",
               advertisedBytes: 20,
               unknownSizeCount: 0,
               resourceCount: 3,
@@ -654,6 +678,7 @@ describe("parseRunnerEvent", () => {
     const selected = [
       {
         courseId: 42,
+        moduleDiscovery: "available",
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,

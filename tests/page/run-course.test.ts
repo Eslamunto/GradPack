@@ -52,6 +52,7 @@ const external: PlannedResource = {
 
 const plan = (resources: PlannedResource[]): CoursePlan => ({
   course: { ...syntheticCourse },
+  moduleDiscovery: "available",
   modules: [],
   resources: resources.map((resource) => ({ ...resource })),
   advertisedBytes: resources.reduce(

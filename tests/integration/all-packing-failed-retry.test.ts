@@ -31,6 +31,7 @@ const courses: CourseSummary[] = [
 
 const coursePlan = (course: CourseSummary): CoursePlan => ({
   course: { ...course },
+  moduleDiscovery: "available",
   modules: [],
   advertisedBytes: 1,
   resources: [

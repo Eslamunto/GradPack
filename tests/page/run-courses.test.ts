@@ -48,6 +48,7 @@ const planFor = (
   unknownSize = false,
 ): CoursePlan => ({
   course: { ...course },
+  moduleDiscovery: "available",
   modules: [],
   advertisedBytes: unknownSize ? 0 : advertisedBytes,
   resources: [
@@ -70,6 +71,7 @@ const manifest = (course: CourseSummary): ArchiveManifest =>
     createdAt: "2026-08-17T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },
+    moduleDiscovery: "available",
     totals: {
       success: 1,
       failed: 0,
