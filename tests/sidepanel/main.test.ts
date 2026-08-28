@@ -208,12 +208,14 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 101,
+            moduleDiscovery: "available",
             advertisedBytes: 19,
             unknownSizeCount: 0,
             resourceCount: 2,
           },
           {
             courseId: 102,
+            moduleDiscovery: "disabled",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
@@ -235,6 +237,14 @@ describe("accessible Side Panel flow", () => {
     expect(document.body.textContent).toContain("Discovery is complete");
     expect(document.body.textContent).toContain("2 courses ready; 1 skipped");
     expect(document.body.textContent).toContain("Concluded Course");
+    const ready = [...document.querySelectorAll(".ready-courses li")].map(
+      (element) => element.textContent,
+    );
+    expect(ready).toHaveLength(2);
+    expect(ready[1]).toContain(
+      "Module navigation is unavailable; GradPack will archive accessible pages and files instead.",
+    );
+    expect(document.querySelectorAll(".skipped-courses li")).toHaveLength(1);
     expect(document.body.textContent).toContain(
       "Canvas did not provide usable course metadata.",
     );
@@ -382,12 +392,14 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 102,
+            moduleDiscovery: "available",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
           },
           {
             courseId: 103,
+            moduleDiscovery: "available",
             advertisedBytes: 21,
             unknownSizeCount: 0,
             resourceCount: 4,
@@ -483,12 +495,14 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 102,
+            moduleDiscovery: "available",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
           },
           {
             courseId: 103,
+            moduleDiscovery: "available",
             advertisedBytes: 21,
             unknownSizeCount: 0,
             resourceCount: 4,
@@ -624,6 +638,7 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 101,
+            moduleDiscovery: "available",
             advertisedBytes: 0,
             unknownSizeCount: 1,
             resourceCount: 1,

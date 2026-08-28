@@ -94,6 +94,9 @@ const COURSE_PLAN_FAILURE_MESSAGES: Readonly<
   "unexpected-local": "A local course operation could not be completed.",
 });
 
+const MODULES_DISABLED_NOTICE =
+  "Module navigation is unavailable; GradPack will archive accessible pages and files instead.";
+
 const courseForId = (
   courses: readonly CourseSummary[],
   courseId: number,
@@ -237,9 +240,19 @@ const render = (focus: RenderFocus = null): void => {
   } else if (state.name === "review") {
     const review = state;
     heading.textContent = "Review plan";
-    const readyCourses = review.plan.selected
-      .map(({ courseId }) => courseForId(review.courses, courseId))
-      .filter((course): course is CourseSummary => course !== undefined);
+    const readyCourses = review.plan.selected.flatMap((summary) => {
+      const course = courseForId(review.courses, summary.courseId);
+      return course
+        ? [
+            {
+              course,
+              ...(summary.moduleDiscovery === "disabled"
+                ? { detail: MODULES_DISABLED_NOTICE }
+                : {}),
+            },
+          ]
+        : [];
+    });
     const skippedCourses = review.plan.skipped
       .map((failure) => {
         const course = courseForId(review.courses, failure.courseId);
@@ -262,10 +275,7 @@ const render = (focus: RenderFocus = null): void => {
       ...(readyCourses.length > 0
         ? [
             paragraph("Ready courses", "list-heading"),
-            courseList(
-              "ready-courses",
-              readyCourses.map((course) => ({ course })),
-            ),
+            courseList("ready-courses", readyCourses),
           ]
         : []),
       ...(skippedCourses.length > 0
