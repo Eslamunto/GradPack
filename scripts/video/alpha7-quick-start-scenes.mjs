@@ -12,7 +12,7 @@ export const quickStartScenes = Object.freeze([
     title: "GradPack Alpha 7 in 55 seconds",
     screenLines: ["Install", "Choose courses", "Download locally"],
     caption: "Install and download with GradPack\nin under one minute.",
-    narration: "GradPack Alpha Seven: your fast Canvas offline setup.",
+    narration: "Install GradPack and download Canvas courses offline.",
   },
   {
     id: "quick-download",
@@ -134,7 +134,7 @@ export const quickStartScenes = Object.freeze([
       "Personal study only",
     ],
     caption: "Archives stay local.\nPersonal study only.",
-    narration: "Archives stay local. Personal study only.",
+    narration: "Keep archives for personal study only.",
   },
 ]);
 

@@ -50,6 +50,15 @@ describe("Alpha 7 quick-start video source", () => {
     }
   });
 
+  it("keeps the two shortest scenes concise for Samantha", () => {
+    expect(
+      quickStartScenes.find(({ id }) => id === "quick-welcome")?.narration,
+    ).toBe("Install GradPack and download Canvas courses offline.");
+    expect(
+      quickStartScenes.find(({ id }) => id === "quick-trust")?.narration,
+    ).toBe("Keep archives for personal study only.");
+  });
+
   it("builds nine monotonic SRT cues ending at 55 seconds", () => {
     const srt = buildQuickStartSrt();
     expect(srt.match(/--> /gu)).toHaveLength(9);
