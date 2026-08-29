@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
+import { quickStartScenes } from "../../scripts/video/alpha7-quick-start-scenes.mjs";
 import {
   escapeXml,
   renderSceneSvg,
@@ -62,5 +63,13 @@ describe("Alpha 7 installation frame renderer", () => {
     expect(svg).toContain("Developer mode");
     expect(svg).not.toContain("/Users/");
     expect(svg).not.toContain("@gmail");
+  });
+
+  it("renders the quick-start scene shape through the shared renderer", () => {
+    const scene = quickStartScenes.find(({ id }) => id === "quick-choose")!;
+    const svg = renderSceneSvg(scene);
+    expect(svg).toContain("Example Finance Course");
+    expect(svg).toContain("Select all courses");
+    expect(svg).not.toContain("undefined");
   });
 });

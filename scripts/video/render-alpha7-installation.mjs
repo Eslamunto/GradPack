@@ -1,4 +1,4 @@
-/** @typedef {(typeof import("./alpha7-installation-scenes.mjs").scenes)[number]} Scene */
+/** @typedef {{ id: string, section: string, durationSeconds: number, visual: string, title: string, screenLines: string[], caption: string, narration: string, capture?: string }} Scene */
 
 /** @type {Readonly<Record<string, string>>} */
 const XML_ENTITIES = Object.freeze({

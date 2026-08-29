@@ -49,4 +49,49 @@ describe("Alpha 7 installation video validator", () => {
     expect(() => validateAudioPeak(-80)).toThrow("silent");
     expect(() => validateAudioPeak(-3.5)).not.toThrow();
   });
+
+  it("accepts quick-start duration and size limits", () => {
+    const probe = {
+      format: { duration: "55.000", size: String(7 * 1024 * 1024) },
+      streams: [
+        {
+          codec_type: "video",
+          codec_name: "h264",
+          width: 1920,
+          height: 1080,
+          pix_fmt: "yuv420p",
+          avg_frame_rate: "30/1",
+        },
+        { codec_type: "audio", codec_name: "aac", sample_rate: "48000" },
+      ],
+    };
+    expect(() =>
+      validateProbe(probe, {
+        minimumDurationSeconds: 54,
+        maximumDurationSeconds: 56,
+        maximumVideoBytes: 25 * 1024 * 1024,
+      }),
+    ).not.toThrow();
+    expect(() =>
+      validateProbe(
+        { ...probe, format: { duration: "57", size: "1" } },
+        {
+          minimumDurationSeconds: 54,
+          maximumDurationSeconds: 56,
+          maximumVideoBytes: 25 * 1024 * 1024,
+        },
+      ),
+    ).toThrow("54-56 seconds");
+  });
+
+  it("accepts nine quick-start cues ending at 55 seconds", async () => {
+    const { buildQuickStartSrt } =
+      await import("../../scripts/video/alpha7-quick-start-scenes.mjs");
+    expect(() =>
+      validateSrt(buildQuickStartSrt(), {
+        expectedCueCount: 9,
+        expectedEndMilliseconds: 55_000,
+      }),
+    ).not.toThrow();
+  });
 });

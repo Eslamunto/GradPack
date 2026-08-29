@@ -1,10 +1,12 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
+import { quickStartContent } from "../../scripts/video/alpha7-quick-start-scenes.mjs";
 import {
   assertNarrationDuration,
   captureNameFor,
   concatFileContent,
+  detailedContent,
   parseArgs,
   segmentArgs,
 } from "../../scripts/video/build-alpha7-installation.mjs";
@@ -65,5 +67,20 @@ describe("Alpha 7 installation video build contract", () => {
       "exceeds",
     );
     expect(() => assertNarrationDuration(scene, 5)).not.toThrow();
+  });
+
+  it("keeps detailed and quick-start output names isolated", () => {
+    expect(detailedContent.videoFilename).toBe(
+      "GradPack-Alpha-7-Installation-Guide.mp4",
+    );
+    expect(quickStartContent.videoFilename).toBe(
+      "GradPack-Alpha-7-Quick-Start.mp4",
+    );
+    expect(quickStartContent.videoFilename).not.toBe(
+      detailedContent.videoFilename,
+    );
+    expect(quickStartContent.captionFilename).not.toBe(
+      detailedContent.captionFilename,
+    );
   });
 });

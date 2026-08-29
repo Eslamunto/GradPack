@@ -14,10 +14,24 @@ import {
 } from "./alpha7-installation-scenes.mjs";
 import { renderSceneSvg } from "./render-alpha7-installation.mjs";
 
-/** @typedef {(typeof scenes)[number]} Scene */
+/** @typedef {{ id: string, section: string, durationSeconds: number, visual: string, title: string, screenLines: string[], caption: string, narration: string, capture?: string }} Scene */
 /** @typedef {{ resize: (width: number, height: number, options: { fit: string }) => SharpPipeline, png: () => SharpPipeline, toFile: (path: string) => Promise<unknown> }} SharpPipeline */
 /** @typedef {(input: Buffer) => SharpPipeline} Sharp */
 /** @typedef {{ captureDirectory: string, workDirectory: string, sourceCommit: string }} BuildArguments */
+/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<Scene>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number }} VideoContent */
+
+export const detailedContent = Object.freeze({
+  version: VIDEO_VERSION,
+  videoFilename: VIDEO_FILENAME,
+  captionFilename: CAPTION_FILENAME,
+  scenes,
+  buildSrt,
+  expectedDurationSeconds: totalDurationSeconds(),
+  minimumDurationSeconds: 339,
+  maximumDurationSeconds: 342,
+  maximumVideoBytes: 100 * 1024 * 1024,
+  expectedCaptionEndMilliseconds: 340_000,
+});
 
 /**
  * @param {string[]} argv
@@ -139,7 +153,7 @@ export const assertNarrationDuration = (scene, narrationDuration) => {
 };
 
 /** @returns {Sharp} */
-const loadSharp = () => {
+export const loadSharp = () => {
   const nodeModules = process.env.VIDEO_NODE_MODULES;
   if (!nodeModules) throw new Error("VIDEO_NODE_MODULES is required");
   // The bundled runtime is loaded from a user-supplied module directory.
@@ -157,12 +171,13 @@ const sha256 = async (path) =>
     .update(await readFile(path))
     .digest("hex");
 
-/** @param {BuildArguments & { sharp: Sharp }} options */
+/** @param {BuildArguments & { sharp: Sharp, content?: VideoContent }} options */
 export const buildVideo = async ({
   captureDirectory,
   workDirectory,
   sourceCommit,
   sharp,
+  content = detailedContent,
 }) => {
   const framesDirectory = join(workDirectory, "frames");
   const audioDirectory = join(workDirectory, "audio");
@@ -174,7 +189,7 @@ export const buildVideo = async ({
   );
 
   const segmentPaths = [];
-  for (const [index, scene] of scenes.entries()) {
+  for (const [index, scene] of content.scenes.entries()) {
     const prefix = `${String(index + 1).padStart(2, "0")}-${scene.id}`;
     const framePath = join(framesDirectory, `${prefix}.png`);
     const audioPath = join(audioDirectory, `${prefix}.aiff`);
@@ -196,8 +211,8 @@ export const buildVideo = async ({
   }
 
   const concatPath = join(workDirectory, "segments.txt");
-  const videoPath = join(workDirectory, VIDEO_FILENAME);
-  const captionPath = join(workDirectory, CAPTION_FILENAME);
+  const videoPath = join(workDirectory, content.videoFilename);
+  const captionPath = join(workDirectory, content.captionFilename);
   await writeFile(concatPath, concatFileContent(segmentPaths), "utf8");
   run("ffmpeg", [
     "-y",
@@ -214,21 +229,21 @@ export const buildVideo = async ({
     "copy",
     videoPath,
   ]);
-  await writeFile(captionPath, buildSrt(), "utf8");
+  await writeFile(captionPath, content.buildSrt(), "utf8");
 
   const videoStat = await stat(videoPath);
   const metadata = {
     sourceCommit,
-    version: VIDEO_VERSION,
-    sceneCount: scenes.length,
-    expectedDurationSeconds: totalDurationSeconds(),
+    version: content.version,
+    sceneCount: content.scenes.length,
+    expectedDurationSeconds: content.expectedDurationSeconds,
     video: {
-      filename: VIDEO_FILENAME,
+      filename: content.videoFilename,
       bytes: videoStat.size,
       sha256: await sha256(videoPath),
     },
     captions: {
-      filename: CAPTION_FILENAME,
+      filename: content.captionFilename,
       sha256: await sha256(captionPath),
     },
   };

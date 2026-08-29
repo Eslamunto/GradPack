@@ -13,15 +13,39 @@ import {
 } from "./alpha7-installation-scenes.mjs";
 
 const SOURCE_COMMIT = "3ab29b97f8d2929c341a8d173d8b424b2fdf58e1";
-const MAX_VIDEO_BYTES = 100 * 1024 * 1024;
 
 /** @typedef {{ codec_type?: string, codec_name?: string, width?: number, height?: number, pix_fmt?: string, avg_frame_rate?: string, sample_rate?: string }} ProbeStream */
 /** @typedef {{ streams?: ProbeStream[], format?: { duration?: string, size?: string } }} Probe */
-/** @typedef {{ sourceCommit: string, version: string, sceneCount: number, video: { filename: string, bytes: number, sha256: string }, captions: { filename: string, sha256: string } }} BuildMetadata */
-/** @typedef {{ videoPath: string, captionPath: string, metadataPath: string, releaseDirectory: string }} ReleaseOptions */
+/** @typedef {{ minimumDurationSeconds?: number, maximumDurationSeconds?: number, maximumVideoBytes?: number }} MediaLimits */
+/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<{ id: string, caption: string }>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number }} ValidationContent */
+/** @typedef {{ sourceCommit: string, version: string, sceneCount: number, expectedDurationSeconds: number, video: { filename: string, bytes: number, sha256: string }, captions: { filename: string, sha256: string } }} BuildMetadata */
+/** @typedef {{ videoPath: string, captionPath: string, metadataPath: string, releaseDirectory: string, content?: ValidationContent }} ReleaseOptions */
 
-/** @param {Probe} probe */
-export const validateProbe = (probe) => {
+export const detailedValidationContent = Object.freeze({
+  version: VIDEO_VERSION,
+  videoFilename: VIDEO_FILENAME,
+  captionFilename: CAPTION_FILENAME,
+  scenes,
+  buildSrt,
+  expectedDurationSeconds: 340,
+  minimumDurationSeconds: 339,
+  maximumDurationSeconds: 342,
+  maximumVideoBytes: 100 * 1024 * 1024,
+  expectedCaptionEndMilliseconds: 340_000,
+});
+
+/**
+ * @param {Probe} probe
+ * @param {MediaLimits} [limits]
+ */
+export const validateProbe = (
+  probe,
+  {
+    minimumDurationSeconds = 339,
+    maximumDurationSeconds = 342,
+    maximumVideoBytes = 100 * 1024 * 1024,
+  } = {},
+) => {
   const video = probe.streams?.find(({ codec_type }) => codec_type === "video");
   const audio = probe.streams?.find(({ codec_type }) => codec_type === "audio");
   if (!video) throw new Error("missing video stream");
@@ -40,12 +64,18 @@ export const validateProbe = (probe) => {
     throw new Error("audio must be 48 kHz AAC");
   }
   const duration = Number(probe.format?.duration);
-  if (!Number.isFinite(duration) || duration < 339 || duration > 342) {
-    throw new Error("duration is outside 339-342 seconds");
+  if (
+    !Number.isFinite(duration) ||
+    duration < minimumDurationSeconds ||
+    duration > maximumDurationSeconds
+  ) {
+    throw new Error(
+      `duration is outside ${minimumDurationSeconds}-${maximumDurationSeconds} seconds`,
+    );
   }
   const size = Number(probe.format?.size);
-  if (!Number.isFinite(size) || size > MAX_VIDEO_BYTES) {
-    throw new Error("video exceeds 100 MiB");
+  if (!Number.isFinite(size) || size > maximumVideoBytes) {
+    throw new Error("video exceeds its size limit");
   }
 };
 
@@ -63,8 +93,14 @@ const srtTimeToMilliseconds = (value) => {
   return ((hours * 60 + minutes) * 60 + seconds) * 1000 + Number(milliseconds);
 };
 
-/** @param {string} srt */
-export const validateSrt = (srt) => {
+/**
+ * @param {string} srt
+ * @param {{ expectedCueCount?: number, expectedEndMilliseconds?: number }} [contract]
+ */
+export const validateSrt = (
+  srt,
+  { expectedCueCount = 18, expectedEndMilliseconds = 340_000 } = {},
+) => {
   const blocks = srt.trim().split(/\n{2,}/u);
   let previousEnd = 0;
   for (const block of blocks) {
@@ -80,9 +116,13 @@ export const validateSrt = (srt) => {
     }
     previousEnd = end;
   }
-  if (blocks.length !== 18) throw new Error("caption count must be 18");
-  if (previousEnd !== 340_000) {
-    throw new Error("captions must end at 340 seconds");
+  if (blocks.length !== expectedCueCount) {
+    throw new Error(`caption count must be ${expectedCueCount}`);
+  }
+  if (previousEnd !== expectedEndMilliseconds) {
+    throw new Error(
+      `captions must end at ${expectedEndMilliseconds} milliseconds`,
+    );
   }
 };
 
@@ -189,13 +229,19 @@ export const validateRelease = async ({
   captionPath,
   metadataPath,
   releaseDirectory,
+  content = detailedValidationContent,
 }) => {
   const probe = runFfprobe(videoPath);
-  validateProbe(probe);
+  validateProbe(probe, content);
   validateAudioPeak(runAudioPeak(videoPath));
   const srt = await readFile(captionPath, "utf8");
-  validateSrt(srt);
-  if (srt !== buildSrt()) throw new Error("captions differ from scene source");
+  validateSrt(srt, {
+    expectedCueCount: content.scenes.length,
+    expectedEndMilliseconds: content.expectedCaptionEndMilliseconds,
+  });
+  if (srt !== content.buildSrt()) {
+    throw new Error("captions differ from scene source");
+  }
 
   // The parsed structure is checked field-by-field below.
   // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -206,18 +252,15 @@ export const validateRelease = async ({
     throw new Error("source commit does not match Alpha 7");
   }
   if (
-    metadata.version !== VIDEO_VERSION ||
-    metadata.sceneCount !== scenes.length
+    metadata.version !== content.version ||
+    metadata.sceneCount !== content.scenes.length ||
+    metadata.expectedDurationSeconds !== content.expectedDurationSeconds ||
+    metadata.video?.filename !== content.videoFilename ||
+    metadata.captions?.filename !== content.captionFilename ||
+    basename(videoPath) !== content.videoFilename ||
+    basename(captionPath) !== content.captionFilename
   ) {
-    throw new Error("build metadata does not match scene source");
-  }
-  if (
-    metadata.video?.filename !== VIDEO_FILENAME ||
-    metadata.captions?.filename !== CAPTION_FILENAME ||
-    basename(videoPath) !== VIDEO_FILENAME ||
-    basename(captionPath) !== CAPTION_FILENAME
-  ) {
-    throw new Error("output filenames do not match the release contract");
+    throw new Error("build metadata does not match content contract");
   }
   if ((await sha256(videoPath)) !== metadata.video.sha256) {
     throw new Error("video hash does not match build metadata");
@@ -229,16 +272,16 @@ export const validateRelease = async ({
     throw new Error("video size does not match build metadata");
   }
 
-  validatePrivacy(JSON.stringify(scenes));
+  validatePrivacy(JSON.stringify(content.scenes));
   validatePrivacy(srt);
   await validateReleaseZip(releaseDirectory);
 
   return {
     status: "pass",
-    version: VIDEO_VERSION,
+    version: content.version,
     durationSeconds: Math.round(Number(probe.format.duration)),
     videoMiB: Number((Number(probe.format.size) / (1024 * 1024)).toFixed(2)),
-    sceneCount: scenes.length,
+    sceneCount: content.scenes.length,
   };
 };
 
