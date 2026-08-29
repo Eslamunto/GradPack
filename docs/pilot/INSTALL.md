@@ -8,8 +8,6 @@ an unpacked extension, not through the Chrome Web Store.
 - Use desktop Chrome 116 or newer.
 - Keep both supplied files together: `gradpack-0.1.0-alpha.6.zip` and its
   `.sha256` sidecar.
-- GradPack saves the resulting course archive locally. It has no analytics,
-  telemetry, backend, or cloud upload.
 - GradPack can select one or more accessible courses and produce one
   combined archive or one ZIP per course.
 - Unknown-size files are streamed under the hard 250 MiB per-course cap.
@@ -25,8 +23,16 @@ an unpacked extension, not through the Chrome Web Store.
 - A valid file whose Canvas folder placement is unavailable is saved under
   `files/unfiled/` with a visible notice. An individual file larger than the
   part cap is listed as unavailable rather than fetched.
-- These behaviors require no additional permission or origin and add no
-  backend, persistence, analytics, or telemetry.
+- These behaviors require no additional permission or origin.
+
+## Privacy and responsible use
+
+GradPack works only with Frankfurt School Canvas and uses the session already
+open in your browser. Everything is processed locally—there is no telemetry,
+backend, or cloud upload. Your archives are saved only to your computer.
+
+**For personal study:** Please keep downloaded course materials for your own
+use and do not redistribute them.
 
 ## Verify the checksum
 

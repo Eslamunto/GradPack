@@ -75,7 +75,9 @@ describe("accessible Side Panel flow", () => {
   it("correlates a multi-course plan with local progress and partial completion", async () => {
     expect(document.querySelector("h1")?.textContent).toBe("Connect to Canvas");
     expect(document.body.textContent).toContain("250 MB");
-    expect(document.body.textContent).toContain("processed locally");
+    expect(document.body.textContent).toContain(
+      "Keep this Canvas tab open and signed in until the ZIP downloads finish.",
+    );
     clickButton("Connect");
     await vi.waitFor(() =>
       expect(tabsSendMessage).toHaveBeenCalledWith(17, {
@@ -96,6 +98,26 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector("h1")?.textContent).toBe("Choose courses");
+    const chooseTrustCard = document.querySelector(".trust-card");
+    expect(chooseTrustCard).toBeInstanceOf(HTMLElement);
+    expect(chooseTrustCard?.querySelector("h2")?.textContent).toBe(
+      "Your courses stay with you",
+    );
+    expect(chooseTrustCard?.textContent).toContain(
+      "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser.",
+    );
+    expect(chooseTrustCard?.textContent).toContain(
+      "Everything is processed locally—there is no telemetry, backend, or cloud upload.",
+    );
+    expect(chooseTrustCard?.textContent).toContain(
+      "Your archives are saved only to your computer.",
+    );
+    expect(
+      chooseTrustCard?.querySelector(".responsible-use")?.textContent,
+    ).toBe(
+      "For personal study: Please keep downloaded course materials for your own use and do not redistribute them.",
+    );
+    expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
     const continueButton = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent === "Continue",
     ) as HTMLButtonElement;
@@ -166,6 +188,16 @@ describe("accessible Side Panel flow", () => {
     clickButton("Continue");
     expect(document.querySelector("h1")?.textContent).toBe(
       "Configure archives",
+    );
+    expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
+    expect(document.querySelector(".trust-card h2")?.textContent).toBe(
+      "Your courses stay with you",
+    );
+    expect(document.body.textContent).not.toContain(
+      "Everything is processed locally. GradPack has no storage, analytics, or backend.",
+    );
+    expect(document.body.textContent).not.toContain(
+      "You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.",
     );
     const combined = document.querySelector<HTMLInputElement>(
       'input[value="combined"]',
