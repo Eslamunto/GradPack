@@ -101,6 +101,7 @@ export type CoursePlan = {
   moduleDiscovery: ModuleDiscovery;
   modules: CourseModule[];
   resources: PlannedResource[];
+  folderPathFallbackKeys: string[];
   advertisedBytes: number;
 };
 

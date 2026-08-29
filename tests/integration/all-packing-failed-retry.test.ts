@@ -33,6 +33,7 @@ const coursePlan = (course: CourseSummary): CoursePlan => ({
   course: { ...course },
   moduleDiscovery: "available",
   modules: [],
+  folderPathFallbackKeys: [],
   advertisedBytes: 1,
   resources: [
     {

@@ -455,6 +455,7 @@ describe("production pilot vertical flow", () => {
                 ],
               },
             ],
+        folderPathFallbackKeys: [],
         resources: [
           {
             key: `file:${course.id}`,

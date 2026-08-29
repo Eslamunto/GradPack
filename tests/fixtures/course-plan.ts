@@ -205,6 +205,7 @@ export function planWithOneFile(size: number | null): CoursePlan {
     course: syntheticCourse,
     moduleDiscovery: "available",
     modules: [],
+    folderPathFallbackKeys: [],
     advertisedBytes: size ?? 0,
     resources: [
       {
@@ -238,6 +239,7 @@ export function unknownFileResource(
 export const syntheticArchivePlan: CoursePlan = {
   course: syntheticCourse,
   moduleDiscovery: "available",
+  folderPathFallbackKeys: [],
   advertisedBytes: 19,
   resources: [
     {

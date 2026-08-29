@@ -92,11 +92,27 @@ export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
       items: module.items.map((item) => ({ ...item })),
     })),
     resources: plan.resources.map((resource) => ({ ...resource })),
+    folderPathFallbackKeys: [...plan.folderPathFallbackKeys],
     advertisedBytes: plan.advertisedBytes,
   };
   assertPilotSize(clone);
   if (clone.resources.length > MAX_ARCHIVE_RESOURCES) {
     throw new RunSafetyError("Archive resource limit exceeded");
+  }
+  const fallbackKeys = new Set(clone.folderPathFallbackKeys);
+  if (fallbackKeys.size !== clone.folderPathFallbackKeys.length) {
+    throw new RunSafetyError("Invalid folder fallback keys");
+  }
+  for (const key of fallbackKeys) {
+    const resource = clone.resources.find((candidate) => candidate.key === key);
+    if (
+      resource?.kind !== "file" ||
+      resource.archivePath === null ||
+      !isCanonicalArchivePath(resource.archivePath) ||
+      !resource.archivePath.startsWith("files/unfiled/")
+    ) {
+      throw new RunSafetyError("Invalid folder fallback keys");
+    }
   }
   Object.freeze(clone.course);
   clone.modules.forEach((module) => {
@@ -107,6 +123,7 @@ export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
   clone.resources.forEach(Object.freeze);
   Object.freeze(clone.modules);
   Object.freeze(clone.resources);
+  Object.freeze(clone.folderPathFallbackKeys);
   return Object.freeze(clone);
 };
 

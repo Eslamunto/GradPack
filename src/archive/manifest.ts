@@ -472,6 +472,7 @@ const validatePlan = (value: unknown): CoursePlan => {
     "moduleDiscovery",
     "modules",
     "resources",
+    "folderPathFallbackKeys",
     "advertisedBytes",
   ]);
   const rawResources = exactArray(valueOf(record, "resources"));
@@ -491,6 +492,22 @@ const validatePlan = (value: unknown): CoursePlan => {
     advertisedBytes = addSafe(advertisedBytes, resource.advertisedBytes ?? 0);
   }
   assertArchivePathSet(resources);
+  const folderPathFallbackKeys = exactArray(
+    valueOf(record, "folderPathFallbackKeys"),
+  ).map((key) => text(key));
+  if (new Set(folderPathFallbackKeys).size !== folderPathFallbackKeys.length) {
+    throw new TypeError("Invalid folder fallback keys");
+  }
+  for (const key of folderPathFallbackKeys) {
+    const resource = resources.find((candidate) => candidate.key === key);
+    if (
+      resource?.kind !== "file" ||
+      resource.archivePath === null ||
+      !resource.archivePath.startsWith("files/unfiled/")
+    ) {
+      throw new TypeError("Invalid folder fallback keys");
+    }
+  }
   const declared = safeInteger(valueOf(record, "advertisedBytes"));
   if (declared !== advertisedBytes || declared > MAX_ADVERTISED_BYTES) {
     throw new TypeError("Invalid advertised byte total");
@@ -512,6 +529,7 @@ const validatePlan = (value: unknown): CoursePlan => {
     moduleDiscovery: discovery,
     modules,
     resources,
+    folderPathFallbackKeys,
     advertisedBytes: declared,
   };
 };
@@ -538,6 +556,7 @@ const freezePlan = (plan: CoursePlan): CoursePlan => {
   Object.freeze(plan.modules);
   for (const resource of plan.resources) Object.freeze(resource);
   Object.freeze(plan.resources);
+  Object.freeze(plan.folderPathFallbackKeys);
   return Object.freeze(plan);
 };
 

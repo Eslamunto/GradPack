@@ -860,18 +860,42 @@ describe("discoverCoursePlan", () => {
     expect(paths.some((path) => /--file-(12|13)/.test(path))).toBe(true);
   });
 
-  it("hard-fails a referenced folder missing from an available folder index", async () => {
-    await expect(
-      discoverCoursePlan(
-        syntheticCanvasHttp({
-          modules: [],
-          files: [{ ...file(1), folder_id: 999 }],
-          folders: [{ id: 401, full_name: "course files/Present" }],
-          pages: [],
-        }),
-        syntheticCourse,
-      ),
-    ).rejects.toThrow("Missing folder metadata");
+  it("places a file with an absent referenced folder under files/unfiled", async () => {
+    const plan = await discoverCoursePlan(
+      syntheticCanvasHttp({
+        modules: [],
+        files: [{ ...file(1, "report.pdf"), folder_id: 999 }],
+        folders: [{ id: 401, full_name: "course files/Present" }],
+        pages: [],
+      }),
+      syntheticCourse,
+    );
+
+    expect(plan.resources[0]?.archivePath).toBe("files/unfiled/report.pdf");
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1"]);
+  });
+
+  it("allocates colliding unfiled paths deterministically", async () => {
+    const plan = await discoverCoursePlan(
+      syntheticCanvasHttp({
+        modules: [],
+        files: [
+          { ...file(1, "Résumé.pdf"), folder_id: 998 },
+          { ...file(2, "Re\u0301sume\u0301.PDF"), folder_id: 999 },
+        ],
+        folders: [{ id: 401, full_name: "course files/Present" }],
+        pages: [],
+      }),
+      syntheticCourse,
+    );
+
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1", "file:2"]);
+    const paths = plan.resources.map(({ archivePath }) => archivePath);
+    expect(new Set(paths.map((path) => path?.toLowerCase())).size).toBe(2);
+    expect(paths.every((path) => path?.startsWith("files/unfiled/"))).toBe(
+      true,
+    );
+    expect(paths.some((path) => /--file-(1|2)/u.test(path ?? ""))).toBe(true);
   });
 
   it("requires full_name instead of trusting a name-only folder record", async () => {
@@ -888,7 +912,7 @@ describe("discoverCoursePlan", () => {
     ).rejects.toThrow("Invalid folder path");
   });
 
-  it("uses a safe root path when the entire folder index is unavailable", async () => {
+  it("discloses the unfiled fallback when the folder index is unavailable", async () => {
     const plan = await discoverCoursePlan(
       syntheticCanvasHttp({
         modules: [],
@@ -899,7 +923,8 @@ describe("discoverCoursePlan", () => {
       syntheticCourse,
     );
 
-    expect(plan.resources[0]?.archivePath).toBe("files/root.txt");
+    expect(plan.resources[0]?.archivePath).toBe("files/unfiled/root.txt");
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1"]);
   });
 
   it("rejects file metadata whose ID does not match the closed requested endpoint", async () => {

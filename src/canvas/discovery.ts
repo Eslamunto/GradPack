@@ -553,6 +553,20 @@ const validateCourse = (course: CourseSummary): CourseSummary => {
 };
 
 const freezePlan = (plan: CoursePlan): CoursePlan => {
+  const fallbackKeys = new Set(plan.folderPathFallbackKeys);
+  if (fallbackKeys.size !== plan.folderPathFallbackKeys.length) {
+    throw new TypeError("Invalid folder fallback keys");
+  }
+  for (const key of fallbackKeys) {
+    const resource = plan.resources.find((candidate) => candidate.key === key);
+    if (
+      resource?.kind !== "file" ||
+      resource.archivePath === null ||
+      !resource.archivePath.startsWith("files/unfiled/")
+    ) {
+      throw new TypeError("Invalid folder fallback keys");
+    }
+  }
   Object.freeze(plan.course);
   for (const module of plan.modules) {
     for (const item of module.items) Object.freeze(item);
@@ -562,6 +576,7 @@ const freezePlan = (plan: CoursePlan): CoursePlan => {
   for (const resource of plan.resources) Object.freeze(resource);
   Object.freeze(plan.modules);
   Object.freeze(plan.resources);
+  Object.freeze(plan.folderPathFallbackKeys);
   return Object.freeze(plan);
 };
 
@@ -783,15 +798,26 @@ export async function discoverCoursePlan(
   );
 
   const drafts: ResourceDraft[] = [...extraDrafts.values()];
+  const folderFallbackDraftKeys = new Set<string>();
   for (const file of files.values()) {
-    let folderSegments: string[] = [];
-    if (rawFolders !== null && file.folderId !== null) {
+    const key = `file:${file.id}`;
+    let folderSegments: string[];
+    if (rawFolders === null) {
+      folderSegments = ["unfiled"];
+      folderFallbackDraftKeys.add(key);
+    } else if (file.folderId === null) {
+      folderSegments = [];
+    } else {
       const resolved = folders.get(file.folderId);
-      if (!resolved) throw new TypeError("Missing folder metadata");
-      folderSegments = resolved;
+      if (resolved === undefined) {
+        folderSegments = ["unfiled"];
+        folderFallbackDraftKeys.add(key);
+      } else {
+        folderSegments = resolved;
+      }
     }
     drafts.push({
-      key: `file:${file.id}`,
+      key,
       kind: "file",
       title: file.title,
       sourceId: String(file.id),
@@ -817,6 +843,9 @@ export async function discoverCoursePlan(
   }
 
   const resources = allocatePaths(drafts);
+  const folderPathFallbackKeys = resources
+    .filter((resource) => folderFallbackDraftKeys.has(resource.key))
+    .map((resource) => resource.key);
   let advertisedBytes = 0;
   for (const resource of resources) {
     if (resource.kind !== "file" || resource.advertisedBytes === null) continue;
@@ -836,6 +865,7 @@ export async function discoverCoursePlan(
     moduleDiscovery,
     modules: parsedModules.map(({ module }) => module),
     resources,
+    folderPathFallbackKeys,
     advertisedBytes,
   };
   assertPilotSize(plan);

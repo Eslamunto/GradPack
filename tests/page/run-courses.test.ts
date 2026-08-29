@@ -50,6 +50,7 @@ const planFor = (
   course: { ...course },
   moduleDiscovery: "available",
   modules: [],
+  folderPathFallbackKeys: [],
   advertisedBytes: unknownSize ? 0 : advertisedBytes,
   resources: [
     {

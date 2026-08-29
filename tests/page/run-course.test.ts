@@ -55,6 +55,7 @@ const plan = (resources: PlannedResource[]): CoursePlan => ({
   moduleDiscovery: "available",
   modules: [],
   resources: resources.map((resource) => ({ ...resource })),
+  folderPathFallbackKeys: [],
   advertisedBytes: resources.reduce(
     (total, resource) =>
       total + (resource.kind === "file" ? (resource.advertisedBytes ?? 0) : 0),

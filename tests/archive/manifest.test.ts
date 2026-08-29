@@ -56,6 +56,7 @@ describe("buildManifest", () => {
         moduleDiscovery: "available",
         modules: [],
         resources: [resource],
+        folderPathFallbackKeys: [],
         advertisedBytes: 0,
       };
       const outcomes: ResourceOutcome[] = [
@@ -103,6 +104,7 @@ describe("buildManifest", () => {
       moduleDiscovery: "available",
       modules: [],
       resources: [resource],
+      folderPathFallbackKeys: [],
       advertisedBytes: 0,
     };
     const outcomes: ResourceOutcome[] = [
@@ -133,6 +135,7 @@ describe("buildManifest", () => {
         moduleDiscovery: "available",
         modules: [],
         resources: [resource],
+        folderPathFallbackKeys: [],
         advertisedBytes: 0,
       };
       const outcomes: ResourceOutcome[] = [
@@ -430,6 +433,7 @@ describe("buildManifest", () => {
       course: structuredClone(syntheticArchivePlan.course),
       moduleDiscovery: "available",
       modules: [],
+      folderPathFallbackKeys: [],
       advertisedBytes: 0,
       resources: Array.from({ length: count }, (_, index) => ({
         key: `unsupported:${index}`,
