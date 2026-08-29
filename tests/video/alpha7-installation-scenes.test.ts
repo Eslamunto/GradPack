@@ -52,4 +52,16 @@ describe("Alpha 7 installation video source", () => {
     });
     expect(srt).toContain("00:05:40,000");
   });
+
+  it("keeps narration within a readable scene budget", () => {
+    for (const scene of scenes) {
+      const words = scene.narration.trim().split(/\s+/u).length;
+      expect(words).toBeLessThanOrEqual(
+        Math.floor(scene.durationSeconds * 2.7),
+      );
+      expect(words).toBeGreaterThanOrEqual(
+        Math.floor(scene.durationSeconds * 0.8),
+      );
+    }
+  });
 });
