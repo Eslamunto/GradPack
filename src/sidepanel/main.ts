@@ -80,7 +80,7 @@ const notices = (): HTMLElement => {
 };
 
 const progressText = (progress: AggregateProgress): string =>
-  `${progress.stage}: course ${progress.currentCourseIndex + 1} of ${progress.totalCourses}; ${progress.completed} of ${progress.total}; ${progress.failed} failed`;
+  `${progress.stage}: course ${progress.currentCourseIndex + 1} of ${progress.totalCourses}, part ${progress.currentPartIndex} of ${progress.totalParts}; ${progress.completed} of ${progress.total}; ${progress.failed} failed`;
 
 const packagingLabel = (packaging: PackagingMode): string =>
   packaging === "combined" ? "one combined ZIP" : "one ZIP per course";
@@ -242,13 +242,22 @@ const render = (focus: RenderFocus = null): void => {
     heading.textContent = "Review plan";
     const readyCourses = review.plan.selected.flatMap((summary) => {
       const course = courseForId(review.courses, summary.courseId);
+      const details = [
+        summary.moduleDiscovery === "disabled" ? MODULES_DISABLED_NOTICE : null,
+        summary.folderPathFallbackCount > 0
+          ? `${summary.folderPathFallbackCount} file(s) will be saved in files/unfiled because Canvas folder placement was unavailable.`
+          : null,
+        summary.archivePartCount > 1
+          ? `${summary.archivePartCount} ZIP parts will be downloaded.`
+          : null,
+      ]
+        .filter((value): value is string => value !== null)
+        .join(" ");
       return course
         ? [
             {
               course,
-              ...(summary.moduleDiscovery === "disabled"
-                ? { detail: MODULES_DISABLED_NOTICE }
-                : {}),
+              ...(details ? { detail: details } : {}),
             },
           ]
         : [];
@@ -293,6 +302,10 @@ const render = (focus: RenderFocus = null): void => {
       paragraph(
         `Advertised material: ${state.plan.advertisedBytes} bytes across ${state.plan.resourceCount} resource(s).`,
       ),
+      paragraph(
+        `Expected downloads: ${state.plan.expectedArchiveCount} ZIP archive(s).`,
+        "archive-count",
+      ),
       ...(state.plan.unknownSizeCount > 0
         ? [
             paragraph(
@@ -301,21 +314,26 @@ const render = (focus: RenderFocus = null): void => {
             ),
           ]
         : []),
-      state.plan.fallbackReason === "unknown-size-files"
+      state.plan.fallbackReason === "multipart-course"
         ? paragraph(
-            "The requested combined archive will be changed to separate course ZIPs because unknown-size files must be streamed under the hard 250 MiB per-course cap.",
+            "The requested combined archive will be changed to separate ZIP parts because at least one course requires multiple bounded archives.",
             "fallback-notice",
           )
-        : state.plan.fallbackReason
+        : state.plan.fallbackReason === "unknown-size-files"
           ? paragraph(
-              "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+              "The requested combined archive will be changed to separate course ZIPs because unknown-size files must be streamed under the hard 250 MiB per-course cap.",
               "fallback-notice",
             )
-          : paragraph(
-              readyCourses.length > 0
-                ? "Discovery is complete. Confirm to begin local retrieval."
-                : "No course is ready for retrieval. Retry the skipped courses.",
-            ),
+          : state.plan.fallbackReason
+            ? paragraph(
+                "The requested combined archive will fall back to separate course ZIPs because the combined safety limit would be exceeded.",
+                "fallback-notice",
+              )
+            : paragraph(
+                readyCourses.length > 0
+                  ? "Discovery is complete. Confirm to begin local retrieval."
+                  : "No course is ready for retrieval. Retry the skipped courses.",
+              ),
       ...(readyCourses.length > 0
         ? [button("Continue with ready courses", () => void confirmPlan())]
         : [button("Retry skipped courses", () => void retryUnfinished())]),
@@ -372,7 +390,7 @@ const render = (focus: RenderFocus = null): void => {
           : "No course archives were downloaded.",
       ),
       paragraph(
-        `${state.outputCount} archive(s) downloaded; ${state.completedCourses} course(s) completed; ${state.failedCourses} course(s) failed.`,
+        `${state.outputCount} archive(s) downloaded; ${state.completedCourses} course(s) completed; ${state.failedCourses} course(s) failed; ${state.completedParts} part(s) completed; ${state.failedParts} part(s) failed.`,
         "archive-summary",
       ),
       paragraph(
@@ -641,7 +659,9 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
     if (
       event.totalCourses !== state.plan.selected.length ||
       selectedCourse?.courseId !== event.currentCourseId ||
-      selectedCourse.resourceCount !== event.total
+      event.total > selectedCourse.resourceCount ||
+      event.totalParts !== selectedCourse.archivePartCount ||
+      event.totalArchiveParts !== state.plan.totalPlannedParts
     ) {
       return;
     }
@@ -677,7 +697,10 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
         state.plan.selected.length - event.completedCourseIds.length ||
       !completedAreSelected ||
       !Number.isSafeInteger(expectedOutcomeTotal) ||
-      total !== expectedOutcomeTotal
+      total < expectedOutcomeTotal ||
+      total > state.plan.resourceCount ||
+      (event.packaging === "per-course" &&
+        event.outputCount !== event.completedParts)
     ) {
       return;
     }
@@ -689,6 +712,8 @@ chrome.runtime.onMessage.addListener((raw: unknown, sender) => {
       completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
+      completedParts: event.completedParts,
+      failedParts: event.failedParts,
       counts,
     });
     terminalReceived = state !== previous;

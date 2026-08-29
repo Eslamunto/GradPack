@@ -100,6 +100,8 @@ describe("all packing failures", () => {
       completedCourseIds: result.completedCourseIds,
       failedCourses: result.failedCourseIds.length,
       outputCount: result.outputCount,
+      completedParts: result.completedParts.length,
+      failedParts: result.failedParts.length,
       ...result.counts,
     });
 
@@ -115,6 +117,11 @@ describe("all packing failures", () => {
         currentCourseIndex: 0,
         totalCourses: courses.length,
         completedCourses: 0,
+        currentPartIndex: 1,
+        totalParts: 1,
+        totalArchiveParts: plan.summary.totalPlannedParts,
+        completedParts: 0,
+        failedParts: 0,
         completed: 0,
         total: 1,
         failed: 0,
@@ -130,6 +137,8 @@ describe("all packing failures", () => {
       completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
+      completedParts: event.completedParts,
+      failedParts: event.failedParts,
       counts: {
         success: event.success,
         failed: event.failed,

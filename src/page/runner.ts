@@ -180,6 +180,8 @@ if (scope[marker] !== true) {
         completedCourseIds: [...result.completedCourseIds],
         failedCourses: result.failedCourseIds.length,
         outputCount: result.outputCount,
+        completedParts: result.completedParts.length,
+        failedParts: result.failedParts.length,
         ...result.counts,
       });
     } catch (error) {

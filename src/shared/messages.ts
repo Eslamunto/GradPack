@@ -80,6 +80,8 @@ export type RunnerEvent =
       completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
+      completedParts: number;
+      failedParts: number;
       success: number;
       failed: number;
       unavailable: number;
@@ -230,7 +232,8 @@ const fallbackReason = (value: unknown): PlanFallbackReason | null => {
     value !== null &&
     value !== "combined-size-exceeded" &&
     value !== "combined-resource-limit-exceeded" &&
-    value !== "unknown-size-files"
+    value !== "unknown-size-files" &&
+    value !== "multipart-course"
   ) {
     throw new TypeError("Invalid fallback reason");
   }
@@ -252,6 +255,8 @@ const planSummary = (value: unknown): CoursePlanSummary => {
     "advertisedBytes",
     "unknownSizeCount",
     "resourceCount",
+    "folderPathFallbackCount",
+    "archivePartCount",
   ]);
   return {
     courseId: positiveInteger(input.courseId, "Invalid course ID"),
@@ -259,6 +264,11 @@ const planSummary = (value: unknown): CoursePlanSummary => {
     advertisedBytes: nonNegativeInteger(input.advertisedBytes),
     unknownSizeCount: nonNegativeInteger(input.unknownSizeCount),
     resourceCount: nonNegativeInteger(input.resourceCount),
+    folderPathFallbackCount: nonNegativeInteger(input.folderPathFallbackCount),
+    archivePartCount: positiveInteger(
+      input.archivePartCount,
+      "Invalid archive part count",
+    ),
   };
 };
 
@@ -296,6 +306,8 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     "advertisedBytes",
     "unknownSizeCount",
     "resourceCount",
+    "totalPlannedParts",
+    "expectedArchiveCount",
     "requestedPackaging",
     "effectivePackaging",
     "fallbackReason",
@@ -320,12 +332,15 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   const advertisedBytes = nonNegativeInteger(input.advertisedBytes);
   const unknownSizeCount = nonNegativeInteger(input.unknownSizeCount);
   const resourceCount = nonNegativeInteger(input.resourceCount);
+  const totalPlannedParts = nonNegativeInteger(input.totalPlannedParts);
+  const expectedArchiveCount = nonNegativeInteger(input.expectedArchiveCount);
   if (
     unknownSizeCount > resourceCount ||
     selected.some(
       (item) =>
         item.resourceCount > MAX_ARCHIVE_RESOURCES ||
-        item.unknownSizeCount > item.resourceCount,
+        item.unknownSizeCount > item.resourceCount ||
+        item.folderPathFallbackCount > item.resourceCount,
     )
   ) {
     throw new TypeError("Invalid plan counts");
@@ -340,9 +355,31 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
   ) {
     throw new TypeError("Invalid plan totals");
   }
+  const selectedPartCount = selected.reduce(
+    (total, item) => total + item.archivePartCount,
+    0,
+  );
+  if (
+    !Number.isSafeInteger(selectedPartCount) ||
+    selectedPartCount !== totalPlannedParts
+  ) {
+    throw new TypeError("Invalid plan part totals");
+  }
   const requestedPackaging = packaging(input.requestedPackaging);
   const effectivePackaging = packaging(input.effectivePackaging);
   const reason = fallbackReason(input.fallbackReason);
+  const hasMultipartCourse = selected.some(
+    ({ archivePartCount }) => archivePartCount > 1,
+  );
+  const requiredArchiveCount =
+    effectivePackaging === "per-course"
+      ? totalPlannedParts
+      : selected.length > 0
+        ? 1
+        : 0;
+  if (expectedArchiveCount !== requiredArchiveCount) {
+    throw new TypeError("Invalid expected archive count");
+  }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
     COURSE_CORE_ENTRY_COUNT * selected.length +
@@ -359,9 +396,17 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     (requestedPackaging === effectivePackaging && reason !== null) ||
     (requestedPackaging !== effectivePackaging && reason === null) ||
     (effectivePackaging === "combined" && reason !== null) ||
+    (reason === "multipart-course" &&
+      (requestedPackaging !== "combined" ||
+        effectivePackaging !== "per-course" ||
+        !hasMultipartCourse)) ||
+    (requestedPackaging === "combined" &&
+      hasMultipartCourse &&
+      reason !== "multipart-course") ||
     (reason === "unknown-size-files" && unknownSizeCount === 0) ||
     (requestedPackaging === "combined" &&
       unknownSizeCount > 0 &&
+      !hasMultipartCourse &&
       reason !== "unknown-size-files")
   ) {
     throw new TypeError("Invalid packaging fallback");
@@ -376,6 +421,8 @@ const planEvent = (input: Record<string, unknown>, id: string): RunnerEvent => {
     advertisedBytes,
     unknownSizeCount,
     resourceCount,
+    totalPlannedParts,
+    expectedArchiveCount,
     requestedPackaging,
     effectivePackaging,
     fallbackReason: reason,
@@ -423,6 +470,11 @@ const aggregateProgress = (
     "currentCourseIndex",
     "totalCourses",
     "completedCourses",
+    "currentPartIndex",
+    "totalParts",
+    "totalArchiveParts",
+    "completedParts",
+    "failedParts",
     "completed",
     "total",
     "failed",
@@ -444,12 +496,26 @@ const aggregateProgress = (
     "Invalid course count",
   );
   const completedCourses = nonNegativeInteger(input.completedCourses);
+  const currentPartIndex = positiveInteger(
+    input.currentPartIndex,
+    "Invalid current part index",
+  );
+  const totalParts = positiveInteger(input.totalParts, "Invalid part count");
+  const totalArchiveParts = positiveInteger(
+    input.totalArchiveParts,
+    "Invalid total archive part count",
+  );
+  const completedParts = nonNegativeInteger(input.completedParts);
+  const failedParts = nonNegativeInteger(input.failedParts);
   const completed = nonNegativeInteger(input.completed);
   const total = nonNegativeInteger(input.total);
   const failed = nonNegativeInteger(input.failed);
   if (
     currentCourseIndex >= totalCourses ||
     completedCourses > currentCourseIndex ||
+    currentPartIndex > totalParts ||
+    completedParts + failedParts > totalArchiveParts ||
+    !Number.isSafeInteger(completedParts + failedParts) ||
     total > MAX_ARCHIVE_RESOURCES ||
     completed > total ||
     failed > completed
@@ -462,6 +528,11 @@ const aggregateProgress = (
     currentCourseIndex,
     totalCourses,
     completedCourses,
+    currentPartIndex,
+    totalParts,
+    totalArchiveParts,
+    completedParts,
+    failedParts,
     completed,
     total,
     failed,
@@ -534,6 +605,8 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       "completedCourseIds",
       "failedCourses",
       "outputCount",
+      "completedParts",
+      "failedParts",
       "success",
       "failed",
       "unavailable",
@@ -551,6 +624,8 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
     );
     const failedCourses = nonNegativeInteger(input.failedCourses);
     const outputCount = nonNegativeInteger(input.outputCount);
+    const completedParts = nonNegativeInteger(input.completedParts);
+    const failedParts = nonNegativeInteger(input.failedParts);
     const zeroOutput = completedCourses === 0;
     const validZeroOutput =
       zeroOutput &&
@@ -558,16 +633,20 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       packagingMode === "per-course" &&
       completedCourseIds.length === 0 &&
       failedCourses > 0 &&
-      outputCount === 0;
+      outputCount === 0 &&
+      completedParts === 0 &&
+      failedParts > 0;
     if (
       (zeroOutput && !validZeroOutput) ||
       (!zeroOutput &&
         (message !== RUNNER_TERMINAL_MESSAGES.complete ||
           completedCourseIds.length !== completedCourses ||
           new Set(completedCourseIds).size !== completedCourseIds.length ||
+          completedParts < completedCourses ||
+          failedParts < failedCourses ||
           outputCount === 0 ||
           (packagingMode === "combined" && outputCount !== 1) ||
-          (packagingMode === "per-course" && outputCount !== completedCourses)))
+          (packagingMode === "per-course" && outputCount !== completedParts)))
     ) {
       throw new TypeError("Invalid terminal course counts");
     }
@@ -579,7 +658,7 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       external: nonNegativeInteger(input.external),
     };
     const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
-    const maximumTotal = completedCourses * MAX_ARCHIVE_RESOURCES;
+    const maximumTotal = completedParts * MAX_ARCHIVE_RESOURCES;
     if (
       !Number.isSafeInteger(maximumTotal) ||
       !Number.isSafeInteger(total) ||
@@ -600,6 +679,8 @@ export function parseRunnerEvent(value: unknown): RunnerEvent {
       completedCourseIds,
       failedCourses,
       outputCount,
+      completedParts,
+      failedParts,
       ...counts,
     };
   }

@@ -22,6 +22,11 @@ const progress = (
   currentCourseIndex: 0,
   totalCourses: 2,
   completedCourses: 0,
+  currentPartIndex: 1,
+  totalParts: 1,
+  totalArchiveParts: 2,
+  completedParts: 0,
+  failedParts: 0,
   completed: 1,
   total: 5,
   failed: 0,
@@ -40,6 +45,8 @@ const complete = (
   completedCourseIds: [42, 43],
   failedCourses: 0,
   outputCount: 2,
+  completedParts: 2,
+  failedParts: 0,
   success: 1,
   failed: 0,
   unavailable: 0,
@@ -58,6 +65,8 @@ const zeroOutputComplete = (
     completedCourseIds: [],
     failedCourses: 2,
     outputCount: 0,
+    completedParts: 0,
+    failedParts: 2,
     success: 0,
     failed: 0,
     unavailable: 0,
@@ -74,6 +83,8 @@ const largePerCourseSelected = [
     advertisedBytes: 10,
     unknownSizeCount: 0,
     resourceCount: perCourseResourceCount,
+    folderPathFallbackCount: 0,
+    archivePartCount: 1,
   },
   {
     courseId: 43,
@@ -81,6 +92,8 @@ const largePerCourseSelected = [
     advertisedBytes: 20,
     unknownSizeCount: 0,
     resourceCount: perCourseResourceCount,
+    folderPathFallbackCount: 0,
+    archivePartCount: 1,
   },
 ];
 const largePerCourseAggregate = perCourseResourceCount * 2;
@@ -97,6 +110,8 @@ const largePlanEvent = (
   advertisedBytes: 30,
   unknownSizeCount: 0,
   resourceCount: largePerCourseAggregate,
+  totalPlannedParts: 2,
+  expectedArchiveCount: 2,
   requestedPackaging: "per-course",
   effectivePackaging: "per-course",
   fallbackReason: null,
@@ -117,12 +132,16 @@ const resilientPlanEvent = (
       advertisedBytes: 10,
       unknownSizeCount: 1,
       resourceCount: 2,
+      folderPathFallbackCount: 0,
+      archivePartCount: 1,
     },
   ],
   skipped: [{ courseId: 43, category: "canvas-unavailable" }],
   advertisedBytes: 10,
   unknownSizeCount: 1,
   resourceCount: 2,
+  totalPlannedParts: 1,
+  expectedArchiveCount: 1,
   requestedPackaging: "combined",
   effectivePackaging: "per-course",
   fallbackReason: "unknown-size-files",
@@ -244,6 +263,8 @@ describe("parseRunnerEvent", () => {
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
+          totalPlannedParts: 0,
+          expectedArchiveCount: 0,
           requestedPackaging: "per-course",
           effectivePackaging: "per-course",
           fallbackReason: null,
@@ -331,6 +352,8 @@ describe("parseRunnerEvent", () => {
             advertisedBytes: 10,
             unknownSizeCount: 1,
             resourceCount: 2,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
           {
             courseId: 43,
@@ -338,12 +361,16 @@ describe("parseRunnerEvent", () => {
             advertisedBytes: 20,
             unknownSizeCount: 2,
             resourceCount: 3,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
         ],
         skipped: [],
         advertisedBytes: 30,
         unknownSizeCount: 3,
         resourceCount: 5,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 2,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
         fallbackReason: "unknown-size-files",
@@ -368,6 +395,81 @@ describe("parseRunnerEvent", () => {
       completedCourseIds: [42, 43],
       outputCount: 2,
     });
+  });
+
+  it("accepts a mixed multipart plan and more downloaded parts than courses", () => {
+    const event = resilientPlanEvent({
+      selected: [
+        {
+          courseId: 42,
+          moduleDiscovery: "available",
+          advertisedBytes: 10,
+          unknownSizeCount: 1,
+          resourceCount: 2,
+          folderPathFallbackCount: 1,
+          archivePartCount: 2,
+        },
+      ],
+      totalPlannedParts: 2,
+      expectedArchiveCount: 2,
+      fallbackReason: "multipart-course",
+    });
+    expect(parseRunnerEvent(event)).toMatchObject({
+      totalPlannedParts: 2,
+      expectedArchiveCount: 2,
+      fallbackReason: "multipart-course",
+    });
+    expect(
+      parseRunnerEvent(
+        complete({
+          completedCourses: 1,
+          completedCourseIds: [42],
+          completedParts: 2,
+          outputCount: 2,
+        }),
+      ),
+    ).toMatchObject({ completedCourses: 1, completedParts: 2, outputCount: 2 });
+  });
+
+  it.each([
+    { totalPlannedParts: 2 },
+    { expectedArchiveCount: 2 },
+    {
+      selected: [
+        {
+          courseId: 42,
+          moduleDiscovery: "available",
+          advertisedBytes: 10,
+          unknownSizeCount: 1,
+          resourceCount: 2,
+          folderPathFallbackCount: 3,
+          archivePartCount: 1,
+        },
+      ],
+    },
+    {
+      selected: [
+        {
+          courseId: 42,
+          moduleDiscovery: "available",
+          advertisedBytes: 10,
+          unknownSizeCount: 1,
+          resourceCount: 2,
+          folderPathFallbackCount: 0,
+          archivePartCount: 0,
+        },
+      ],
+    },
+  ])("rejects invalid multipart plan counts %#", (overrides) => {
+    expect(() => parseRunnerEvent(resilientPlanEvent(overrides))).toThrow();
+  });
+
+  it.each([
+    { currentPartIndex: 0 },
+    { currentPartIndex: 2, totalParts: 1 },
+    { completedParts: 2, failedParts: 1, totalArchiveParts: 2 },
+  ])("rejects invalid part progress %#", (overrides) => {
+    expect(() => parseRunnerEvent(progress(overrides))).toThrow();
   });
 
   it("accepts a strict zero-output completion", () => {
@@ -473,6 +575,8 @@ describe("parseRunnerEvent", () => {
             advertisedBytes: 0,
             unknownSizeCount: 0,
             resourceCount: firstCount,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
           {
             courseId: 43,
@@ -480,12 +584,16 @@ describe("parseRunnerEvent", () => {
             advertisedBytes: 0,
             unknownSizeCount: 0,
             resourceCount: secondCount,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
         ],
         skipped: [],
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 1,
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         fallbackReason: null,
@@ -509,6 +617,8 @@ describe("parseRunnerEvent", () => {
           advertisedBytes: 10,
           unknownSizeCount: 1,
           resourceCount: 2,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         },
         {
           courseId: 43,
@@ -516,12 +626,16 @@ describe("parseRunnerEvent", () => {
           advertisedBytes: 20,
           unknownSizeCount: 2,
           resourceCount: 3,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         },
       ],
       skipped: [],
       advertisedBytes: 30,
       unknownSizeCount: 3,
       resourceCount: 5,
+      totalPlannedParts: 2,
+      expectedArchiveCount: 2,
       requestedPackaging: "combined",
       effectivePackaging: "per-course",
       fallbackReason: "unknown-size-files",
@@ -585,6 +699,8 @@ describe("parseRunnerEvent", () => {
           advertisedBytes: 10,
           unknownSizeCount: 1,
           resourceCount: 2,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         },
         {
           courseId: 43,
@@ -592,12 +708,16 @@ describe("parseRunnerEvent", () => {
           advertisedBytes: 20,
           unknownSizeCount: 2,
           resourceCount: 3,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         },
       ],
       skipped: [],
       advertisedBytes: 30,
       unknownSizeCount: 3,
       resourceCount: 5,
+      totalPlannedParts: 2,
+      expectedArchiveCount: 2,
       requestedPackaging: "combined",
       effectivePackaging: "per-course",
       fallbackReason: "unknown-size-files",
@@ -653,6 +773,8 @@ describe("parseRunnerEvent", () => {
               advertisedBytes: 10,
               unknownSizeCount: 1,
               resourceCount: 2,
+              folderPathFallbackCount: 0,
+              archivePartCount: 1,
             },
             {
               courseId: 43,
@@ -660,12 +782,16 @@ describe("parseRunnerEvent", () => {
               advertisedBytes: 20,
               unknownSizeCount: 0,
               resourceCount: 3,
+              folderPathFallbackCount: 0,
+              archivePartCount: 1,
             },
           ],
           skipped: [],
           advertisedBytes: 30,
           unknownSizeCount: 1,
           resourceCount: 5,
+          totalPlannedParts: 2,
+          expectedArchiveCount: 2,
           requestedPackaging: "combined",
           effectivePackaging: "per-course",
           fallbackReason,
@@ -682,6 +808,8 @@ describe("parseRunnerEvent", () => {
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,
+        folderPathFallbackCount: 0,
+        archivePartCount: 1,
       },
     ];
     expect(() =>
@@ -695,6 +823,8 @@ describe("parseRunnerEvent", () => {
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,
+        totalPlannedParts: 1,
+        expectedArchiveCount: 1,
         requestedPackaging: "per-course",
         effectivePackaging: "per-course",
         fallbackReason: null,
@@ -711,6 +841,8 @@ describe("parseRunnerEvent", () => {
         advertisedBytes: 10,
         unknownSizeCount: 0,
         resourceCount: 2,
+        totalPlannedParts: 1,
+        expectedArchiveCount: 1,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
         fallbackReason: "combined-size-exceeded",
@@ -755,6 +887,7 @@ describe("parseRunnerEvent", () => {
         complete({
           completedCourseIds: [42, 44],
           failedCourses: 1,
+          failedParts: 1,
           success: 2,
         }),
       ),

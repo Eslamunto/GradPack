@@ -145,6 +145,11 @@ const progressForCourse =
     courseIndex: number,
     totalCourses: number,
     completedCourses: number,
+    currentPartIndex: number,
+    totalParts: number,
+    totalArchiveParts: number,
+    completedParts: number,
+    failedParts: number,
   ): ((value: Progress) => void) =>
   (value) =>
     progress({
@@ -153,6 +158,11 @@ const progressForCourse =
       currentCourseIndex: courseIndex,
       totalCourses,
       completedCourses,
+      currentPartIndex,
+      totalParts,
+      totalArchiveParts,
+      completedParts,
+      failedParts,
     });
 
 const planSummary = (
@@ -164,7 +174,16 @@ const planSummary = (
   fallbackReason: PlanFallbackReason | null,
 ): RunPlanSummary => {
   const selected = courses.map(
-    ({ plan: { course, moduleDiscovery, advertisedBytes, resources } }) => ({
+    ({
+      plan: {
+        course,
+        moduleDiscovery,
+        advertisedBytes,
+        resources,
+        folderPathFallbackKeys,
+      },
+      parts,
+    }) => ({
       courseId: course.id,
       moduleDiscovery,
       advertisedBytes,
@@ -173,6 +192,8 @@ const planSummary = (
           resource.kind === "file" && resource.advertisedBytes === null,
       ).length,
       resourceCount: resources.length,
+      folderPathFallbackCount: folderPathFallbackKeys.length,
+      archivePartCount: parts.length,
     }),
   );
   const advertisedBytes = selected.reduce(
@@ -187,6 +208,16 @@ const planSummary = (
     (total, item) => total + item.unknownSizeCount,
     0,
   );
+  const totalPlannedParts = selected.reduce(
+    (total, item) => total + item.archivePartCount,
+    0,
+  );
+  const expectedArchiveCount =
+    effectivePackaging === "per-course"
+      ? totalPlannedParts
+      : selected.length > 0
+        ? 1
+        : 0;
   return {
     requestedCourseCount,
     selected,
@@ -199,6 +230,8 @@ const planSummary = (
     advertisedBytes,
     unknownSizeCount,
     resourceCount,
+    totalPlannedParts,
+    expectedArchiveCount,
     fallbackReason,
   };
 };
@@ -270,7 +303,9 @@ export async function createRunPlan(options: {
   if (
     !Number.isSafeInteger(summaryBase.advertisedBytes) ||
     !Number.isSafeInteger(summaryBase.unknownSizeCount) ||
-    !Number.isSafeInteger(summaryBase.resourceCount)
+    !Number.isSafeInteger(summaryBase.resourceCount) ||
+    !Number.isSafeInteger(summaryBase.totalPlannedParts) ||
+    !Number.isSafeInteger(summaryBase.expectedArchiveCount)
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
@@ -404,23 +439,28 @@ export async function runCourses(options: {
       throwIfAborted(signal);
       const plannedCourse = plan.courses[index]!;
       const coursePlan = plannedCourse.plan;
-      const courseProgress = progressForCourse(
-        progress,
-        coursePlan.course,
-        index,
-        plan.courses.length,
-        completedCourseIds.length,
-      );
-      courseProgress({
-        stage: "download",
-        completed: 0,
-        total: coursePlan.resources.length,
-        failed: 0,
-      });
       let courseComplete = true;
       let lastCompleted: CompletedCourse | null = null;
       for (const partPlan of plannedCourse.parts) {
         throwIfAborted(signal);
+        const courseProgress = progressForCourse(
+          progress,
+          coursePlan.course,
+          index,
+          plan.courses.length,
+          completedCourseIds.length,
+          partPlan.index,
+          partPlan.total,
+          plan.summary.totalPlannedParts,
+          completedParts.length,
+          failedParts.length,
+        );
+        courseProgress({
+          stage: "download",
+          completed: 0,
+          total: partPlan.resourceKeys.length,
+          failed: 0,
+        });
         let partBytes: Uint8Array | null = null;
         try {
           const result = await dependencies.buildCourseArchive({

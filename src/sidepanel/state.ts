@@ -38,6 +38,8 @@ export type UiEvent =
       completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
+      completedParts: number;
+      failedParts: number;
       counts: OutcomeCounts;
     }
   | { type: "FAILED"; message: string }
@@ -86,6 +88,8 @@ export type ViewState =
       completedCourseIds: number[];
       failedCourses: number;
       outputCount: number;
+      completedParts: number;
+      failedParts: number;
       counts: OutcomeCounts;
     }
   | { name: "blocked"; message: string };
@@ -201,6 +205,11 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
         currentCourseIndex: 0,
         totalCourses: state.plan.selected.length,
         completedCourses: 0,
+        currentPartIndex: 1,
+        totalParts: firstCourse.archivePartCount,
+        totalArchiveParts: state.plan.totalPlannedParts,
+        completedParts: 0,
+        failedParts: 0,
         completed: 0,
         total: firstCourse.resourceCount,
         failed: 0,
@@ -230,6 +239,8 @@ export const reduceState = (state: ViewState, event: UiEvent): ViewState => {
       completedCourseIds: event.completedCourseIds,
       failedCourses: event.failedCourses,
       outputCount: event.outputCount,
+      completedParts: event.completedParts,
+      failedParts: event.failedParts,
       counts: event.counts,
     };
   }

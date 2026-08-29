@@ -29,6 +29,8 @@ export type CoursePlanSummary = {
   advertisedBytes: number;
   unknownSizeCount: number;
   resourceCount: number;
+  folderPathFallbackCount: number;
+  archivePartCount: number;
 };
 
 export type CoursePlanFailureCategory =
@@ -57,6 +59,8 @@ export type RunPlanSummary = {
   advertisedBytes: number;
   unknownSizeCount: number;
   resourceCount: number;
+  totalPlannedParts: number;
+  expectedArchiveCount: number;
   fallbackReason: PlanFallbackReason | null;
 };
 
@@ -65,6 +69,11 @@ export type AggregateProgress = Progress & {
   currentCourseIndex: number;
   totalCourses: number;
   completedCourses: number;
+  currentPartIndex: number;
+  totalParts: number;
+  totalArchiveParts: number;
+  completedParts: number;
+  failedParts: number;
 };
 
 export type ResourceKind = "file" | "page" | "external" | "unsupported";
