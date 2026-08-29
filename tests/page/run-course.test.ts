@@ -3,6 +3,7 @@ import { unzipSync, strFromU8, strToU8 } from "fflate";
 import { describe, expect, it, vi } from "vitest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import { sanitizePageFragment } from "../../src/archive/sanitize";
+import { partitionCoursePlan } from "../../src/page/course-parts";
 import {
   buildCourseArchive,
   resolveLocalHref,
@@ -12,6 +13,7 @@ import {
   type RunDependencies,
 } from "../../src/page/run-course";
 import type { CoursePlan, PlannedResource } from "../../src/shared/model";
+import { MAX_ARCHIVE_BYTES } from "../../src/shared/constants";
 import { syntheticCourse } from "../fixtures/course-plan";
 
 const file = (id: number, size = 4): PlannedResource => ({
@@ -115,6 +117,62 @@ const buildPageLinkedArchive = async (
 };
 
 describe("runCourse", () => {
+  it("builds an explanatory part without requesting a known oversized file", async () => {
+    const coursePlan = plan([file(1, MAX_ARCHIVE_BYTES + 1)]);
+    const deps = dependencies(coursePlan, async () => {
+      throw new Error("oversized file must not be requested");
+    });
+
+    const result = await buildCourseArchive({
+      course: syntheticCourse,
+      plan: coursePlan,
+      partPlan: partitionCoursePlan(coursePlan)[0]!,
+      combinedRoot: null,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(deps.retrieve).not.toHaveBeenCalled();
+    expect(result.manifest.resources).toEqual([
+      expect.objectContaining({
+        key: "file:1",
+        status: "unavailable",
+        actualBytes: null,
+        failureCategory: "individual-size-limit",
+      }),
+    ]);
+    expect(unzipSync(result.zipBytes)["files/file-1.bin"]).toBeUndefined();
+  });
+
+  it("builds an explanatory outcome when the saved page wrapper exceeds its limit", async () => {
+    const coursePlan = plan([page]);
+    const deps = dependencies(coursePlan, async () => ({
+      status: "success",
+      bytes: strToU8("<p>Safe</p>"),
+    }));
+    deps.maxArchivedPageBytes = 16;
+
+    const result = await buildCourseArchive({
+      course: syntheticCourse,
+      plan: coursePlan,
+      combinedRoot: null,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(result.manifest.resources).toEqual([
+      expect.objectContaining({
+        key: "page:welcome",
+        status: "unavailable",
+        actualBytes: null,
+        failureCategory: "page-too-large",
+      }),
+    ]);
+    expect(unzipSync(result.zipBytes)["pages/welcome.html"]).toBeUndefined();
+  });
+
   it("packages a successful unknown-size page-linked file under its local href", async () => {
     const zip = await buildPageLinkedArchive({
       status: "success",

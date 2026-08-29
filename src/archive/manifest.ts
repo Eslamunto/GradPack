@@ -27,6 +27,7 @@ const CONTROL = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const ENCODED_CONTROL = /%(?:0[0-9a-f]|1[0-9a-f]|7f)/iu;
 const FAILURE_CATEGORIES = new Set([
   "access-denied",
+  "individual-size-limit",
   "network-exhausted",
   "not-found",
   "page-too-large",
@@ -413,7 +414,9 @@ const validateOutcome = (value: unknown, courseId: number): ResourceOutcome => {
     (status === "unsupported" &&
       (resource.kind !== "unsupported" ||
         actualBytes !== 0 ||
-        failureCategory !== null))
+        failureCategory !== null)) ||
+    (failureCategory === "individual-size-limit" && resource.kind !== "file") ||
+    (failureCategory === "page-too-large" && resource.kind !== "page")
   ) {
     throw new TypeError("Invalid archive data");
   }

@@ -164,6 +164,29 @@ describe("buildManifest", () => {
     },
   );
 
+  it("accepts individual-size-limit only for unavailable files", () => {
+    const filePlan = copyPlan();
+    const fileOutcomes = copyOutcomes();
+    Object.assign(fileOutcomes[0]!, {
+      status: "unavailable",
+      actualBytes: null,
+      failureCategory: "individual-size-limit",
+    });
+    expect(() =>
+      buildManifest(filePlan, fileOutcomes, CREATED_AT),
+    ).not.toThrow();
+
+    const pageOutcomes = copyOutcomes();
+    Object.assign(pageOutcomes[1]!, {
+      status: "unavailable",
+      actualBytes: null,
+      failureCategory: "individual-size-limit",
+    });
+    expect(() =>
+      buildManifest(copyPlan(), pageOutcomes, CREATED_AT),
+    ).toThrowError(TypeError);
+  });
+
   it.each([
     [
       "another course",

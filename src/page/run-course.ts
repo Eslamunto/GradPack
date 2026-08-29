@@ -11,6 +11,7 @@ import { isCanonicalArchivePath } from "../archive/paths";
 import { renderSavedPageHtml, sanitizePageFragment } from "../archive/sanitize";
 import { assertCoursePlanSizes } from "../canvas/discovery";
 import { canvasEndpoint } from "../canvas/endpoints";
+import { partitionCoursePlan } from "./course-parts";
 import {
   CanvasBodySizeError,
   CanvasResourceUnavailableError,
@@ -23,11 +24,13 @@ import { exactCanvasPage } from "../canvas/page-links";
 import {
   CANVAS_PAGE_JSON_MAX_BYTES,
   CANVAS_ORIGIN,
+  MAX_ARCHIVED_PAGE_BYTES,
   MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
   MAX_RETRIES,
 } from "../shared/constants";
 import type {
+  CourseArchivePartPlan,
   CoursePlan,
   CourseSummary,
   PlannedResource,
@@ -47,6 +50,7 @@ export type Retrieval =
         | "access-denied"
         | "network-exhausted"
         | "not-found"
+        | "individual-size-limit"
         | "page-too-large"
         | "transient-exhausted";
     };
@@ -65,6 +69,7 @@ export type RunDependencies = {
   download: (fileName: string, bytes: Uint8Array) => void;
   beforePackage?: () => void;
   maxArchiveBytes?: number;
+  maxArchivedPageBytes?: number;
 };
 
 export type CourseArchiveDependencies = Omit<
@@ -177,13 +182,21 @@ const removeUnavailableLocalLinks = (
 export async function buildCourseArchive(options: {
   course: CourseSummary;
   plan: CoursePlan;
+  partPlan?: CourseArchivePartPlan;
   combinedRoot: string | null;
   signal: AbortSignal;
   progress: (progress: Progress) => void;
   dependencies: CourseArchiveDependencies;
 }): Promise<RunResult> {
-  const { course, plan, combinedRoot, signal, progress, dependencies } =
-    options;
+  const {
+    course,
+    plan,
+    partPlan,
+    combinedRoot,
+    signal,
+    progress,
+    dependencies,
+  } = options;
   if (combinedRoot !== null && !isCanonicalArchivePath(combinedRoot)) {
     throw new RunSafetyError("Invalid combined course root");
   }
@@ -203,20 +216,64 @@ export async function buildCourseArchive(options: {
     if (immutablePlan.course.id !== course.id) {
       throw new RunSafetyError("Discovered course does not match selection");
     }
+    const activePart = partPlan;
+    if (activePart) {
+      const canonicalParts = partitionCoursePlan(immutablePlan);
+      const canonicalPart = canonicalParts[activePart.index - 1];
+      if (
+        !canonicalPart ||
+        activePart.total !== canonicalPart.total ||
+        activePart.resourceKeys.length !== canonicalPart.resourceKeys.length ||
+        activePart.resourceKeys.some(
+          (key, index) => key !== canonicalPart.resourceKeys[index],
+        ) ||
+        activePart.resourceParts.length !==
+          canonicalPart.resourceParts.length ||
+        activePart.resourceParts.some((assignment, index) => {
+          const canonical = canonicalPart.resourceParts[index];
+          return (
+            assignment.resourceKey !== canonical?.resourceKey ||
+            assignment.partIndex !== canonical.partIndex
+          );
+        })
+      ) {
+        throw new RunSafetyError("Invalid course archive part");
+      }
+    }
+    const resourcesByKey = new Map(
+      immutablePlan.resources.map((resource) => [resource.key, resource]),
+    );
+    const localResources = (
+      activePart?.resourceKeys ??
+      immutablePlan.resources.map((resource) => resource.key)
+    ).map((key) => {
+      const resource = resourcesByKey.get(key);
+      if (!resource) throw new RunSafetyError("Invalid course archive part");
+      return resource;
+    });
     throwIfAborted(controller.signal);
 
-    const outcomes = new Array<ResourceOutcome>(immutablePlan.resources.length);
+    const outcomes = new Array<ResourceOutcome>(localResources.length);
     let cursor = 0;
     let completed = 0;
     let failed = 0;
     let successfulBytes = 0;
     const byteLimit = dependencies.maxArchiveBytes ?? MAX_ARCHIVE_BYTES;
+    const pageByteLimit =
+      dependencies.maxArchivedPageBytes ?? MAX_ARCHIVED_PAGE_BYTES;
     if (
       !Number.isSafeInteger(byteLimit) ||
       byteLimit < 0 ||
       byteLimit > MAX_ARCHIVE_BYTES
     ) {
       throw new RunSafetyError("Invalid archive byte limit");
+    }
+    if (
+      !Number.isSafeInteger(pageByteLimit) ||
+      pageByteLimit < 1 ||
+      pageByteLimit > MAX_ARCHIVED_PAGE_BYTES
+    ) {
+      throw new RunSafetyError("Invalid archived page byte limit");
     }
 
     const latchTerminalCause = (error: unknown): Error | DOMException => {
@@ -319,9 +376,9 @@ export async function buildCourseArchive(options: {
       for (;;) {
         if (terminalCause !== undefined || controller.signal.aborted) return;
         const index = cursor;
-        if (index >= immutablePlan.resources.length) return;
+        if (index >= localResources.length) return;
         cursor += 1;
-        const resource = immutablePlan.resources[index]!;
+        const resource = localResources[index]!;
         try {
           let outcome: ResourceOutcome;
           if (resource.kind === "external" || resource.kind === "unsupported") {
@@ -330,79 +387,93 @@ export async function buildCourseArchive(options: {
             progress({
               stage: resource.kind === "page" ? "sanitize" : "download",
               completed,
-              total: immutablePlan.resources.length,
+              total: localResources.length,
               failed,
             });
-            if (resource.kind === "file") {
-              validatedFileUrl(resource, immutablePlan.course.id);
-            }
-            let releaseRetrieval: RetrievalRelease | undefined;
-            try {
-              const exclusive =
-                resource.kind === "file" && resource.advertisedBytes === null;
-              const admission = acquireRetrieval(exclusive);
-              releaseRetrieval =
-                typeof admission === "function" ? admission : await admission;
-              const remainingBytes = byteLimit - successfulBytes;
-              if (
-                !Number.isSafeInteger(remainingBytes) ||
-                remainingBytes < 0 ||
-                remainingBytes > MAX_ARCHIVE_BYTES
-              ) {
-                throw new RunSafetyError(
-                  "Invalid remaining archive byte limit",
+            if (
+              resource.kind === "file" &&
+              resource.advertisedBytes !== null &&
+              resource.advertisedBytes > MAX_ARCHIVE_BYTES
+            ) {
+              failed += 1;
+              outcome = {
+                ...resource,
+                status: "unavailable",
+                actualBytes: null,
+                failureCategory: "individual-size-limit",
+              };
+            } else {
+              if (resource.kind === "file") {
+                validatedFileUrl(resource, immutablePlan.course.id);
+              }
+              let releaseRetrieval: RetrievalRelease | undefined;
+              try {
+                const exclusive =
+                  resource.kind === "file" && resource.advertisedBytes === null;
+                const admission = acquireRetrieval(exclusive);
+                releaseRetrieval =
+                  typeof admission === "function" ? admission : await admission;
+                const remainingBytes = byteLimit - successfulBytes;
+                if (
+                  !Number.isSafeInteger(remainingBytes) ||
+                  remainingBytes < 0 ||
+                  remainingBytes > MAX_ARCHIVE_BYTES
+                ) {
+                  throw new RunSafetyError(
+                    "Invalid remaining archive byte limit",
+                  );
+                }
+                const result = await dependencies.retrieve(
+                  resource,
+                  immutablePlan,
+                  controller.signal,
+                  remainingBytes,
                 );
-              }
-              const result = await dependencies.retrieve(
-                resource,
-                immutablePlan,
-                controller.signal,
-                remainingBytes,
-              );
-              if (controller.signal.aborted && result.status === "success") {
-                result.bytes.fill(0);
-              }
-              throwIfAborted(controller.signal);
-              if (result.status === "success") {
-                if (
-                  !resource.archivePath ||
-                  !isCanonicalArchivePath(resource.archivePath)
-                ) {
+                if (controller.signal.aborted && result.status === "success") {
                   result.bytes.fill(0);
-                  throw new RunSafetyError("Invalid planned archive path");
                 }
-                successfulBytes += result.bytes.byteLength;
-                if (
-                  !Number.isSafeInteger(successfulBytes) ||
-                  successfulBytes > byteLimit
-                ) {
-                  result.bytes.fill(0);
-                  throw new RunSafetyError("Archive byte limit exceeded");
+                throwIfAborted(controller.signal);
+                if (result.status === "success") {
+                  if (
+                    !resource.archivePath ||
+                    !isCanonicalArchivePath(resource.archivePath)
+                  ) {
+                    result.bytes.fill(0);
+                    throw new RunSafetyError("Invalid planned archive path");
+                  }
+                  successfulBytes += result.bytes.byteLength;
+                  if (
+                    !Number.isSafeInteger(successfulBytes) ||
+                    successfulBytes > byteLimit
+                  ) {
+                    result.bytes.fill(0);
+                    throw new RunSafetyError("Archive byte limit exceeded");
+                  }
+                  retained.add(result.bytes);
+                  entries.set(resource.archivePath, result.bytes);
+                  outcome = {
+                    ...resource,
+                    status: "success",
+                    actualBytes: result.bytes.byteLength,
+                    failureCategory: null,
+                  };
+                } else {
+                  failed += 1;
+                  outcome = {
+                    ...resource,
+                    status: result.status,
+                    actualBytes: null,
+                    failureCategory: result.failureCategory,
+                  };
                 }
-                retained.add(result.bytes);
-                entries.set(resource.archivePath, result.bytes);
-                outcome = {
-                  ...resource,
-                  status: "success",
-                  actualBytes: result.bytes.byteLength,
-                  failureCategory: null,
-                };
-              } else {
-                failed += 1;
-                outcome = {
-                  ...resource,
-                  status: result.status,
-                  actualBytes: null,
-                  failureCategory: result.failureCategory,
-                };
+              } catch (error) {
+                if (releaseRetrieval !== undefined) {
+                  latchTerminalCause(error);
+                }
+                throw error;
+              } finally {
+                releaseRetrieval?.();
               }
-            } catch (error) {
-              if (releaseRetrieval !== undefined) {
-                latchTerminalCause(error);
-              }
-              throw error;
-            } finally {
-              releaseRetrieval?.();
             }
           }
           outcomes[index] = outcome;
@@ -410,7 +481,7 @@ export async function buildCourseArchive(options: {
           progress({
             stage: resource.kind === "page" ? "sanitize" : "download",
             completed,
-            total: immutablePlan.resources.length,
+            total: localResources.length,
             failed,
           });
         } catch (error) {
@@ -422,7 +493,7 @@ export async function buildCourseArchive(options: {
 
     await Promise.allSettled(
       Array.from(
-        { length: Math.min(MAX_CONCURRENCY, immutablePlan.resources.length) },
+        { length: Math.min(MAX_CONCURRENCY, localResources.length) },
         work,
       ),
     );
@@ -443,14 +514,14 @@ export async function buildCourseArchive(options: {
     progress({
       stage: "package",
       completed,
-      total: immutablePlan.resources.length,
+      total: localResources.length,
       failed,
     });
     dependencies.beforePackage?.();
     throwIfAborted(controller.signal);
     const createdAt = dependencies.now();
-    let model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
-    for (const [index, resource] of immutablePlan.resources.entries()) {
+    const pageFragments = new Map<string, Uint8Array>();
+    for (const [index, resource] of localResources.entries()) {
       if (
         resource.kind !== "page" ||
         outcomes[index]?.status !== "success" ||
@@ -460,43 +531,87 @@ export async function buildCourseArchive(options: {
       const fragmentBytes = entries.get(resource.archivePath);
       if (!fragmentBytes)
         throw new RunSafetyError("Missing sanitized page fragment");
-      const wrapped = strToU8(
-        renderSavedPageHtml({
-          model,
-          pagePath: resource.archivePath,
-          title: resource.title,
-          sanitizedFragment: removeUnavailableLocalLinks(
-            strFromU8(fragmentBytes),
-            resource.archivePath,
-            entries,
-          ),
-          combinedHomeHref:
-            combinedRoot === null
-              ? null
-              : relativeArchiveHref(
-                  `${combinedRoot}/${resource.archivePath}`,
-                  "index.html",
-                ),
-        }),
-      );
-      successfulBytes =
-        successfulBytes - fragmentBytes.byteLength + wrapped.byteLength;
-      if (
-        !Number.isSafeInteger(successfulBytes) ||
-        successfulBytes > byteLimit
-      ) {
-        wrapped.fill(0);
-        throw new RunSafetyError("Archive byte limit exceeded");
-      }
-      fragmentBytes.fill(0);
-      retained.add(wrapped);
-      entries.set(resource.archivePath, wrapped);
-      outcomes[index] = {
-        ...outcomes[index],
-        actualBytes: wrapped.byteLength,
-      };
+      pageFragments.set(resource.archivePath, fragmentBytes);
     }
-    model = buildArchiveNavigationModel(immutablePlan, outcomes, createdAt);
+    let model = buildArchiveNavigationModel(
+      immutablePlan,
+      outcomes,
+      createdAt,
+      activePart,
+    );
+    let removedOversizedPage: boolean;
+    do {
+      removedOversizedPage = false;
+      for (const [index, resource] of localResources.entries()) {
+        if (
+          resource.kind !== "page" ||
+          outcomes[index]?.status !== "success" ||
+          resource.archivePath === null
+        )
+          continue;
+        const fragmentBytes = pageFragments.get(resource.archivePath);
+        const currentBytes = entries.get(resource.archivePath);
+        if (!fragmentBytes || !currentBytes) {
+          throw new RunSafetyError("Missing sanitized page fragment");
+        }
+        const wrapped = strToU8(
+          renderSavedPageHtml({
+            model,
+            pagePath: resource.archivePath,
+            title: resource.title,
+            sanitizedFragment: removeUnavailableLocalLinks(
+              strFromU8(fragmentBytes),
+              resource.archivePath,
+              entries,
+            ),
+            combinedHomeHref:
+              combinedRoot === null
+                ? null
+                : relativeArchiveHref(
+                    `${combinedRoot}/${resource.archivePath}`,
+                    "index.html",
+                  ),
+          }),
+        );
+        if (wrapped.byteLength > pageByteLimit) {
+          wrapped.fill(0);
+          successfulBytes -= currentBytes.byteLength;
+          if (currentBytes !== fragmentBytes) currentBytes.fill(0);
+          entries.delete(resource.archivePath);
+          outcomes[index] = {
+            ...resource,
+            status: "unavailable",
+            actualBytes: null,
+            failureCategory: "page-too-large",
+          };
+          failed += 1;
+          removedOversizedPage = true;
+          continue;
+        }
+        successfulBytes =
+          successfulBytes - currentBytes.byteLength + wrapped.byteLength;
+        if (
+          !Number.isSafeInteger(successfulBytes) ||
+          successfulBytes > byteLimit
+        ) {
+          wrapped.fill(0);
+          throw new RunSafetyError("Archive byte limit exceeded");
+        }
+        if (currentBytes !== fragmentBytes) currentBytes.fill(0);
+        retained.add(wrapped);
+        entries.set(resource.archivePath, wrapped);
+        outcomes[index] = {
+          ...outcomes[index],
+          actualBytes: wrapped.byteLength,
+        };
+      }
+      model = buildArchiveNavigationModel(
+        immutablePlan,
+        outcomes,
+        createdAt,
+        activePart,
+      );
+    } while (removedOversizedPage);
     const manifest = model.manifest;
     const pages = renderCoursePages(
       model,
@@ -779,7 +894,10 @@ export async function fetchFileResource(
         }
         if (advertisedBytes === null && declared > remainingBytes) {
           await cancelBody(response);
-          throw new RunSafetyError("Archive byte limit exceeded");
+          return {
+            status: "unavailable",
+            failureCategory: "individual-size-limit",
+          };
         }
         declaredBytes = declared;
       }
@@ -809,7 +927,14 @@ export async function fetchFileResource(
               throw new RunSafetyError("Invalid file stream chunk");
             }
             if (value.value.byteLength > remainingBytes - total) {
-              throw new RunSafetyError("Archive byte limit exceeded");
+              await reader.cancel();
+              chunks.forEach((chunk) => chunk.fill(0));
+              chunks.length = 0;
+              reader.releaseLock();
+              return {
+                status: "unavailable",
+                failureCategory: "individual-size-limit",
+              };
             }
             if (
               declaredBytes !== null &&
@@ -947,8 +1072,16 @@ export async function fetchPageResource(
   plan: CoursePlan,
   signal: AbortSignal,
   http: BoundedPageHttp,
+  maximumArchivedBytes = MAX_ARCHIVED_PAGE_BYTES,
 ): Promise<Retrieval> {
   throwIfAborted(signal);
+  if (
+    !Number.isSafeInteger(maximumArchivedBytes) ||
+    maximumArchivedBytes < 1 ||
+    maximumArchivedBytes > MAX_ARCHIVED_PAGE_BYTES
+  ) {
+    throw new RunSafetyError("Invalid archived page byte limit");
+  }
   if (resource.kind !== "page" || resource.archivePath === null) {
     throw new RunSafetyError("Invalid planned page");
   }
@@ -968,7 +1101,12 @@ export async function fetchPageResource(
       body: page.body,
       resolveLocalHref: (href) => resolveLocalHref(href, plan),
     });
-    return { status: "success", bytes: strToU8(html) };
+    const bytes = strToU8(html);
+    if (bytes.byteLength > maximumArchivedBytes) {
+      bytes.fill(0);
+      return { status: "unavailable", failureCategory: "page-too-large" };
+    }
+    return { status: "success", bytes };
   } catch (error) {
     if (
       error instanceof CanvasBodySizeError ||
