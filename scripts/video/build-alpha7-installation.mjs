@@ -14,21 +14,40 @@ import {
 } from "./alpha7-installation-scenes.mjs";
 import { renderSceneSvg } from "./render-alpha7-installation.mjs";
 
+/** @typedef {(typeof scenes)[number]} Scene */
+/** @typedef {{ resize: (width: number, height: number, options: { fit: string }) => SharpPipeline, png: () => SharpPipeline, toFile: (path: string) => Promise<unknown> }} SharpPipeline */
+/** @typedef {(input: Buffer) => SharpPipeline} Sharp */
+/** @typedef {{ captureDirectory: string, workDirectory: string, sourceCommit: string }} BuildArguments */
+
+/**
+ * @param {string[]} argv
+ * @param {string} name
+ */
 const requiredArgument = (argv, name) => {
   const index = argv.indexOf(name);
   if (index === -1 || !argv[index + 1]) throw new Error(`${name} is required`);
   return argv[index + 1];
 };
 
+/**
+ * @param {string[]} argv
+ * @returns {BuildArguments}
+ */
 export const parseArgs = (argv) => ({
   captureDirectory: resolve(requiredArgument(argv, "--capture-dir")),
   workDirectory: resolve(requiredArgument(argv, "--work-dir")),
   sourceCommit: requiredArgument(argv, "--source-commit"),
 });
 
+/** @param {Scene} scene */
 export const captureNameFor = (scene) =>
   scene.visual === "chrome-capture" ? scene.capture : null;
 
+/**
+ * @param {Scene} scene
+ * @param {{ framePath: string, audioPath: string, segmentPath: string }} paths
+ * @returns {string[]}
+ */
 export const segmentArgs = (scene, { framePath, audioPath, segmentPath }) => [
   "-y",
   "-hide_banner",
@@ -69,11 +88,17 @@ export const segmentArgs = (scene, { framePath, audioPath, segmentPath }) => [
   segmentPath,
 ];
 
+/** @param {string} path */
 const quoteConcatPath = (path) => path.replaceAll("'", "'\\''");
 
+/** @param {string[]} segmentPaths */
 export const concatFileContent = (segmentPaths) =>
   `${segmentPaths.map((path) => `file '${quoteConcatPath(path)}'`).join("\n")}\n`;
 
+/**
+ * @param {string} command
+ * @param {string[]} args
+ */
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: "utf8" });
   if (result.status !== 0) {
@@ -84,6 +109,7 @@ const run = (command, args) => {
   return result.stdout.trim();
 };
 
+/** @param {string} audioPath */
 const audioDurationSeconds = (audioPath) =>
   Number(
     run("ffprobe", [
@@ -97,17 +123,41 @@ const audioDurationSeconds = (audioPath) =>
     ]),
   );
 
+/**
+ * @param {Scene} scene
+ * @param {number} narrationDuration
+ */
+export const assertNarrationDuration = (scene, narrationDuration) => {
+  if (!Number.isFinite(narrationDuration) || narrationDuration <= 0.1) {
+    throw new Error(`narration for ${scene.id} contains no audio`);
+  }
+  if (narrationDuration > scene.durationSeconds - 0.5) {
+    throw new Error(
+      `narration for ${scene.id} exceeds its ${scene.durationSeconds}-second scene`,
+    );
+  }
+};
+
+/** @returns {Sharp} */
 const loadSharp = () => {
   const nodeModules = process.env.VIDEO_NODE_MODULES;
   if (!nodeModules) throw new Error("VIDEO_NODE_MODULES is required");
-  return createRequire(import.meta.url)(join(nodeModules, "sharp"));
+  // The bundled runtime is loaded from a user-supplied module directory.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+  return /** @type {Sharp} */ (
+    /** @type {unknown} */ (
+      createRequire(import.meta.url)(join(nodeModules, "sharp"))
+    )
+  );
 };
 
+/** @param {string} path */
 const sha256 = async (path) =>
   createHash("sha256")
     .update(await readFile(path))
     .digest("hex");
 
+/** @param {BuildArguments & { sharp: Sharp }} options */
 export const buildVideo = async ({
   captureDirectory,
   workDirectory,
@@ -140,11 +190,7 @@ export const buildVideo = async ({
       .toFile(framePath);
     run("say", ["-v", "Samantha", "-o", audioPath, scene.narration]);
     const narrationDuration = audioDurationSeconds(audioPath);
-    if (narrationDuration > scene.durationSeconds - 0.5) {
-      throw new Error(
-        `narration for ${scene.id} exceeds its ${scene.durationSeconds}-second scene`,
-      );
-    }
+    assertNarrationDuration(scene, narrationDuration);
     run("ffmpeg", segmentArgs(scene, { framePath, audioPath, segmentPath }));
     segmentPaths.push(segmentPath);
   }

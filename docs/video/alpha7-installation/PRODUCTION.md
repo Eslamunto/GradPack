@@ -6,7 +6,7 @@ Generated browser captures, narration, frames, and videos belong under
 Verify and extract the source extension:
 
 ```bash
-cd /Users/esso/Documents/codes/personal-projects/GradPack/GradPack-classmate-release-0.1.0-alpha.7
+cd "$GRADPACK_RELEASE_DIR"
 shasum -a 256 -c gradpack-0.1.0-alpha.7.zip.sha256
 mkdir -p /private/tmp/gradpack-alpha7-video/extension
 unzip -q gradpack-0.1.0-alpha.7.zip -d /private/tmp/gradpack-alpha7-video/extension

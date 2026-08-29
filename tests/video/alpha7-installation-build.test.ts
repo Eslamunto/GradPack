@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
 import {
+  assertNarrationDuration,
   captureNameFor,
   concatFileContent,
   parseArgs,
@@ -35,7 +36,7 @@ describe("Alpha 7 installation video build contract", () => {
   });
 
   it("builds fixed-duration H.264 and AAC segment arguments", () => {
-    const scene = scenes[0];
+    const scene = scenes[0]!;
     const args = segmentArgs(scene, {
       framePath: "/tmp/frame.png",
       audioPath: "/tmp/audio.aiff",
@@ -52,5 +53,17 @@ describe("Alpha 7 installation video build contract", () => {
     expect(concatFileContent(["/tmp/one.mp4", "/tmp/two.mp4"])).toBe(
       "file '/tmp/one.mp4'\nfile '/tmp/two.mp4'\n",
     );
+  });
+
+  it("rejects missing or overlong narration audio", () => {
+    const scene = scenes[0]!;
+    expect(() => assertNarrationDuration(scene, 0)).toThrow("no audio");
+    expect(() => assertNarrationDuration(scene, Number.NaN)).toThrow(
+      "no audio",
+    );
+    expect(() => assertNarrationDuration(scene, scene.durationSeconds)).toThrow(
+      "exceeds",
+    );
+    expect(() => assertNarrationDuration(scene, 5)).not.toThrow();
   });
 });

@@ -5,10 +5,14 @@ import { fileURLToPath } from "node:url";
 import { scenes } from "./alpha7-installation-scenes.mjs";
 import { renderSyntheticChromeCaptureSvg } from "./render-alpha7-installation.mjs";
 
+/** @typedef {{ resize: (width: number, height: number, options: { fit: string }) => SharpPipeline, png: () => SharpPipeline, toFile: (path: string) => Promise<unknown> }} SharpPipeline */
+/** @typedef {(input: Buffer) => SharpPipeline} Sharp */
+
 export const chromeCaptureScenes = Object.freeze(
   scenes.filter(({ visual }) => visual === "chrome-capture"),
 );
 
+/** @param {string[]} argv */
 const parseOutputDirectory = (argv) => {
   const index = argv.indexOf("--output-dir");
   if (index === -1 || !argv[index + 1]) {
@@ -17,12 +21,20 @@ const parseOutputDirectory = (argv) => {
   return resolve(argv[index + 1]);
 };
 
+/** @returns {Sharp} */
 const loadSharp = () => {
   const nodeModules = process.env.VIDEO_NODE_MODULES;
   if (!nodeModules) throw new Error("VIDEO_NODE_MODULES is required");
-  return createRequire(import.meta.url)(join(nodeModules, "sharp"));
+  // The bundled runtime is loaded from a user-supplied module directory.
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-return
+  return /** @type {Sharp} */ (
+    /** @type {unknown} */ (
+      createRequire(import.meta.url)(join(nodeModules, "sharp"))
+    )
+  );
 };
 
+/** @param {{ outputDirectory: string, sharp: Sharp }} options */
 export const generateChromeCaptures = async ({ outputDirectory, sharp }) => {
   await mkdir(outputDirectory, { recursive: true });
   for (const scene of chromeCaptureScenes) {

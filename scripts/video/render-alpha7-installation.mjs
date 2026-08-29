@@ -1,3 +1,6 @@
+/** @typedef {(typeof import("./alpha7-installation-scenes.mjs").scenes)[number]} Scene */
+
+/** @type {Readonly<Record<string, string>>} */
 const XML_ENTITIES = Object.freeze({
   "&": "&amp;",
   "<": "&lt;",
@@ -6,9 +9,17 @@ const XML_ENTITIES = Object.freeze({
   "'": "&apos;",
 });
 
+/** @param {string | number} value */
 export const escapeXml = (value) =>
-  String(value).replace(/[&<>"']/gu, (character) => XML_ENTITIES[character]);
+  String(value).replace(
+    /[&<>"']/gu,
+    (character) => XML_ENTITIES[character] ?? character,
+  );
 
+/**
+ * @param {string} value
+ * @param {number} limit
+ */
 export const wrapWords = (value, limit) => {
   const lines = [];
   let current = "";
@@ -24,6 +35,7 @@ export const wrapWords = (value, limit) => {
   return lines;
 };
 
+/** @param {Scene} scene */
 const chromeStateBody = (scene) => {
   if (scene.id === "extensions-url") {
     return `<rect x="600" y="430" width="1050" height="360" rx="24" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><text x="670" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="42" font-weight="700" fill="#202124">Manage your extensions</text><text x="670" y="590" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#5f6368">Turn features on or off and review installed versions.</text><rect x="670" y="660" width="330" height="70" rx="35" fill="#e8f0fe"/><text x="835" y="705" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700" fill="#185abc">Chrome Web Store</text>`;
@@ -40,6 +52,7 @@ const chromeStateBody = (scene) => {
   return `<rect x="600" y="350" width="1050" height="390" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><rect x="670" y="425" width="92" height="92" rx="22" fill="#2356d8"/><path d="M700 471h32M716 455v32" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/><text x="805" y="470" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="40" font-weight="700" fill="#202124">GradPack</text><text x="805" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" fill="#5f6368">0.1.0-alpha.7</text><rect x="1350" y="435" width="110" height="52" rx="26" fill="#1a73e8"/><circle cx="1428" cy="461" r="21" fill="#ffffff"/><text x="805" y="640" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#188038">Enabled</text><circle cx="1410" cy="460" r="76" fill="none" stroke="#f2b134" stroke-width="10"/>`;
 };
 
+/** @param {Scene} scene */
 export const renderSyntheticChromeCaptureSvg = (scene) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
     <rect width="1920" height="1080" fill="#f1f3f4"/>
@@ -62,6 +75,10 @@ export const renderSyntheticChromeCaptureSvg = (scene) =>
     ${chromeStateBody(scene)}
   </svg>`;
 
+/**
+ * @param {string[]} lines
+ * @param {{ x: number, y: number, size?: number, gap?: number, color?: string, anchor?: string }} options
+ */
 const textLines = (
   lines,
   { x, y, size = 42, gap = 58, color = "#17213b", anchor = "start" },
@@ -73,9 +90,13 @@ const textLines = (
     )
     .join("");
 
+/**
+ * @param {Scene} scene
+ * @param {string | undefined} captureDataUrl
+ */
 const visualBody = (scene, captureDataUrl) => {
   if (scene.visual === "chrome-capture" && captureDataUrl) {
-    return `<g data-visual="chrome-capture" data-accent="click-target"><rect x="180" y="240" width="1560" height="580" rx="30" fill="#ffffff" stroke="#d9ddec" stroke-width="4"/><image href="${escapeXml(captureDataUrl)}" x="195" y="255" width="1530" height="550" preserveAspectRatio="xMidYMid slice"/><circle cx="1495" cy="715" r="42" fill="none" stroke="#f2b134" stroke-width="12"/></g>`;
+    return `<g data-visual="chrome-capture" data-accent="click-target"><rect x="180" y="240" width="1560" height="580" rx="30" fill="#ffffff" stroke="#d9ddec" stroke-width="4"/><image href="${escapeXml(captureDataUrl)}" x="195" y="255" width="1530" height="550" preserveAspectRatio="xMidYMid slice"/></g>`;
   }
 
   const lines = scene.screenLines.flatMap((line) => wrapWords(line, 42));
@@ -116,6 +137,10 @@ const visualBody = (scene, captureDataUrl) => {
   return `<g data-visual="${escapeXml(scene.visual)}" data-accent="content-card"><rect x="180" y="250" width="1560" height="560" rx="28" fill="#ffffff" stroke="#d9ddec" stroke-width="3"/>${textLines(lines, { x: 255, y: 350, size: 40, gap: 62 })}</g>`;
 };
 
+/**
+ * @param {Scene} scene
+ * @param {{ captureDataUrl?: string }} [options]
+ */
 export const renderSceneSvg = (scene, { captureDataUrl } = {}) => {
   const captions = scene.caption.split("\n");
   return `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
