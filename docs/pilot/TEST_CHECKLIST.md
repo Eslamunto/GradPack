@@ -15,10 +15,19 @@
 - Requested packaging: combined / per-course
 - Effective packaging: combined / per-course
 - Packaging fallback notice: pass / fail / not-shown
+- Expected ZIP-part count:
+- Downloaded ZIP-part count:
+- Unfiled fallback count:
+- Individual-size-limit count:
+- Maximum observed part payload (MiB):
+- Every part at or below 250 MiB: pass / fail
 - Output count:
 - Course archive download: pass / fail
 - ZIP extraction: pass / fail
 - Offline index: pass / fail
+- Every multipart index opens offline: pass / fail / not-present
+- Part N of M labels: pass / fail / not-present
+- Cross-part Available in Part N labels: pass / fail / not-present
 - Saved files: pass / fail / not-present
 - Sanitized pages: pass / fail / not-present
 - External-link labels: pass / fail / not-present

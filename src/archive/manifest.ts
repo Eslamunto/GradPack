@@ -739,11 +739,15 @@ export function buildManifestFromSnapshot(
     unavailable: 0,
     unsupported: 0,
     external: 0,
-    advertisedBytes: validatedPlan.advertisedBytes,
+    advertisedBytes: 0,
     archivedBytes: 0,
   };
   const resources = validatedOutcomes.map((outcome) => {
     totals[outcome.status] += 1;
+    totals.advertisedBytes = addSafe(
+      totals.advertisedBytes,
+      outcome.advertisedBytes ?? 0,
+    );
     if (outcome.status === "success") {
       totals.archivedBytes = addSafe(
         totals.archivedBytes,

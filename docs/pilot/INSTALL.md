@@ -19,6 +19,14 @@ an unpacked extension, not through the Chrome Web Store.
 - If a requested combined archive exceeds its aggregate size or entry limit,
   GradPack shows the packaging fallback before retrieval and uses per-course
   output only after confirmation.
+- A course larger than 250 MiB is downloaded as sequential self-contained ZIP
+  parts, each under the same hard payload cap. Cross-part material is labelled
+  **Available in Part N** instead of linked.
+- A valid file whose Canvas folder placement is unavailable is saved under
+  `files/unfiled/` with a visible notice. An individual file larger than the
+  part cap is listed as unavailable rather than fetched.
+- These behaviors require no additional permission or origin and add no
+  backend, persistence, analytics, or telemetry.
 
 ## Verify the checksum
 
@@ -57,18 +65,20 @@ they differ.
 5. Select **Load unpacked** and choose the extracted folder.
 6. Sign in to Frankfurt School Canvas in a normal Chrome tab.
 7. Refresh the signed-in Canvas tab once after GradPack loads.
-8. Keep that tab open, signed in, and unnavigated while GradPack works.
+8. Keep that tab open, signed in, and unnavigated until every ZIP part finishes
+   downloading.
 9. Select GradPack in the Chrome toolbar to open its Side Panel.
 10. Select individual courses or use **Select all courses** to select every
     displayed active, completed, and concluded course; then choose combined or
     per-course output and start planning.
-11. Review the ready and skipped courses plus any packaging fallback notice,
-    then confirm retrieval for the ready courses.
+11. Review the ready and skipped courses, packaging fallback notice, and
+    expected ZIP count; then confirm retrieval for the ready courses.
 12. If GradPack reports unfinished courses after downloading the safe
     archives, select **Retry unfinished courses**. The retry checks only those
     courses again and shows a new review before retrieval.
 13. Keep the resulting archive or archives local. Extract each ZIP before
-    opening its `index.html`.
+    opening its `index.html`. For multipart courses, keep all numbered parts
+    and open each part's `index.html` as needed.
 
 GradPack retrieves only resources available to the signed-in Canvas session.
 Some resources may be unavailable, unsupported, or retained as labeled
