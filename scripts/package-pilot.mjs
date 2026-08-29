@@ -14,7 +14,7 @@ import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { zipSync } from "fflate";
 
-export const PILOT_ARTIFACT_NAME = "gradpack-0.1.0-alpha.6.zip";
+export const PILOT_ARTIFACT_NAME = "gradpack-0.1.0-alpha.7.zip";
 export const PILOT_FILES = Object.freeze([
   "archive.css",
   "manifest.json",
@@ -285,7 +285,7 @@ const validateText = (path, bytes) => {
       !("version" in manifest) ||
       manifest.version !== "0.1.0" ||
       !("version_name" in manifest) ||
-      manifest.version_name !== "0.1.0-alpha.6"
+      manifest.version_name !== "0.1.0-alpha.7"
     ) {
       throw new TypeError("Pilot manifest identity is invalid");
     }

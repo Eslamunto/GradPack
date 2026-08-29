@@ -31,7 +31,7 @@ const makeBuild = async (): Promise<string> => {
     await writeFile(
       join(root, path),
       path === "manifest.json"
-        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.6"}\n'
+        ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.7"}\n'
         : `synthetic:${path}\n`,
     );
   }
@@ -84,7 +84,7 @@ describe("pilot package", () => {
       await writeFile(
         join(buildRoot, path),
         path === "manifest.json"
-          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.6"}\n'
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.7"}\n'
           : `synthetic:${path}\n`,
       );
     }
@@ -244,7 +244,7 @@ describe("pilot package", () => {
       await writeFile(
         join(ancestorBuild, path),
         path === "manifest.json"
-          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.6"}\n'
+          ? '{"name":"GradPack","version":"0.1.0","version_name":"0.1.0-alpha.7"}\n'
           : `synthetic:${path}\n`,
       );
     }

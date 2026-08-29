@@ -8,7 +8,7 @@ import {
   syntheticArchivePlan,
 } from "../fixtures/course-plan";
 
-const RELEASE_VERSION = "0.1.0-alpha.6";
+const RELEASE_VERSION = "0.1.0-alpha.7";
 const ARTIFACT_NAME = `gradpack-${RELEASE_VERSION}.zip`;
 
 describe("pilot release identity", () => {
