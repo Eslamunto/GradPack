@@ -19,7 +19,11 @@ const copyOutcomes = (): ResourceOutcome[] =>
 
 describe("buildManifest", () => {
   it("preserves and validates disabled module discovery", () => {
-    const plan = { ...copyPlan(), moduleDiscovery: "disabled" as const };
+    const plan = {
+      ...copyPlan(),
+      moduleDiscovery: "disabled" as const,
+      modules: [],
+    };
 
     const manifest = buildManifest(plan, copyOutcomes(), CREATED_AT);
 
@@ -30,6 +34,14 @@ describe("buildManifest", () => {
     const missing = { ...manifest } as Record<string, unknown>;
     Reflect.deleteProperty(missing, "moduleDiscovery");
     expect(() => normalizeArchiveManifest(missing)).toThrow(TypeError);
+  });
+
+  it("rejects disabled module discovery with a non-empty module topology", () => {
+    const plan = { ...copyPlan(), moduleDiscovery: "disabled" as const };
+
+    expect(() => buildManifest(plan, copyOutcomes(), CREATED_AT)).toThrowError(
+      TypeError,
+    );
   });
 
   it.each([

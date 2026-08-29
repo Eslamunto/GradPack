@@ -496,6 +496,10 @@ const validatePlan = (value: unknown): CoursePlan => {
     throw new TypeError("Invalid advertised byte total");
   }
   const modules = validateModules(valueOf(record, "modules"));
+  const discovery = moduleDiscovery(valueOf(record, "moduleDiscovery"));
+  if (discovery === "disabled" && modules.length !== 0) {
+    throw new TypeError("Disabled module discovery cannot include modules");
+  }
   for (const module of modules) {
     for (const item of module.items) {
       if (item.resourceKey !== null && !keys.has(item.resourceKey)) {
@@ -505,7 +509,7 @@ const validatePlan = (value: unknown): CoursePlan => {
   }
   return {
     course,
-    moduleDiscovery: moduleDiscovery(valueOf(record, "moduleDiscovery")),
+    moduleDiscovery: discovery,
     modules,
     resources,
     advertisedBytes: declared,

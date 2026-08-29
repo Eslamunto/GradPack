@@ -1,7 +1,16 @@
 /* eslint-disable @typescript-eslint/require-await -- synthetic fetch responses model the browser network seam */
 import { strFromU8, strToU8, unzipSync } from "fflate";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { buildCombinedZip } from "../../src/archive/combined";
+import { ARCHIVE_CSS } from "../../src/archive/style";
+import { buildCourseArchive } from "../../src/page/run-course";
+import {
+  createRunPlan,
+  runCourses,
+  type MultiCourseDependencies,
+} from "../../src/page/run-courses";
 import { EXTENSION_CHANNEL } from "../../src/shared/constants";
+import type { CoursePlan, CourseSummary } from "../../src/shared/model";
 
 type RuntimeListener = Parameters<
   typeof chrome.runtime.onMessage.addListener
@@ -401,5 +410,145 @@ describe("production pilot vertical flow", () => {
     });
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(anchorClick).toHaveBeenCalledTimes(2);
+  });
+
+  it("downloads truthful per-course archives for available and disabled Modules in one run", async () => {
+    const courses: CourseSummary[] = [
+      {
+        id: 101,
+        name: "Available Synthetic Course",
+        courseCode: "SYN-101",
+        workflowState: "available",
+        concluded: false,
+      },
+      {
+        id: 202,
+        name: "Disabled Synthetic Course",
+        courseCode: "SYN-202",
+        workflowState: "completed",
+        concluded: false,
+      },
+    ];
+    const planFor = (course: CourseSummary): CoursePlan => {
+      const disabled = course.id === 202;
+      const fileTitle = disabled ? "reading.pdf" : "slides.pdf";
+      const fileBytes = strToU8(disabled ? "reading" : "slides");
+      return {
+        course: { ...course },
+        moduleDiscovery: disabled ? "disabled" : "available",
+        modules: disabled
+          ? []
+          : [
+              {
+                id: 301,
+                name: "Module One",
+                position: 1,
+                items: [
+                  {
+                    id: 401,
+                    title: fileTitle,
+                    position: 1,
+                    indent: 0,
+                    resourceKey: `file:${course.id}`,
+                    type: "File",
+                  },
+                ],
+              },
+            ],
+        resources: [
+          {
+            key: `file:${course.id}`,
+            kind: "file",
+            title: fileTitle,
+            sourceId: String(course.id),
+            archivePath: `files/${fileTitle}`,
+            advertisedBytes: fileBytes.length,
+            sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}/download`,
+          },
+          {
+            key: `page:day-${course.id}`,
+            kind: "page",
+            title: "Day 1",
+            sourceId: `day-${course.id}`,
+            archivePath: "pages/day-1.html",
+            advertisedBytes: 0,
+            sourceUrl: null,
+          },
+        ],
+        advertisedBytes: fileBytes.length,
+      };
+    };
+    const downloads: Array<{ fileName: string; bytes: Uint8Array }> = [];
+    const dependencies: MultiCourseDependencies = {
+      discover: async (course) => planFor(course),
+      retrieve: vi.fn(async (resource) => ({
+        status: "success" as const,
+        bytes:
+          resource.kind === "page"
+            ? strToU8("<p>Day 1</p>")
+            : strToU8(resource.title === "reading.pdf" ? "reading" : "slides"),
+      })),
+      buildCourseArchive,
+      buildCombinedZip,
+      archiveCss: ARCHIVE_CSS,
+      now: () => "2026-08-27T12:00:00.000Z",
+      fileName: (course) => `gradpack-${course.id}.zip`,
+      combinedFileName: () => "gradpack-combined.zip",
+      download: (fileName, bytes) =>
+        downloads.push({ fileName, bytes: bytes.slice() }),
+    };
+
+    const planReady = await createRunPlan({
+      courses,
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies,
+    });
+
+    expect(planReady.summary.selected).toEqual([
+      expect.objectContaining({
+        courseId: 101,
+        moduleDiscovery: "available",
+        advertisedBytes: 6,
+        resourceCount: 2,
+      }),
+      expect.objectContaining({
+        courseId: 202,
+        moduleDiscovery: "disabled",
+        advertisedBytes: 7,
+        resourceCount: 2,
+      }),
+    ]);
+    expect(planReady.summary.skipped).toEqual([]);
+    expect(planReady.summary).toMatchObject({
+      advertisedBytes: 13,
+      resourceCount: 4,
+      unknownSizeCount: 0,
+    });
+
+    await runCourses({
+      plan: planReady,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies,
+    });
+
+    expect(downloads).toHaveLength(2);
+    const disabledDownload = downloads.find(
+      ({ fileName }) => fileName === "gradpack-202.zip",
+    );
+    expect(disabledDownload).toBeDefined();
+    const disabledEntries = unzipSync(disabledDownload!.bytes);
+    const disabledManifest = JSON.parse(
+      strFromU8(disabledEntries["manifest.json"]!),
+    ) as { moduleDiscovery?: unknown };
+    expect(disabledManifest.moduleDiscovery).toBe("disabled");
+    expect(strFromU8(disabledEntries["modules.html"]!)).toContain(
+      "Module navigation unavailable",
+    );
+    expect(strFromU8(disabledEntries["pages.html"]!)).toContain("Day 1");
+    expect(strFromU8(disabledEntries["files.html"]!)).toContain("reading.pdf");
+    expect(strFromU8(disabledEntries["pages/day-1.html"]!)).toContain("Day 1");
+    expect(strFromU8(disabledEntries["files/reading.pdf"]!)).toBe("reading");
   });
 });

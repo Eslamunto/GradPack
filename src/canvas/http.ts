@@ -158,6 +158,13 @@ const hasConservativeCanvasErrorShape = (value: unknown): boolean => {
 
 const hasConservativeDisabledCourseShape = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null;
+  } catch {
+    return false;
+  }
+  if (prototype !== Object.prototype && prototype !== null) return false;
   const keys = ownKeys(value);
   if (!keys || keys.length !== 1 || keys[0] !== "message") return false;
   return (

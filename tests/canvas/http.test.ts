@@ -293,6 +293,9 @@ describe("CanvasHttp", () => {
     Object.create({
       message: "That page has been disabled for this course",
     }) as object,
+    Object.assign(new (class DisabledModulesPayload {})(), {
+      message: "That page has been disabled for this course",
+    }),
     Object.defineProperty({}, "message", {
       enumerable: true,
       get: () => "That page has been disabled for this course",
