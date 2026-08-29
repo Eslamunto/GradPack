@@ -96,10 +96,10 @@ describe("all packing failures", () => {
       runId: "run-synthetic-0001",
       message: RUNNER_TERMINAL_MESSAGES.noArchives,
       packaging: result.effectivePackaging,
-      completedCourses: result.completed.length,
-      completedCourseIds: result.completed.map(({ course }) => course.id),
+      completedCourses: result.completedCourseIds.length,
+      completedCourseIds: result.completedCourseIds,
       failedCourses: result.failedCourseIds.length,
-      outputCount: result.combined ? 1 : result.completed.length,
+      outputCount: result.outputCount,
       ...result.counts,
     });
 

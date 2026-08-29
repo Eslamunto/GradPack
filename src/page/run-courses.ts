@@ -13,6 +13,7 @@ import {
   MAX_ARCHIVE_BYTES,
 } from "../shared/constants";
 import { partitionCoursePlan } from "./course-parts";
+import { partFileName } from "./course-parts";
 import type {
   AggregateProgress,
   CourseArchivePartPlan,
@@ -55,6 +56,7 @@ export type MultiCourseDependencies = {
   buildCourseArchive: (options: {
     course: CourseSummary;
     plan: CoursePlan;
+    partPlan: CourseArchivePartPlan;
     combinedRoot: string | null;
     signal: AbortSignal;
     progress: (progress: Progress) => void;
@@ -68,11 +70,31 @@ export type MultiCourseDependencies = {
   download: (fileName: string, bytes: Uint8Array) => void;
 };
 
+export type CompletedArchivePart = Readonly<{
+  courseId: number;
+  partIndex: number;
+  totalParts: number;
+  fileName: string;
+}>;
+
+export type FailedArchivePart = Readonly<{
+  courseId: number;
+  partIndex: number;
+  totalParts: number;
+}>;
+
+type CompletedCourse = Omit<CourseArchiveOutput, "zipBytes">;
+type CompletedCombined = Omit<CombinedArchiveOutput, "zipBytes">;
+
 export type MultiCourseResult = {
   effectivePackaging: PackagingMode;
-  combined: CombinedArchiveOutput | null;
-  completed: readonly CourseArchiveOutput[];
+  combined: CompletedCombined | null;
+  completed: readonly CompletedCourse[];
+  completedParts: readonly CompletedArchivePart[];
+  failedParts: readonly FailedArchivePart[];
+  completedCourseIds: readonly number[];
   failedCourseIds: readonly number[];
+  outputCount: number;
   counts: {
     success: number;
     failed: number;
@@ -345,17 +367,35 @@ export async function runCourses(options: {
   dependencies: MultiCourseDependencies;
 }): Promise<MultiCourseResult> {
   const { plan, signal, progress, dependencies } = options;
-  const completed: CourseArchiveOutput[] = [];
+  const completed: CompletedCourse[] = [];
+  const completedParts: CompletedArchivePart[] = [];
+  const failedParts: FailedArchivePart[] = [];
+  const completedCourseIds: number[] = [];
   const failedCourseIds: number[] = [];
-  const handedOff = new Set<number>();
   const counts = emptyCounts();
-  let combined: CombinedArchiveOutput | null = null;
+  let combined: CompletedCombined | null = null;
+  let outputCount = 0;
+  const pendingCombined: CourseArchiveOutput[] = [];
 
-  const handOffCompleted = (): void => {
-    for (const archive of completed) {
-      if (handedOff.has(archive.course.id)) continue;
+  const completedCourse = (
+    coursePlan: CoursePlan,
+    result: RunResult,
+    fileName: string,
+  ): CompletedCourse => ({
+    course: coursePlan.course,
+    fileName,
+    manifest: result.manifest,
+    moduleCount: coursePlan.modules.length,
+    itemCount: coursePlan.modules.reduce(
+      (total, module) => total + module.items.length,
+      0,
+    ),
+  });
+
+  const handOffPendingCombined = (): void => {
+    for (const archive of pendingCombined) {
       dependencies.download(archive.fileName, archive.zipBytes);
-      handedOff.add(archive.course.id);
+      outputCount += 1;
     }
   };
 
@@ -369,7 +409,7 @@ export async function runCourses(options: {
         coursePlan.course,
         index,
         plan.courses.length,
-        completed.length,
+        completedCourseIds.length,
       );
       courseProgress({
         stage: "download",
@@ -377,41 +417,64 @@ export async function runCourses(options: {
         total: coursePlan.resources.length,
         failed: 0,
       });
-      try {
-        const result = await dependencies.buildCourseArchive({
-          course: coursePlan.course,
-          plan: coursePlan,
-          combinedRoot: null,
-          signal,
-          progress: courseProgress,
-          dependencies,
-        });
-        const archive: CourseArchiveOutput = {
-          course: coursePlan.course,
-          fileName: dependencies.fileName(coursePlan.course),
-          manifest: result.manifest,
-          moduleCount: coursePlan.modules.length,
-          itemCount: coursePlan.modules.reduce(
-            (total, module) => total + module.items.length,
-            0,
-          ),
-          zipBytes: result.zipBytes,
-        };
-        completed.push(archive);
-        addCounts(counts, result.manifest.totals);
-        if (plan.summary.effectivePackaging === "per-course") {
-          dependencies.download(archive.fileName, archive.zipBytes);
-          handedOff.add(archive.course.id);
+      let courseComplete = true;
+      let lastCompleted: CompletedCourse | null = null;
+      for (const partPlan of plannedCourse.parts) {
+        throwIfAborted(signal);
+        let partBytes: Uint8Array | null = null;
+        try {
+          const result = await dependencies.buildCourseArchive({
+            course: coursePlan.course,
+            plan: coursePlan,
+            partPlan,
+            combinedRoot: null,
+            signal,
+            progress: courseProgress,
+            dependencies,
+          });
+          partBytes = result.zipBytes;
+          const outputName = partFileName(
+            dependencies.fileName(coursePlan.course),
+            partPlan,
+          );
+          addCounts(counts, result.manifest.totals);
+          const descriptor = Object.freeze({
+            courseId: coursePlan.course.id,
+            partIndex: partPlan.index,
+            totalParts: partPlan.total,
+            fileName: outputName,
+          });
+          if (plan.summary.effectivePackaging === "per-course") {
+            dependencies.download(outputName, result.zipBytes);
+            outputCount += 1;
+          } else {
+            pendingCombined.push({
+              ...completedCourse(coursePlan, result, outputName),
+              zipBytes: result.zipBytes,
+            });
+          }
+          completedParts.push(descriptor);
+          lastCompleted = completedCourse(coursePlan, result, outputName);
+        } catch (error) {
+          if (isAbort(error)) throw error;
+          courseComplete = false;
+          failedParts.push(
+            Object.freeze({
+              courseId: coursePlan.course.id,
+              partIndex: partPlan.index,
+              totalParts: partPlan.total,
+            }),
+          );
+        } finally {
+          if (plan.summary.effectivePackaging === "per-course") {
+            partBytes?.fill(0);
+          }
         }
-        courseProgress({
-          stage: "package",
-          completed: coursePlan.resources.length,
-          total: coursePlan.resources.length,
-          failed:
-            result.manifest.totals.failed + result.manifest.totals.unavailable,
-        });
-      } catch (error) {
-        if (isAbort(error)) throw error;
+      }
+      if (courseComplete && lastCompleted) {
+        completedCourseIds.push(coursePlan.course.id);
+        completed.push(lastCompleted);
+      } else {
         failedCourseIds.push(coursePlan.course.id);
       }
     }
@@ -421,28 +484,35 @@ export async function runCourses(options: {
       failedCourseIds.length === 0
     ) {
       const result = dependencies.buildCombinedZip({
-        archives: completed,
+        archives: pendingCombined,
         archiveCss: dependencies.archiveCss,
         now: dependencies.now,
         fileName: dependencies.combinedFileName,
       });
+      const combinedBytes = result.zipBytes;
+      const combinedFileName = dependencies.combinedFileName(
+        plan.courses.map(({ plan: { course } }) => course),
+      );
       combined = {
-        fileName: dependencies.combinedFileName(
-          plan.courses.map(({ plan: { course } }) => course),
-        ),
+        fileName: combinedFileName,
         manifest: result.manifest,
-        zipBytes: result.zipBytes,
       };
-      dependencies.download(combined.fileName, combined.zipBytes);
+      try {
+        dependencies.download(combinedFileName, combinedBytes);
+        outputCount = 1;
+      } finally {
+        combinedBytes.fill(0);
+      }
     } else if (plan.summary.effectivePackaging === "combined") {
-      handOffCompleted();
+      handOffPendingCombined();
     }
   } catch (error) {
-    handOffCompleted();
+    if (plan.summary.effectivePackaging === "combined") {
+      handOffPendingCombined();
+    }
     throw error;
   } finally {
-    for (const archive of completed) clearBytes(archive.zipBytes);
-    if (combined) clearBytes(combined.zipBytes);
+    for (const archive of pendingCombined) clearBytes(archive.zipBytes);
   }
 
   const effectivePackaging =
@@ -453,7 +523,11 @@ export async function runCourses(options: {
     effectivePackaging,
     combined,
     completed,
+    completedParts: Object.freeze(completedParts),
+    failedParts: Object.freeze(failedParts),
+    completedCourseIds: Object.freeze(completedCourseIds),
     failedCourseIds,
+    outputCount,
     counts,
   };
 }

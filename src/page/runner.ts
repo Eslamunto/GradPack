@@ -170,17 +170,16 @@ if (scope[marker] !== true) {
         return;
       owned.terminal = true;
       if (!markTerminal(runId)) return;
-      const outputCount = result.combined ? 1 : result.completed.length;
       post({
         channel: RUNNER_CHANNEL,
         type: "COMPLETE",
         runId,
-        message: outputCount === 0 ? FIXED.noArchives : FIXED.complete,
+        message: result.outputCount === 0 ? FIXED.noArchives : FIXED.complete,
         packaging: result.effectivePackaging,
-        completedCourses: result.completed.length,
-        completedCourseIds: result.completed.map(({ course }) => course.id),
+        completedCourses: result.completedCourseIds.length,
+        completedCourseIds: [...result.completedCourseIds],
         failedCourses: result.failedCourseIds.length,
-        outputCount,
+        outputCount: result.outputCount,
         ...result.counts,
       });
     } catch (error) {
