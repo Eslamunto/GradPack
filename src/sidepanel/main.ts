@@ -58,6 +58,29 @@ const courseLabel = (course: CourseSummary): string => {
   return details ? `${course.name} — ${details}` : course.name;
 };
 
+const trustCard = (): HTMLElement => {
+  const section = document.createElement("section");
+  section.className = "trust-card";
+
+  const heading = document.createElement("h2");
+  heading.textContent = "Your courses stay with you";
+
+  const trust = paragraph(
+    "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser. Everything is processed locally—there is no telemetry, backend, or cloud upload. Your archives are saved only to your computer.",
+  );
+
+  const responsibleUse = paragraph(
+    "Please keep downloaded course materials for your own use and do not redistribute them.",
+    "responsible-use",
+  );
+  const label = document.createElement("strong");
+  label.textContent = "For personal study: ";
+  responsibleUse.prepend(label);
+
+  section.append(heading, trust, responsibleUse);
+  return section;
+};
+
 const notices = (): HTMLElement => {
   const section = document.createElement("section");
   section.className = "notices";
@@ -66,10 +89,8 @@ const notices = (): HTMLElement => {
   const list = document.createElement("ul");
   for (const text of [
     "Select one or more courses. Combined archives fall back to separate ZIPs when the 250 MB or resource safety limit would be exceeded.",
-    "Everything is processed locally. GradPack has no storage, analytics, or backend.",
     "Keep this Canvas tab open and signed in until the ZIP downloads finish.",
     "Only currently accessible material is retrieved. Some resources may be unavailable, fail, remain external, or be unsupported.",
-    "You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.",
   ]) {
     const item = document.createElement("li");
     item.textContent = text;
@@ -177,6 +198,7 @@ const render = (focus: RenderFocus = null): void => {
     }
     body.append(
       paragraph("Select one or more accessible courses."),
+      trustCard(),
       fieldset,
       paragraph(
         `${state.selectedIds.length} of ${state.courses.length} courses selected.`,
@@ -223,6 +245,7 @@ const render = (focus: RenderFocus = null): void => {
     }
     body.append(
       paragraph(`${state.selectedIds.length} course(s) selected.`),
+      trustCard(),
       fieldset,
       notices(),
       ...(discoveryStatus ? [discoveryStatus] : []),

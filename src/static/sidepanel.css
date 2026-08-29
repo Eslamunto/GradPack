@@ -41,6 +41,7 @@ li {
 
 fieldset,
 .notices,
+.trust-card,
 .selected-course,
 .progress,
 .discovery-progress,
@@ -53,13 +54,28 @@ fieldset,
 }
 
 fieldset,
-.notices {
+.notices,
+.trust-card {
   padding: 1rem;
 }
 
 .notices ul {
   margin-bottom: 0;
   padding-left: 1.25rem;
+}
+
+.trust-card h2 {
+  margin-block: 0 0.5rem;
+}
+
+.trust-card p {
+  margin-block: 0.5rem 0;
+}
+
+.trust-card .responsible-use {
+  border-top: 1px solid #d9dcec;
+  padding-top: 0.75rem;
+  color: #3f4d72;
 }
 
 .selected-course,
