@@ -1,6 +1,6 @@
 # GRAD-23 Folder Recovery and Multipart Archives Design
 
-- **Status:** Design approved; written review pending
+- **Status:** Approved
 - **Issue:** GRAD-23 follow-up — recover incomplete folder metadata and package
   oversized courses
 - **Date:** 2026-08-29
