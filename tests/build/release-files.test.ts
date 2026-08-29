@@ -30,6 +30,7 @@ describe("pilot release surface", () => {
   it("keeps the package command and public guidance within pilot policy", () => {
     const packageJson = JSON.parse(read("package.json"));
     const install = read("docs/pilot/INSTALL.md");
+    const normalizedInstall = install.replace(/\s+/gu, " ");
     const checklist = read("docs/pilot/TEST_CHECKLIST.md");
     const contributing = read("CONTRIBUTING.md");
     const security = read("SECURITY.md");
@@ -50,6 +51,13 @@ describe("pilot release surface", () => {
     ]) {
       expect(install).toContain(token);
     }
+    expect(install).toContain("## Privacy and responsible use");
+    expect(normalizedInstall).toContain(
+      "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser. Everything is processed locally—there is no telemetry, backend, or cloud upload. Your archives are saved only to your computer.",
+    );
+    expect(normalizedInstall).toContain(
+      "**For personal study:** Please keep downloaded course materials for your own use and do not redistribute them.",
+    );
     expect(install).toContain(
       "If GradPack is already installed, select **Remove** and confirm before continuing.",
     );
