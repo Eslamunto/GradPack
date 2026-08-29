@@ -23,6 +23,9 @@ export class CanvasCourseIndexUnavailableError extends CanvasResponseError {
     super("Canvas course index is unavailable");
   }
 }
+export class CanvasCourseModulesDisabledError extends CanvasResponseError {
+  override readonly name = "CanvasCourseModulesDisabledError";
+}
 
 type Sleep = (milliseconds: number, signal?: AbortSignal) => Promise<void>;
 
@@ -70,7 +73,12 @@ const isJsonContentType = (value: string): boolean => {
 };
 
 const isCourseCollectionIndex = (url: URL): boolean =>
-  /^\/api\/v1\/courses\/[1-9]\d*\/(?:files|folders|pages)$/.test(url.pathname);
+  /^\/api\/v1\/courses\/[1-9]\d*\/(?:files|folders|modules|pages)$/.test(
+    url.pathname,
+  );
+
+const isCourseModulesIndex = (url: URL): boolean =>
+  /^\/api\/v1\/courses\/[1-9]\d*\/modules$/.test(url.pathname);
 
 const isCoursePagesIndex = (url: URL): boolean =>
   /^\/api\/v1\/courses\/[1-9]\d*\/pages$/.test(url.pathname);
@@ -148,8 +156,15 @@ const hasConservativeCanvasErrorShape = (value: unknown): boolean => {
   return typeof status === "string" && /^[a-z][a-z0-9_-]{0,99}$/u.test(status);
 };
 
-const hasConservativeDisabledPagesShape = (value: unknown): boolean => {
+const hasConservativeDisabledCourseShape = (value: unknown): boolean => {
   if (!isRecord(value)) return false;
+  let prototype: object | null;
+  try {
+    prototype = Object.getPrototypeOf(value) as object | null;
+  } catch {
+    return false;
+  }
+  if (prototype !== Object.prototype && prototype !== null) return false;
   const keys = ownKeys(value);
   if (!keys || keys.length !== 1 || keys[0] !== "message") return false;
   return (
@@ -306,10 +321,18 @@ export class CanvasHttp {
           throw new CanvasResponseError("Canvas returned invalid JSON");
         }
         if (
+          isCourseModulesIndex(url) &&
+          hasConservativeDisabledCourseShape(errorValue)
+        ) {
+          throw new CanvasCourseModulesDisabledError(
+            "Canvas course Modules are disabled",
+          );
+        }
+        if (
           !hasConservativeCanvasErrorShape(errorValue) &&
           !(
             isCoursePagesIndex(url) &&
-            hasConservativeDisabledPagesShape(errorValue)
+            hasConservativeDisabledCourseShape(errorValue)
           )
         ) {
           throw new CanvasResponseError(
@@ -458,13 +481,23 @@ export class CanvasHttp {
 
   fetchAll<T>(url: URL): Promise<T[]> {
     let initial = true;
-    return fetchAllPages<T>((next) => {
+    return fetchAllPages<T>(async (next) => {
       const isInitial = initial;
       initial = false;
-      return this.requestJson<T[]>(next, {
+      const page = await this.requestJson<unknown>(next, {
         optionalCourseIndexInitial: isInitial && isCourseCollectionIndex(url),
         continuation: !isInitial,
       });
+      if (
+        isInitial &&
+        isCourseModulesIndex(url) &&
+        hasConservativeDisabledCourseShape(page.value)
+      ) {
+        throw new CanvasCourseModulesDisabledError(
+          "Canvas course Modules are disabled",
+        );
+      }
+      return page as { value: T[]; response: Response };
     }, url);
   }
 }

@@ -18,13 +18,19 @@ export type PackagingMode = "combined" | "per-course";
 export type PlanFallbackReason =
   | "combined-size-exceeded"
   | "combined-resource-limit-exceeded"
-  | "unknown-size-files";
+  | "unknown-size-files"
+  | "multipart-course";
+
+export type ModuleDiscovery = "available" | "disabled";
 
 export type CoursePlanSummary = {
   courseId: number;
+  moduleDiscovery: ModuleDiscovery;
   advertisedBytes: number;
   unknownSizeCount: number;
   resourceCount: number;
+  folderPathFallbackCount: number;
+  archivePartCount: number;
 };
 
 export type CoursePlanFailureCategory =
@@ -53,6 +59,8 @@ export type RunPlanSummary = {
   advertisedBytes: number;
   unknownSizeCount: number;
   resourceCount: number;
+  totalPlannedParts: number;
+  expectedArchiveCount: number;
   fallbackReason: PlanFallbackReason | null;
 };
 
@@ -61,6 +69,11 @@ export type AggregateProgress = Progress & {
   currentCourseIndex: number;
   totalCourses: number;
   completedCourses: number;
+  currentPartIndex: number;
+  totalParts: number;
+  totalArchiveParts: number;
+  completedParts: number;
+  failedParts: number;
 };
 
 export type ResourceKind = "file" | "page" | "external" | "unsupported";
@@ -95,9 +108,23 @@ export type CourseModule = {
 
 export type CoursePlan = {
   course: CourseSummary;
+  moduleDiscovery: ModuleDiscovery;
   modules: CourseModule[];
   resources: PlannedResource[];
+  folderPathFallbackKeys: string[];
   advertisedBytes: number;
+};
+
+export type ResourcePartAssignment = {
+  resourceKey: string;
+  partIndex: number;
+};
+
+export type CourseArchivePartPlan = {
+  index: number;
+  total: number;
+  resourceKeys: string[];
+  resourceParts: ResourcePartAssignment[];
 };
 
 export type ResourceOutcome = PlannedResource & {

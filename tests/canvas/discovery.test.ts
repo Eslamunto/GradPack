@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  assertPilotSize,
+  assertCoursePlanSizes,
   discoverCoursePlan,
   PilotSizeError,
 } from "../../src/canvas/discovery";
@@ -50,6 +50,51 @@ function deferred(): { promise: Promise<void>; resolve: () => void } {
 }
 
 describe("discoverCoursePlan", () => {
+  it("archives accessible pages and files when Modules are disabled", async () => {
+    const http = syntheticCanvasHttp({
+      modulesDisabled: true,
+      files: [file(301, "reading.pdf", 19)],
+      pages: [{ page_id: 501, url: "day-1", title: "Day 1" }],
+      pageDetails: {
+        "day-1": {
+          title: "Day 1",
+          body: '<a href="/courses/101/files/302/download">Reading</a>',
+        },
+      },
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan.moduleDiscovery).toBe("disabled");
+    expect(plan.modules).toEqual([]);
+    expect(plan.resources.map(({ key }) => key)).toEqual([
+      "file:301",
+      "file:302",
+      "page:day-1",
+    ]);
+    expect(http.fetchAll.mock.calls.map(([url]) => url.pathname)).not.toContain(
+      "/api/v1/courses/101/modules/201/items",
+    );
+  });
+
+  it("creates an accurate empty plan when disabled Modules indexes are empty", async () => {
+    const http = syntheticCanvasHttp({
+      modulesDisabled: true,
+      files: [],
+      folders: [],
+      pages: [],
+    });
+
+    const plan = await discoverCoursePlan(http, syntheticCourse);
+
+    expect(plan).toMatchObject({
+      moduleDiscovery: "disabled",
+      modules: [],
+      resources: [],
+      advertisedBytes: 0,
+    });
+  });
+
   it("falls back to module-linked files when the broad index has an accepted optional error", async () => {
     const response = (body: unknown, url: URL, status = 200): Response => {
       const value = new Response(JSON.stringify(body), {
@@ -141,6 +186,7 @@ describe("discoverCoursePlan", () => {
 
     const plan = await discoverCoursePlan(http, syntheticCourse);
 
+    expect(plan.moduleDiscovery).toBe("available");
     expect(plan.resources.map(({ key }) => key)).toEqual([
       "file:301",
       "file:302",
@@ -814,18 +860,42 @@ describe("discoverCoursePlan", () => {
     expect(paths.some((path) => /--file-(12|13)/.test(path))).toBe(true);
   });
 
-  it("hard-fails a referenced folder missing from an available folder index", async () => {
-    await expect(
-      discoverCoursePlan(
-        syntheticCanvasHttp({
-          modules: [],
-          files: [{ ...file(1), folder_id: 999 }],
-          folders: [{ id: 401, full_name: "course files/Present" }],
-          pages: [],
-        }),
-        syntheticCourse,
-      ),
-    ).rejects.toThrow("Missing folder metadata");
+  it("places a file with an absent referenced folder under files/unfiled", async () => {
+    const plan = await discoverCoursePlan(
+      syntheticCanvasHttp({
+        modules: [],
+        files: [{ ...file(1, "report.pdf"), folder_id: 999 }],
+        folders: [{ id: 401, full_name: "course files/Present" }],
+        pages: [],
+      }),
+      syntheticCourse,
+    );
+
+    expect(plan.resources[0]?.archivePath).toBe("files/unfiled/report.pdf");
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1"]);
+  });
+
+  it("allocates colliding unfiled paths deterministically", async () => {
+    const plan = await discoverCoursePlan(
+      syntheticCanvasHttp({
+        modules: [],
+        files: [
+          { ...file(1, "Résumé.pdf"), folder_id: 998 },
+          { ...file(2, "Re\u0301sume\u0301.PDF"), folder_id: 999 },
+        ],
+        folders: [{ id: 401, full_name: "course files/Present" }],
+        pages: [],
+      }),
+      syntheticCourse,
+    );
+
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1", "file:2"]);
+    const paths = plan.resources.map(({ archivePath }) => archivePath);
+    expect(new Set(paths.map((path) => path?.toLowerCase())).size).toBe(2);
+    expect(paths.every((path) => path?.startsWith("files/unfiled/"))).toBe(
+      true,
+    );
+    expect(paths.some((path) => /--file-(1|2)/u.test(path ?? ""))).toBe(true);
   });
 
   it("requires full_name instead of trusting a name-only folder record", async () => {
@@ -842,7 +912,7 @@ describe("discoverCoursePlan", () => {
     ).rejects.toThrow("Invalid folder path");
   });
 
-  it("uses a safe root path when the entire folder index is unavailable", async () => {
+  it("discloses the unfiled fallback when the folder index is unavailable", async () => {
     const plan = await discoverCoursePlan(
       syntheticCanvasHttp({
         modules: [],
@@ -853,7 +923,8 @@ describe("discoverCoursePlan", () => {
       syntheticCourse,
     );
 
-    expect(plan.resources[0]?.archivePath).toBe("files/root.txt");
+    expect(plan.resources[0]?.archivePath).toBe("files/unfiled/root.txt");
+    expect(plan.folderPathFallbackKeys).toEqual(["file:1"]);
   });
 
   it("rejects file metadata whose ID does not match the closed requested endpoint", async () => {
@@ -1191,17 +1262,17 @@ describe("discoverCoursePlan", () => {
   });
 });
 
-describe("assertPilotSize", () => {
+describe("assertCoursePlanSizes", () => {
   it.each([
     [0, false],
     [262_144_000, false],
-    [262_144_001, true],
+    [262_144_001, false],
     [-1, true],
     [null, false],
     [1.5, true],
     [Number.NaN, true],
   ])("enforces advertised size %s", (size, rejected) => {
-    const assertion = () => assertPilotSize(planWithOneFile(size));
+    const assertion = () => assertCoursePlanSizes(planWithOneFile(size));
     if (rejected) expect(assertion).toThrow(PilotSizeError);
     else expect(assertion).not.toThrow();
   });
@@ -1216,14 +1287,14 @@ describe("assertPilotSize", () => {
     });
     plan.advertisedBytes = Number.MAX_SAFE_INTEGER;
 
-    expect(() => assertPilotSize(plan)).toThrow("overflow");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("overflow");
   });
 
   it("rejects a declared total that does not match the immutable file plan", () => {
     const plan = planWithOneFile(19);
     plan.advertisedBytes = 18;
 
-    expect(() => assertPilotSize(plan)).toThrow("total");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("total");
   });
 
   it("does not trust inherited file-size fields at the size boundary", () => {
@@ -1234,6 +1305,6 @@ describe("assertPilotSize", () => {
     }) as (typeof plan.resources)[number];
     plan.resources = [inherited];
 
-    expect(() => assertPilotSize(plan)).toThrow("invalid resource");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("invalid resource");
   });
 });

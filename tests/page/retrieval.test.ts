@@ -5,6 +5,7 @@ import { CanvasSessionError } from "../../src/canvas/http";
 import {
   CANVAS_ORIGIN,
   CANVAS_PAGE_JSON_MAX_BYTES,
+  MAX_ARCHIVED_PAGE_BYTES,
   MAX_ARCHIVE_BYTES,
 } from "../../src/shared/constants";
 import {
@@ -398,7 +399,7 @@ describe("unknown-size production file retrieval", () => {
     expect(shared).toEqual(new Uint8Array(3));
   });
 
-  it("rejects an over-budget declared length before reading the body", async () => {
+  it("classifies an over-budget declared length before reading the body", async () => {
     const response = streamResponse([new Uint8Array([9, 8, 7, 6])], {
       status: 200,
       headers: {
@@ -415,11 +416,14 @@ describe("unknown-size production file retrieval", () => {
         { fetcher: vi.fn(async () => response), sleep: vi.fn() },
         3,
       ),
-    ).rejects.toThrow("Archive byte limit exceeded");
+    ).resolves.toEqual({
+      status: "unavailable",
+      failureCategory: "individual-size-limit",
+    });
     expect(cancel).toHaveBeenCalledOnce();
   });
 
-  it("cancels and zeroes every retained chunk after streamed overflow", async () => {
+  it("classifies streamed overflow and zeroes every retained chunk", async () => {
     const first = new Uint8Array([1, 2]);
     const overflow = new Uint8Array([3, 4]);
     const cancelled = vi.fn();
@@ -447,7 +451,10 @@ describe("unknown-size production file retrieval", () => {
         { fetcher: vi.fn(async () => response), sleep: vi.fn() },
         3,
       ),
-    ).rejects.toThrow("Archive byte limit exceeded");
+    ).resolves.toEqual({
+      status: "unavailable",
+      failureCategory: "individual-size-limit",
+    });
     expect(cancelled).toHaveBeenCalledOnce();
     expect(first).toEqual(new Uint8Array(2));
     expect(overflow).toEqual(new Uint8Array(2));
@@ -742,6 +749,27 @@ describe("production page retrieval and local links", () => {
       status: "unavailable",
       failureCategory: "page-too-large",
     });
+  });
+
+  it("maps sanitized page output beyond the archived page limit", async () => {
+    const http = {
+      jsonBoundedResource: vi.fn(async () => ({
+        value: { title: "Welcome", body: "<p>Too large</p>" },
+      })),
+    };
+    await expect(
+      fetchPageResource(
+        page,
+        syntheticArchivePlan,
+        new AbortController().signal,
+        http as never,
+        8,
+      ),
+    ).resolves.toEqual({
+      status: "unavailable",
+      failureCategory: "page-too-large",
+    });
+    expect(MAX_ARCHIVED_PAGE_BYTES).toBeGreaterThan(8);
   });
 
   it("rewrites only exact same-course known file and page paths", () => {

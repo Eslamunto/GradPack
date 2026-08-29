@@ -79,6 +79,18 @@ its aggregate size or ZIP-entry limit while the individual courses remain valid
 uses the same visible combined-to-per-course fallback. GradPack never silently
 omits resources to make a course fit.
 
+If a course's advertised material is larger than 250 MiB, GradPack creates
+several sequential, self-contained ZIP parts instead of skipping the course.
+Every part keeps the same hard payload cap. Offline navigation labels material
+stored in another ZIP as **Available in Part N** instead of creating a broken
+link. A single file larger than the cap remains listed with the explicit
+`individual-size-limit` unavailable outcome.
+
+When Canvas does not provide a usable folder relationship for an otherwise
+valid file, GradPack saves it deterministically under `files/unfiled/` and
+discloses that fallback in the review screen, archive status, and manifest.
+Malformed folder metadata still fails closed.
+
 During retrieval, each course also stops if successful files plus sanitized
 pages exceed the same 250 MiB per-course limit. Individual Canvas page-detail
 JSON bodies are streamed under a conservative 5 MiB raw-body cap and receive a
@@ -88,3 +100,7 @@ Each course archive reserves seven ZIP entries for its generated interface and
 manifest, leaving a maximum of 65,528 discovered resource entries. GradPack
 stops safely when a course would exceed that limit; it never drops resources to
 make an archive fit.
+
+These recovery paths add no permission, origin, backend, persistence, or
+telemetry. Keep the signed-in Canvas tab open and unnavigated until every ZIP
+part has downloaded.

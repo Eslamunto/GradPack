@@ -17,6 +17,10 @@ const size = (resource: ArchiveResourceView): string => {
   const bytes = resource.actualBytes ?? resource.advertisedBytes;
   return bytes === null ? "" : ` <span>${bytes} bytes</span>`;
 };
+const availability = (resource: ArchiveResourceView): string =>
+  resource.availableInPart === null
+    ? ""
+    : ` <span class="resource-part">Available in Part ${resource.availableInPart}</span>`;
 const row = (
   pagePath: string,
   resource: ArchiveResourceView,
@@ -29,7 +33,7 @@ const row = (
     label = `<a href="${relativeArchiveHref(pagePath, resource.archivePath)}">${escapeHtml(title)}</a>`;
   else if (resource.status === "external" && resource.externalHref !== null)
     label = `<a href="${escapeHtml(resource.externalHref)}" rel="noopener noreferrer">${escapeHtml(title)} (external)</a>`;
-  return `<li class="module-indent-${indent}">${label} ${status(resource)}${details}</li>`;
+  return `<li class="module-indent-${indent}">${label} ${status(resource)}${availability(resource)}${details}</li>`;
 };
 const shell = (
   model: ArchiveNavigationModel,
@@ -45,7 +49,7 @@ const shell = (
     title,
     course: model.manifest.course,
     combinedHomeHref,
-    contentHtml,
+    contentHtml: `<p class="archive-part">Part ${model.manifest.part.index} of ${model.manifest.part.total}</p>${contentHtml}`,
   });
 
 export const renderCoursePages = (
@@ -86,11 +90,18 @@ export const renderCoursePages = (
     )
     .join("");
   const totals = model.manifest.totals;
-  const home = `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>${escapeHtml(model.manifest.course.name)}</h1><p>Browse this saved course without Canvas.</p></header><section class="panel"><h2>Course content</h2><p><a href="modules.html">View modules</a>, <a href="pages.html">pages</a>, <a href="files.html">files</a>, or <a href="status.html">archive status</a>.</p></section>`;
+  const modulesUnavailable = model.manifest.moduleDiscovery === "disabled";
+  const modulesNotice =
+    '<aside class="panel modules-unavailable"><h2>Module navigation unavailable</h2><p>Module navigation is unavailable; GradPack archived accessible pages and files instead.</p></aside>';
+  const unfiledNotice =
+    model.manifest.courseTotals.folderPathFallbackCount === 0
+      ? ""
+      : `<aside class="panel unfiled-notice"><h2>Canvas folder placement unavailable</h2><p>${model.manifest.courseTotals.folderPathFallbackCount} file(s) were saved under <code>files/unfiled/</code> because Canvas did not provide their folder placement.</p></aside>`;
+  const home = `<header class="archive-header"><p class="eyebrow">GradPack offline archive</p><h1>${escapeHtml(model.manifest.course.name)}</h1><p>Browse this saved course without Canvas.</p></header><section class="panel"><h2>Course content</h2><p><a href="modules.html">View modules</a>, <a href="pages.html">pages</a>, <a href="files.html">files</a>, or <a href="status.html">archive status</a>.</p></section>${modulesUnavailable ? modulesNotice : ""}${unfiledNotice}`;
   const outcomes = model.resources
     .map((resource) => row("status.html", resource, resource.title))
     .join("");
-  const statusPage = `<h1>Archive status</h1><section class="status-grid"><div class="panel"><strong>${totals.success}</strong><br>Saved</div><div class="panel"><strong>${totals.failed}</strong><br>Failed</div><div class="panel"><strong>${totals.unavailable}</strong><br>Unavailable</div><div class="panel"><strong>${totals.unsupported}</strong><br>Unsupported</div><div class="panel"><strong>${totals.external}</strong><br>External</div></section><h2>Resource outcomes</h2><ul class="resource-list">${outcomes || "<li>No resources were listed.</li>"}</ul><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`;
+  const statusPage = `<h1>Archive status</h1><h2>This part</h2><section class="status-grid"><div class="panel"><strong>${totals.success}</strong><br>Saved</div><div class="panel"><strong>${totals.failed}</strong><br>Failed</div><div class="panel"><strong>${totals.unavailable}</strong><br>Unavailable</div><div class="panel"><strong>${totals.unsupported}</strong><br>Unsupported</div><div class="panel"><strong>${totals.external}</strong><br>External</div></section><section class="panel"><h2>Complete course resources</h2><p>${model.manifest.courseTotals.resourceCount} resource(s) across ${model.manifest.part.total} part(s); ${model.manifest.courseTotals.advertisedBytes} advertised byte(s).</p></section>${modulesUnavailable ? modulesNotice : ""}${unfiledNotice}<h2>Resource outcomes</h2><ul class="resource-list">${outcomes || "<li>No resources were listed.</li>"}</ul><p><a href="manifest.json">View technical manifest</a></p><aside class="responsibility-notice"><h2>Course-material responsibility</h2><p>You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.</p></aside>`;
   return new Map([
     [
       "files.html",
@@ -121,7 +132,11 @@ export const renderCoursePages = (
         "modules.html",
         "modules",
         "Modules",
-        `<h1>Modules</h1>${modules || "<p>No modules were listed.</p>"}`,
+        `<h1>Modules</h1>${
+          modulesUnavailable
+            ? modulesNotice
+            : modules || "<p>No modules were listed.</p>"
+        }`,
         combined,
       ),
     ],

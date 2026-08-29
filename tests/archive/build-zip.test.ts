@@ -95,48 +95,69 @@ const localHeaderMetadata = (bytes: Uint8Array): HeaderMetadata[] => {
 const manifestWithResources = (
   count: number,
   status: "success" | "unsupported" = "success",
-): ArchiveManifest => ({
-  schemaVersion: 1,
-  gradPackVersion: "0.1.0-alpha.6",
-  createdAt: "2026-08-16T12:00:00.000Z",
-  canvasHost: "frankfurtschool.instructure.com",
-  course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
-  totals: {
-    success: status === "success" ? count : 0,
-    failed: 0,
-    unavailable: 0,
-    unsupported: status === "unsupported" ? count : 0,
-    external: 0,
-    advertisedBytes: 0,
-    archivedBytes: 0,
-  },
-  resources: Array.from({ length: count }, (_, index) => {
-    const suffix = index.toString().padStart(5, "0");
-    return status === "success"
-      ? {
-          key: `file:${suffix}`,
-          kind: "file" as const,
-          title: "Synthetic file",
-          sourceId: suffix,
-          archivePath: `files/item-${suffix}.bin`,
-          advertisedBytes: 0,
-          status: "success" as const,
-          actualBytes: 0,
-          failureCategory: null,
-        }
-      : {
-          key: `unsupported:${suffix}`,
-          kind: "unsupported" as const,
-          title: "Synthetic unsupported item",
-          sourceId: suffix,
-          archivePath: null,
-          advertisedBytes: 0,
-          status: "unsupported" as const,
-          actualBytes: 0,
-          failureCategory: null,
-        };
-  }),
-});
+): ArchiveManifest => {
+  const resources: ArchiveManifest["resources"] = Array.from(
+    { length: count },
+    (_, index) => {
+      const suffix = index.toString().padStart(5, "0");
+      return status === "success"
+        ? {
+            key: `file:${suffix}`,
+            kind: "file" as const,
+            title: "Synthetic file",
+            sourceId: suffix,
+            archivePath: `files/item-${suffix}.bin`,
+            advertisedBytes: 0,
+            status: "success" as const,
+            actualBytes: 0,
+            failureCategory: null,
+          }
+        : {
+            key: `unsupported:${suffix}`,
+            kind: "unsupported" as const,
+            title: "Synthetic unsupported item",
+            sourceId: suffix,
+            archivePath: null,
+            advertisedBytes: 0,
+            status: "unsupported" as const,
+            actualBytes: 0,
+            failureCategory: null,
+          };
+    },
+  );
+  return {
+    schemaVersion: 1,
+    gradPackVersion: "0.1.0-alpha.6",
+    createdAt: "2026-08-16T12:00:00.000Z",
+    canvasHost: "frankfurtschool.instructure.com",
+    course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+    moduleDiscovery: "available",
+    part: { index: 1, total: 1 },
+    courseTotals: {
+      advertisedBytes: 0,
+      resourceCount: count,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 0,
+    },
+    totals: {
+      success: status === "success" ? count : 0,
+      failed: 0,
+      unavailable: 0,
+      unsupported: status === "unsupported" ? count : 0,
+      external: 0,
+      advertisedBytes: 0,
+      archivedBytes: 0,
+    },
+    resourceCatalog: resources.map(({ key, kind, title }) => ({
+      key,
+      kind,
+      title,
+      partIndex: 1,
+      folderPathFallback: false,
+    })),
+    resources,
+  };
+};
 
 const inputAtPayloadCount = (count: number): ArchiveInput => {
   const input = copyInput();

@@ -45,6 +45,9 @@ h2 { margin: 0 0 0.75rem; }
 .module-indent-4 { padding-left: 5rem !important; }
 .module-indent-5 { padding-left: 6rem !important; }
 .resource-status { display: inline-block; margin-left: 0.4rem; padding: 0.12rem 0.5rem; border-radius: 999px; color: #3f496d; background: #eceefa; font-size: 0.78rem; }
+.archive-part { margin: 0 0 1rem; color: var(--gradpack-muted); font-size: 0.85rem; font-weight: 700; }
+.resource-part { display: inline-block; margin-left: 0.4rem; color: var(--gradpack-muted); font-size: 0.82rem; }
+.unfiled-notice { border-color: #d9c98d; background: #fffbee; }
 .status-success { color: #17633a; background: #e8f5ed; }
 .status-unavailable, .status-failed { color: #7a3d00; background: #fff1df; }
 .metadata, .status-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr)); gap: 0.75rem; margin: 0; }

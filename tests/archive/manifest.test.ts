@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { buildManifest } from "../../src/archive/manifest";
-import type { CoursePlan, ResourceOutcome } from "../../src/shared/model";
+import {
+  buildManifest,
+  normalizeArchiveManifest,
+} from "../../src/archive/manifest";
+import type {
+  CourseArchivePartPlan,
+  CoursePlan,
+  ResourceOutcome,
+} from "../../src/shared/model";
 import {
   syntheticArchiveInput,
   syntheticArchiveOutcomes,
@@ -14,7 +21,109 @@ const copyPlan = (): CoursePlan => structuredClone(syntheticArchivePlan);
 const copyOutcomes = (): ResourceOutcome[] =>
   structuredClone(syntheticArchiveOutcomes);
 
+const firstOfTwoParts = (): CourseArchivePartPlan => ({
+  index: 1,
+  total: 2,
+  resourceKeys: ["file:301", "external:401", "unsupported:501"],
+  resourceParts: [
+    { resourceKey: "file:301", partIndex: 1 },
+    { resourceKey: "page:welcome", partIndex: 2 },
+    { resourceKey: "external:401", partIndex: 1 },
+    { resourceKey: "unsupported:501", partIndex: 1 },
+  ],
+});
+
 describe("buildManifest", () => {
+  it("records a complete course catalog and part-local outcomes", () => {
+    const plan = copyPlan();
+    plan.folderPathFallbackKeys = ["file:301"];
+    plan.resources[0]!.archivePath = "files/unfiled/slides.pdf";
+    const outcomes = copyOutcomes()
+      .filter(({ key }) => key !== "page:welcome")
+      .map((outcome) =>
+        outcome.key === "file:301"
+          ? { ...outcome, archivePath: "files/unfiled/slides.pdf" }
+          : outcome,
+      );
+
+    const manifest = buildManifest(
+      plan,
+      outcomes,
+      CREATED_AT,
+      firstOfTwoParts(),
+    );
+
+    expect(manifest.part).toEqual({ index: 1, total: 2 });
+    expect(manifest.courseTotals).toEqual({
+      advertisedBytes: 19,
+      resourceCount: 4,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 1,
+    });
+    expect(manifest.resources.map(({ key }) => key)).toEqual([
+      "file:301",
+      "external:401",
+      "unsupported:501",
+    ]);
+    expect(manifest.resourceCatalog).toEqual([
+      {
+        key: "file:301",
+        kind: "file",
+        title: "slides.pdf",
+        partIndex: 1,
+        folderPathFallback: true,
+      },
+      {
+        key: "page:welcome",
+        kind: "page",
+        title: "Welcome",
+        partIndex: 2,
+        folderPathFallback: false,
+      },
+      {
+        key: "external:401",
+        kind: "external",
+        title: "Public reference",
+        partIndex: 1,
+        folderPathFallback: false,
+      },
+      {
+        key: "unsupported:501",
+        kind: "unsupported",
+        title: "Synthetic unsupported item",
+        partIndex: 1,
+        folderPathFallback: false,
+      },
+    ]);
+    expect(() => normalizeArchiveManifest(manifest)).not.toThrow();
+  });
+
+  it("preserves and validates disabled module discovery", () => {
+    const plan = {
+      ...copyPlan(),
+      moduleDiscovery: "disabled" as const,
+      modules: [],
+    };
+
+    const manifest = buildManifest(plan, copyOutcomes(), CREATED_AT);
+
+    expect(manifest.moduleDiscovery).toBe("disabled");
+    expect(() =>
+      normalizeArchiveManifest({ ...manifest, moduleDiscovery: "unknown" }),
+    ).toThrow(TypeError);
+    const missing = { ...manifest } as Record<string, unknown>;
+    Reflect.deleteProperty(missing, "moduleDiscovery");
+    expect(() => normalizeArchiveManifest(missing)).toThrow(TypeError);
+  });
+
+  it("rejects disabled module discovery with a non-empty module topology", () => {
+    const plan = { ...copyPlan(), moduleDiscovery: "disabled" as const };
+
+    expect(() => buildManifest(plan, copyOutcomes(), CREATED_AT)).toThrowError(
+      TypeError,
+    );
+  });
+
   it.each([
     ["success", 25, null],
     ["unavailable", null, "not-found"],
@@ -24,8 +133,10 @@ describe("buildManifest", () => {
       const resource = unknownFileResource();
       const plan: CoursePlan = {
         course: structuredClone(syntheticArchivePlan.course),
+        moduleDiscovery: "available",
         modules: [],
         resources: [resource],
+        folderPathFallbackKeys: [],
         advertisedBytes: 0,
       };
       const outcomes: ResourceOutcome[] = [
@@ -53,6 +164,29 @@ describe("buildManifest", () => {
     },
   );
 
+  it("accepts individual-size-limit only for unavailable files", () => {
+    const filePlan = copyPlan();
+    const fileOutcomes = copyOutcomes();
+    Object.assign(fileOutcomes[0]!, {
+      status: "unavailable",
+      actualBytes: null,
+      failureCategory: "individual-size-limit",
+    });
+    expect(() =>
+      buildManifest(filePlan, fileOutcomes, CREATED_AT),
+    ).not.toThrow();
+
+    const pageOutcomes = copyOutcomes();
+    Object.assign(pageOutcomes[1]!, {
+      status: "unavailable",
+      actualBytes: null,
+      failureCategory: "individual-size-limit",
+    });
+    expect(() =>
+      buildManifest(copyPlan(), pageOutcomes, CREATED_AT),
+    ).toThrowError(TypeError);
+  });
+
   it.each([
     [
       "another course",
@@ -70,8 +204,10 @@ describe("buildManifest", () => {
     const resource = { ...unknownFileResource(), sourceUrl };
     const plan: CoursePlan = {
       course: structuredClone(syntheticArchivePlan.course),
+      moduleDiscovery: "available",
       modules: [],
       resources: [resource],
+      folderPathFallbackKeys: [],
       advertisedBytes: 0,
     };
     const outcomes: ResourceOutcome[] = [
@@ -99,8 +235,10 @@ describe("buildManifest", () => {
       };
       const plan: CoursePlan = {
         course: structuredClone(syntheticArchivePlan.course),
+        moduleDiscovery: "available",
         modules: [],
         resources: [resource],
+        folderPathFallbackKeys: [],
         advertisedBytes: 0,
       };
       const outcomes: ResourceOutcome[] = [
@@ -127,6 +265,14 @@ describe("buildManifest", () => {
       createdAt: CREATED_AT,
       canvasHost: "frankfurtschool.instructure.com",
       course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+      moduleDiscovery: "available",
+      part: { index: 1, total: 1 },
+      courseTotals: {
+        advertisedBytes: 19,
+        resourceCount: 4,
+        unknownSizeCount: 0,
+        folderPathFallbackCount: 0,
+      },
       totals: {
         success: 2,
         failed: 0,
@@ -136,6 +282,13 @@ describe("buildManifest", () => {
         advertisedBytes: 19,
         archivedBytes: syntheticArchiveInput.manifest.totals.archivedBytes,
       },
+      resourceCatalog: syntheticArchivePlan.resources.map((resource) => ({
+        key: resource.key,
+        kind: resource.kind,
+        title: resource.title,
+        partIndex: 1,
+        folderPathFallback: false,
+      })),
       resources: expect.arrayContaining([
         expect.objectContaining({ key: "file:301", status: "success" }),
         expect.objectContaining({ key: "page:welcome", status: "success" }),
@@ -162,6 +315,10 @@ describe("buildManifest", () => {
     expect(Object.isFrozen(manifest)).toBe(true);
     expect(Object.isFrozen(manifest.resources)).toBe(true);
     expect(Object.isFrozen(manifest.resources[0])).toBe(true);
+    expect(Object.isFrozen(manifest.resourceCatalog)).toBe(true);
+    expect(Object.isFrozen(manifest.resourceCatalog[0])).toBe(true);
+    expect(Object.isFrozen(manifest.part)).toBe(true);
+    expect(Object.isFrozen(manifest.courseTotals)).toBe(true);
   });
 
   it.each([
@@ -395,7 +552,9 @@ describe("buildManifest", () => {
     const count = 65_533;
     const plan: CoursePlan = {
       course: structuredClone(syntheticArchivePlan.course),
+      moduleDiscovery: "available",
       modules: [],
+      folderPathFallbackKeys: [],
       advertisedBytes: 0,
       resources: Array.from({ length: count }, (_, index) => ({
         key: `unsupported:${index}`,

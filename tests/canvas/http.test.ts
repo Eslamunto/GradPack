@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CanvasBodySizeError,
   CanvasCourseIndexUnavailableError,
+  CanvasCourseModulesDisabledError,
   CanvasHttp,
   CanvasResourceUnavailableError,
   CanvasResponseError,
@@ -223,6 +224,93 @@ describe("CanvasHttp", () => {
       status: 404,
     });
     expect(fetcher).toHaveBeenCalledOnce();
+  });
+
+  it.each([200, 403, 404])(
+    "classifies exact disabled Modules JSON at status %i",
+    async (status) => {
+      const url = `${CANVAS_ORIGIN}/api/v1/courses/101/modules?include%5B%5D=items&per_page=100`;
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(
+          jsonResponse(
+            status,
+            { message: "That page has been disabled for this course" },
+            { url },
+          ),
+        );
+
+      await expect(
+        new CanvasHttp(fetcher).fetchAll(new URL(url)),
+      ).rejects.toBeInstanceOf(CanvasCourseModulesDisabledError);
+      expect(fetcher).toHaveBeenCalledOnce();
+    },
+  );
+
+  it.each([
+    { message: "That page has been disabled for this course", extra: true },
+    { message: "Modules unavailable" },
+  ])("does not classify non-exact Modules body %#", async (body) => {
+    const url = `${CANVAS_ORIGIN}/api/v1/courses/101/modules?per_page=100`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, body, { url }));
+
+    await expect(
+      new CanvasHttp(fetcher).fetchAll(new URL(url)),
+    ).rejects.not.toMatchObject({ name: "CanvasCourseModulesDisabledError" });
+  });
+
+  it("keeps an empty Modules array available", async () => {
+    const url = `${CANVAS_ORIGIN}/api/v1/courses/101/modules?per_page=100`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(jsonResponse(200, [], { url }));
+
+    await expect(
+      new CanvasHttp(fetcher).fetchAll(new URL(url)),
+    ).resolves.toEqual([]);
+  });
+
+  it("does not classify the disabled message on an unrelated index", async () => {
+    const url = `${CANVAS_ORIGIN}/api/v1/courses/101/files?per_page=100`;
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValue(
+        jsonResponse(
+          200,
+          { message: "That page has been disabled for this course" },
+          { url },
+        ),
+      );
+
+    await expect(
+      new CanvasHttp(fetcher).fetchAll(new URL(url)),
+    ).rejects.not.toMatchObject({ name: "CanvasCourseModulesDisabledError" });
+  });
+
+  it.each([
+    Object.create({
+      message: "That page has been disabled for this course",
+    }) as object,
+    Object.assign(new (class DisabledModulesPayload {})(), {
+      message: "That page has been disabled for this course",
+    }),
+    Object.defineProperty({}, "message", {
+      enumerable: true,
+      get: () => "That page has been disabled for this course",
+    }),
+  ])("rejects inherited or accessor disabled messages", async (body) => {
+    const url = `${CANVAS_ORIGIN}/api/v1/courses/101/modules?per_page=100`;
+    const response = jsonResponse(200, [], { url });
+    Object.defineProperty(response, "json", {
+      value: vi.fn().mockResolvedValue(body),
+    });
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(response);
+
+    await expect(
+      new CanvasHttp(fetcher).fetchAll(new URL(url)),
+    ).rejects.not.toMatchObject({ name: "CanvasCourseModulesDisabledError" });
   });
 
   it.each([

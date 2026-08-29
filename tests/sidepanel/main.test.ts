@@ -208,21 +208,29 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 101,
+            moduleDiscovery: "available",
             advertisedBytes: 19,
             unknownSizeCount: 0,
             resourceCount: 2,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
           {
             courseId: 102,
+            moduleDiscovery: "disabled",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
         ],
         skipped: [{ courseId: 103, category: "canvas-unavailable" }],
         advertisedBytes: 39,
         unknownSizeCount: 0,
         resourceCount: 5,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 1,
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         fallbackReason: null,
@@ -235,6 +243,14 @@ describe("accessible Side Panel flow", () => {
     expect(document.body.textContent).toContain("Discovery is complete");
     expect(document.body.textContent).toContain("2 courses ready; 1 skipped");
     expect(document.body.textContent).toContain("Concluded Course");
+    const ready = [...document.querySelectorAll(".ready-courses li")].map(
+      (element) => element.textContent,
+    );
+    expect(ready).toHaveLength(2);
+    expect(ready[1]).toContain(
+      "Module navigation is unavailable; GradPack will archive accessible pages and files instead.",
+    );
+    expect(document.querySelectorAll(".skipped-courses li")).toHaveLength(1);
     expect(document.body.textContent).toContain(
       "Canvas did not provide usable course metadata.",
     );
@@ -249,7 +265,7 @@ describe("accessible Side Panel flow", () => {
     );
     expect(document.querySelector("h1")?.textContent).toBe("Packing courses");
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
-      "course 1 of 2; 0 of 2",
+      "course 1 of 2, part 1 of 1; 0 of 2",
     );
     const cancel = [...document.querySelectorAll("button")].find(
       (candidate) => candidate.textContent === "Cancel",
@@ -265,6 +281,11 @@ describe("accessible Side Panel flow", () => {
         currentCourseIndex: 1,
         totalCourses: 3,
         completedCourses: 1,
+        currentPartIndex: 1,
+        totalParts: 1,
+        totalArchiveParts: 2,
+        completedParts: 1,
+        failedParts: 0,
         completed: 1,
         total: 5,
         failed: 0,
@@ -273,7 +294,7 @@ describe("accessible Side Panel flow", () => {
       vi.fn(),
     );
     expect(document.querySelector('[role="status"]')?.textContent).toContain(
-      "course 1 of 2; 0 of 2",
+      "course 1 of 2, part 1 of 1; 0 of 2",
     );
     listener(
       {
@@ -285,6 +306,11 @@ describe("accessible Side Panel flow", () => {
         currentCourseIndex: 1,
         totalCourses: 2,
         completedCourses: 1,
+        currentPartIndex: 1,
+        totalParts: 1,
+        totalArchiveParts: 2,
+        completedParts: 1,
+        failedParts: 0,
         completed: 1,
         total: 3,
         failed: 0,
@@ -308,6 +334,8 @@ describe("accessible Side Panel flow", () => {
           completedCourseIds: [101],
           failedCourses: 1,
           outputCount: 1,
+          completedParts: 1,
+          failedParts: 1,
           success: 2,
           failed: 0,
           unavailable: 0,
@@ -382,21 +410,29 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 102,
+            moduleDiscovery: "available",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
           {
             courseId: 103,
+            moduleDiscovery: "available",
             advertisedBytes: 21,
             unknownSizeCount: 0,
             resourceCount: 4,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
         ],
         skipped: [],
         advertisedBytes: 41,
         unknownSizeCount: 0,
         resourceCount: 7,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 1,
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         fallbackReason: null,
@@ -433,6 +469,8 @@ describe("accessible Side Panel flow", () => {
         completedCourseIds: [],
         failedCourses: 2,
         outputCount: 0,
+        completedParts: 0,
+        failedParts: 2,
         success: 0,
         failed: 0,
         unavailable: 0,
@@ -483,21 +521,29 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 102,
+            moduleDiscovery: "available",
             advertisedBytes: 20,
             unknownSizeCount: 0,
             resourceCount: 3,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
           {
             courseId: 103,
+            moduleDiscovery: "available",
             advertisedBytes: 21,
             unknownSizeCount: 0,
             resourceCount: 4,
+            folderPathFallbackCount: 0,
+            archivePartCount: 1,
           },
         ],
         skipped: [],
         advertisedBytes: 41,
         unknownSizeCount: 0,
         resourceCount: 7,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 1,
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         fallbackReason: null,
@@ -572,6 +618,8 @@ describe("accessible Side Panel flow", () => {
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
+        totalPlannedParts: 0,
+        expectedArchiveCount: 0,
         requestedPackaging: "combined",
         effectivePackaging: "combined",
         fallbackReason: null,
@@ -624,18 +672,23 @@ describe("accessible Side Panel flow", () => {
         selected: [
           {
             courseId: 101,
+            moduleDiscovery: "available",
             advertisedBytes: 0,
             unknownSizeCount: 1,
             resourceCount: 1,
+            folderPathFallbackCount: 1,
+            archivePartCount: 2,
           },
         ],
         skipped: [],
         advertisedBytes: 0,
         unknownSizeCount: 1,
         resourceCount: 1,
+        totalPlannedParts: 2,
+        expectedArchiveCount: 2,
         requestedPackaging: "combined",
         effectivePackaging: "per-course",
-        fallbackReason: "unknown-size-files",
+        fallbackReason: "multipart-course",
       },
       sender(),
       vi.fn(),
@@ -645,8 +698,11 @@ describe("accessible Side Panel flow", () => {
       "stream them under the hard 250 MiB per-course cap",
     );
     expect(document.body.textContent).toContain(
-      "combined archive will be changed to separate course ZIPs",
+      "combined archive will be changed to separate ZIP parts",
     );
+    expect(document.body.textContent).toContain("files/unfiled");
+    expect(document.body.textContent).toContain("2 ZIP parts");
+    expect(document.body.textContent).toContain("Expected downloads: 2");
     clickButton("Cancel");
     await vi.waitFor(() =>
       expect(

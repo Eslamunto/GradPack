@@ -73,6 +73,7 @@ const plan = (
   courses: [
     {
       course: syntheticCourse,
+      moduleDiscovery: "available" as const,
       modules: [],
       resources: [],
       advertisedBytes: 0,
@@ -84,9 +85,12 @@ const plan = (
     selected: [
       {
         courseId: syntheticCourse.id,
+        moduleDiscovery: "available" as const,
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
+        folderPathFallbackCount: 0,
+        archivePartCount: 1,
       },
     ],
     skipped: [],
@@ -95,6 +99,8 @@ const plan = (
     advertisedBytes: 0,
     unknownSizeCount: 0,
     resourceCount: 0,
+    totalPlannedParts: 1,
+    expectedArchiveCount: 1,
     fallbackReason:
       effectivePackaging === "per-course"
         ? ("combined-size-exceeded" as const)
@@ -121,7 +127,13 @@ const successfulResult = {
       zipBytes: new Uint8Array(),
     },
   ],
+  completedParts: [
+    { courseId: syntheticCourse.id, partIndex: 1, totalParts: 1 },
+  ],
+  failedParts: [],
+  completedCourseIds: [syntheticCourse.id],
   failedCourseIds: [],
+  outputCount: 1,
   counts: {
     success: 1,
     failed: 0,
@@ -167,6 +179,11 @@ beforeEach(() => {
       currentCourseIndex: 0,
       totalCourses: 1,
       completedCourses: 0,
+      currentPartIndex: 1,
+      totalParts: 1,
+      totalArchiveParts: 1,
+      completedParts: 0,
+      failedParts: 0,
       stage: "package",
       completed: 0,
       total: 0,
@@ -234,9 +251,12 @@ describe("production page runner", () => {
           selected: [
             {
               courseId: 101,
+              moduleDiscovery: "available",
               advertisedBytes: 0,
               unknownSizeCount: 0,
               resourceCount: 0,
+              folderPathFallbackCount: 0,
+              archivePartCount: 1,
             },
           ],
           skipped: [{ courseId: 202, category: "canvas-unavailable" }],
@@ -245,6 +265,8 @@ describe("production page runner", () => {
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
+          totalPlannedParts: 1,
+          expectedArchiveCount: 1,
           fallbackReason: null,
         },
       };
@@ -295,6 +317,8 @@ describe("production page runner", () => {
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
+        totalPlannedParts: 0,
+        expectedArchiveCount: 0,
         fallbackReason: null,
       },
     });
@@ -362,6 +386,7 @@ describe("production page runner", () => {
     mocks.createRunPlan.mockResolvedValueOnce({
       courses: partialCourses.map((course) => ({
         course,
+        moduleDiscovery: "available" as const,
         modules: [],
         resources: [],
         advertisedBytes: 0,
@@ -371,9 +396,12 @@ describe("production page runner", () => {
         requestedCourseCount: 3,
         selected: partialCourses.map((course) => ({
           courseId: course.id,
+          moduleDiscovery: "available" as const,
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         })),
         skipped: [],
         requestedPackaging: "combined",
@@ -381,6 +409,8 @@ describe("production page runner", () => {
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
+        totalPlannedParts: 3,
+        expectedArchiveCount: 1,
         fallbackReason: null,
       },
     });
@@ -401,7 +431,15 @@ describe("production page runner", () => {
         },
         zipBytes: new Uint8Array(),
       })),
+      completedParts: [101, 303].map((courseId) => ({
+        courseId,
+        partIndex: 1,
+        totalParts: 1,
+      })),
+      failedParts: [{ courseId: 202, partIndex: 1, totalParts: 1 }],
+      completedCourseIds: [101, 303],
       failedCourseIds: [202],
+      outputCount: 2,
       counts: {
         success: 2,
         failed: 0,
@@ -451,6 +489,7 @@ describe("production page runner", () => {
     mocks.createRunPlan.mockResolvedValueOnce({
       courses: partialCourses.map((course) => ({
         course,
+        moduleDiscovery: "available" as const,
         modules: [],
         resources: [],
         advertisedBytes: 0,
@@ -460,9 +499,12 @@ describe("production page runner", () => {
         requestedCourseCount: 3,
         selected: partialCourses.map((course) => ({
           courseId: course.id,
+          moduleDiscovery: "available" as const,
           advertisedBytes: 0,
           unknownSizeCount: 0,
           resourceCount: 0,
+          folderPathFallbackCount: 0,
+          archivePartCount: 1,
         })),
         skipped: [],
         requestedPackaging: "combined",
@@ -470,6 +512,8 @@ describe("production page runner", () => {
         advertisedBytes: 0,
         unknownSizeCount: 0,
         resourceCount: 0,
+        totalPlannedParts: 3,
+        expectedArchiveCount: 1,
         fallbackReason: null,
       },
     });
@@ -477,7 +521,15 @@ describe("production page runner", () => {
       effectivePackaging: "per-course",
       combined: null,
       completed: [],
+      completedParts: [],
+      failedParts: partialCourses.map(({ id }) => ({
+        courseId: id,
+        partIndex: 1,
+        totalParts: 1,
+      })),
+      completedCourseIds: [],
       failedCourseIds: partialCourses.map(({ id }) => id),
+      outputCount: 0,
       counts: {
         success: 0,
         failed: 0,

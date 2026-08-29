@@ -5,12 +5,21 @@ import {
   buildCombinedZip,
   type CourseArchiveOutput,
 } from "../../src/archive/combined";
-import type { ArchiveManifest } from "../../src/archive/manifest";
+import {
+  normalizeArchiveManifest,
+  type ArchiveManifest,
+} from "../../src/archive/manifest";
 import { ARCHIVE_CSS } from "../../src/archive/style";
 import {
   buildCourseArchive,
   type CourseArchiveDependencies,
 } from "../../src/page/run-course";
+import {
+  createRunPlan,
+  runCourses,
+  type MultiCourseDependencies,
+} from "../../src/page/run-courses";
+import { MAX_ARCHIVE_BYTES } from "../../src/shared/constants";
 import type { CoursePlan, CourseSummary } from "../../src/shared/model";
 import {
   runSyntheticPilot,
@@ -277,5 +286,166 @@ describe("extracted offline archive navigation", () => {
     ).toEqual(["../../../index.html", "../../../index.html"]);
     expect(combined.manifest.courses).toHaveLength(2);
     expect(combined.manifest.totals.success).toBe(4);
+  });
+
+  it("downloads a mixed single-part, disabled, unfiled, and multipart course set", async () => {
+    const selected = [
+      course(101, "ordinary"),
+      course(202, "disabled"),
+      course(303, "unfiled"),
+      course(404, "multipart"),
+    ];
+    const fileResource = (
+      id: number,
+      archivePath: string,
+      advertisedBytes: number,
+    ) => ({
+      key: `file:${id}`,
+      kind: "file" as const,
+      title: `file-${id}.bin`,
+      sourceId: String(id),
+      archivePath,
+      advertisedBytes,
+      sourceUrl: `https://frankfurtschool.instructure.com/files/${id}/download`,
+    });
+    const plans = new Map<number, CoursePlan>([
+      [
+        101,
+        {
+          course: selected[0]!,
+          moduleDiscovery: "available",
+          modules: [],
+          resources: [fileResource(101, "files/file-101.bin", 1)],
+          folderPathFallbackKeys: [],
+          advertisedBytes: 1,
+        },
+      ],
+      [
+        202,
+        {
+          course: selected[1]!,
+          moduleDiscovery: "disabled",
+          modules: [],
+          resources: [fileResource(202, "files/file-202.bin", 1)],
+          folderPathFallbackKeys: [],
+          advertisedBytes: 1,
+        },
+      ],
+      [
+        303,
+        {
+          course: selected[2]!,
+          moduleDiscovery: "available",
+          modules: [],
+          resources: [
+            fileResource(3031, "files/unfiled/reading.bin", 1),
+            fileResource(3032, "files/unfiled/reading-2.bin", 1),
+          ],
+          folderPathFallbackKeys: ["file:3031", "file:3032"],
+          advertisedBytes: 2,
+        },
+      ],
+      [
+        404,
+        {
+          course: selected[3]!,
+          moduleDiscovery: "available",
+          modules: [
+            {
+              id: 1,
+              name: "Module One",
+              position: 1,
+              items: [
+                {
+                  id: 1,
+                  title: "Second part file",
+                  position: 1,
+                  indent: 0,
+                  resourceKey: "file:4042",
+                  type: "File",
+                },
+              ],
+            },
+          ],
+          resources: [
+            fileResource(4041, "files/large.bin", MAX_ARCHIVE_BYTES),
+            fileResource(4042, "files/second.bin", 1),
+          ],
+          folderPathFallbackKeys: [],
+          advertisedBytes: MAX_ARCHIVE_BYTES + 1,
+        },
+      ],
+    ]);
+    const downloads: Array<{ name: string; bytes: Uint8Array }> = [];
+    const buildErrors: string[] = [];
+    const multiDependencies: MultiCourseDependencies = {
+      discover: (selectedCourse) =>
+        Promise.resolve(plans.get(selectedCourse.id)!),
+      retrieve: () =>
+        Promise.resolve({ status: "success", bytes: new Uint8Array([7]) }),
+      buildCourseArchive: async (options) => {
+        try {
+          return await buildCourseArchive(options);
+        } catch (error) {
+          buildErrors.push(error instanceof Error ? error.message : "unknown");
+          throw error;
+        }
+      },
+      buildCombinedZip,
+      archiveCss: ARCHIVE_CSS,
+      now: () => "2026-08-29T12:00:00.000Z",
+      fileName: (selectedCourse) => `gradpack-${selectedCourse.name}.zip`,
+      combinedFileName: () => "gradpack-combined.zip",
+      download: (name, bytes) => downloads.push({ name, bytes: bytes.slice() }),
+    };
+    const runPlan = await createRunPlan({
+      courses: selected,
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: multiDependencies,
+    });
+
+    const result = await runCourses({
+      plan: runPlan,
+      signal: new AbortController().signal,
+      progress: () => {},
+      dependencies: multiDependencies,
+    });
+
+    expect(buildErrors).toEqual([]);
+    expect(result.failedParts).toEqual([]);
+    expect(downloads.map(({ name }) => name)).toEqual([
+      "gradpack-ordinary.zip",
+      "gradpack-disabled.zip",
+      "gradpack-unfiled.zip",
+      "gradpack-multipart-part-01-of-02.zip",
+      "gradpack-multipart-part-02-of-02.zip",
+    ]);
+    expect(result.completedCourseIds).toEqual([101, 202, 303, 404]);
+    const archives = downloads.map(({ bytes }) => unzipSync(bytes));
+    for (const entries of archives) {
+      verifyOfflineArchive(entries);
+      expect(() =>
+        normalizeArchiveManifest(
+          JSON.parse(strFromU8(entries["manifest.json"]!)),
+        ),
+      ).not.toThrow();
+    }
+    expect(strFromU8(archives[1]!["index.html"]!)).toContain(
+      "Module navigation is unavailable",
+    );
+    expect(strFromU8(archives[2]!["status.html"]!)).toContain("files/unfiled");
+    const firstPart = archives[3]!;
+    const secondPart = archives[4]!;
+    expect(strFromU8(firstPart["modules.html"]!)).toContain(
+      "Available in Part 2",
+    );
+    expect(strFromU8(firstPart["modules.html"]!)).not.toContain(
+      'href="files/second.bin"',
+    );
+    expect(firstPart["files/large.bin"]).toBeDefined();
+    expect(firstPart["files/second.bin"]).toBeUndefined();
+    expect(secondPart["files/large.bin"]).toBeUndefined();
+    expect(secondPart["files/second.bin"]).toBeDefined();
   });
 });

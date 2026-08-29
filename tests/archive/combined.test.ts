@@ -15,9 +15,18 @@ import {
   syntheticArchiveOutcomes,
 } from "../fixtures/course-plan";
 
-const courseArchive = (id: number, name: string): CourseArchiveOutput => {
+const courseArchive = (
+  id: number,
+  name: string,
+  moduleDiscovery: "available" | "disabled" = "available",
+): CourseArchiveOutput => {
   const plan = {
     ...structuredClone(syntheticArchivePlan),
+    moduleDiscovery,
+    modules:
+      moduleDiscovery === "disabled"
+        ? []
+        : structuredClone(syntheticArchivePlan.modules),
     course: {
       ...syntheticArchivePlan.course,
       id,
@@ -76,6 +85,19 @@ const courseArchive = (id: number, name: string): CourseArchiveOutput => {
 };
 
 describe("buildCombinedZip", () => {
+  it("labels disabled module navigation instead of claiming zero modules", () => {
+    const result = buildCombinedZip({
+      archives: [courseArchive(101, "First Course", "disabled")],
+      archiveCss: ARCHIVE_CSS,
+      now: () => "2026-08-17T12:00:00.000Z",
+      fileName: () => "gradpack-combined.zip",
+    });
+    const index = strFromU8(unzipSync(result.zipBytes)["index.html"]!);
+
+    expect(index).toContain("Module navigation unavailable");
+    expect(index).not.toContain("0 modules · 0 module items");
+  });
+
   it("namespaces colliding course entries and aggregates the manifest", () => {
     const result = buildCombinedZip({
       archives: [

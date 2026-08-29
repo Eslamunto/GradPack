@@ -16,6 +16,15 @@ only unfinished course IDs that are still available. It does not bypass the
 review step or any per-course 250 MiB, resource-count, path, origin, response,
 or archive validation.
 
+The 250 MiB boundary applies independently to every generated part. Oversized
+courses are partitioned before retrieval, parts are built and handed off
+sequentially, and completed in-memory ZIP buffers are cleared before the next
+part. Individually oversized files are not fetched and receive the fixed
+`individual-size-limit` outcome. Missing folder placement may recover only to
+the disclosed `files/unfiled/` path; malformed metadata remains terminal.
+Cross-part resources are labelled but never linked as if they were local.
+These behaviors add no permission, origin, backend, persistence, or telemetry.
+
 ## Report a vulnerability privately
 
 Use GitHub's **private vulnerability reporting** channel for this repository

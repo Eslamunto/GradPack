@@ -12,8 +12,11 @@ import {
   MAX_ARCHIVE_RESOURCES,
   MAX_ARCHIVE_BYTES,
 } from "../shared/constants";
+import { partitionCoursePlan } from "./course-parts";
+import { partFileName } from "./course-parts";
 import type {
   AggregateProgress,
+  CourseArchivePartPlan,
   CourseDiscoveryProgress,
   CoursePlan,
   CoursePlanFailureCategory,
@@ -36,8 +39,13 @@ export type CoursePlanFailure = Readonly<{
   category: CoursePlanFailureCategory;
 }>;
 
+export type PlannedCourse = Readonly<{
+  plan: CoursePlan;
+  parts: readonly CourseArchivePartPlan[];
+}>;
+
 export type ImmutableRunPlan = Readonly<{
-  courses: readonly CoursePlan[];
+  courses: readonly PlannedCourse[];
   failures: readonly CoursePlanFailure[];
   summary: Readonly<RunPlanSummary>;
 }>;
@@ -48,6 +56,7 @@ export type MultiCourseDependencies = {
   buildCourseArchive: (options: {
     course: CourseSummary;
     plan: CoursePlan;
+    partPlan: CourseArchivePartPlan;
     combinedRoot: string | null;
     signal: AbortSignal;
     progress: (progress: Progress) => void;
@@ -61,11 +70,31 @@ export type MultiCourseDependencies = {
   download: (fileName: string, bytes: Uint8Array) => void;
 };
 
+export type CompletedArchivePart = Readonly<{
+  courseId: number;
+  partIndex: number;
+  totalParts: number;
+  fileName: string;
+}>;
+
+export type FailedArchivePart = Readonly<{
+  courseId: number;
+  partIndex: number;
+  totalParts: number;
+}>;
+
+type CompletedCourse = Omit<CourseArchiveOutput, "zipBytes">;
+type CompletedCombined = Omit<CombinedArchiveOutput, "zipBytes">;
+
 export type MultiCourseResult = {
   effectivePackaging: PackagingMode;
-  combined: CombinedArchiveOutput | null;
-  completed: readonly CourseArchiveOutput[];
+  combined: CompletedCombined | null;
+  completed: readonly CompletedCourse[];
+  completedParts: readonly CompletedArchivePart[];
+  failedParts: readonly FailedArchivePart[];
+  completedCourseIds: readonly number[];
   failedCourseIds: readonly number[];
+  outputCount: number;
   counts: {
     success: number;
     failed: number;
@@ -116,6 +145,11 @@ const progressForCourse =
     courseIndex: number,
     totalCourses: number,
     completedCourses: number,
+    currentPartIndex: number,
+    totalParts: number,
+    totalArchiveParts: number,
+    completedParts: number,
+    failedParts: number,
   ): ((value: Progress) => void) =>
   (value) =>
     progress({
@@ -124,25 +158,44 @@ const progressForCourse =
       currentCourseIndex: courseIndex,
       totalCourses,
       completedCourses,
+      currentPartIndex,
+      totalParts,
+      totalArchiveParts,
+      completedParts,
+      failedParts,
     });
 
 const planSummary = (
-  courses: readonly CoursePlan[],
+  courses: readonly PlannedCourse[],
   failures: readonly CoursePlanFailure[],
   requestedCourseCount: number,
   requestedPackaging: PackagingMode,
   effectivePackaging: PackagingMode,
   fallbackReason: PlanFallbackReason | null,
 ): RunPlanSummary => {
-  const selected = courses.map(({ course, advertisedBytes, resources }) => ({
-    courseId: course.id,
-    advertisedBytes,
-    unknownSizeCount: resources.filter(
-      (resource) =>
-        resource.kind === "file" && resource.advertisedBytes === null,
-    ).length,
-    resourceCount: resources.length,
-  }));
+  const selected = courses.map(
+    ({
+      plan: {
+        course,
+        moduleDiscovery,
+        advertisedBytes,
+        resources,
+        folderPathFallbackKeys,
+      },
+      parts,
+    }) => ({
+      courseId: course.id,
+      moduleDiscovery,
+      advertisedBytes,
+      unknownSizeCount: resources.filter(
+        (resource) =>
+          resource.kind === "file" && resource.advertisedBytes === null,
+      ).length,
+      resourceCount: resources.length,
+      folderPathFallbackCount: folderPathFallbackKeys.length,
+      archivePartCount: parts.length,
+    }),
+  );
   const advertisedBytes = selected.reduce(
     (total, item) => total + item.advertisedBytes,
     0,
@@ -155,6 +208,16 @@ const planSummary = (
     (total, item) => total + item.unknownSizeCount,
     0,
   );
+  const totalPlannedParts = selected.reduce(
+    (total, item) => total + item.archivePartCount,
+    0,
+  );
+  const expectedArchiveCount =
+    effectivePackaging === "per-course"
+      ? totalPlannedParts
+      : selected.length > 0
+        ? 1
+        : 0;
   return {
     requestedCourseCount,
     selected,
@@ -167,6 +230,8 @@ const planSummary = (
     advertisedBytes,
     unknownSizeCount,
     resourceCount,
+    totalPlannedParts,
+    expectedArchiveCount,
     fallbackReason,
   };
 };
@@ -193,7 +258,7 @@ export async function createRunPlan(options: {
     options;
   if (courses.length === 0)
     throw new MultiCourseSafetyError("No courses selected");
-  const plans: CoursePlan[] = [];
+  const plannedCourses: PlannedCourse[] = [];
   const failures: CoursePlanFailure[] = [];
   for (let index = 0; index < courses.length; index += 1) {
     const course = courses[index]!;
@@ -205,7 +270,13 @@ export async function createRunPlan(options: {
           `Course ${course.id} discovery returned a different course`,
         );
       }
-      plans.push(freezeCoursePlan(discovered));
+      const plan = freezeCoursePlan(discovered);
+      plannedCourses.push(
+        Object.freeze({
+          plan,
+          parts: partitionCoursePlan(plan),
+        }),
+      );
     } catch (error) {
       if (isAbort(error)) throw error;
       failures.push(
@@ -222,7 +293,7 @@ export async function createRunPlan(options: {
     });
   }
   const summaryBase = planSummary(
-    plans,
+    plannedCourses,
     failures,
     courses.length,
     requestedPackaging,
@@ -232,13 +303,33 @@ export async function createRunPlan(options: {
   if (
     !Number.isSafeInteger(summaryBase.advertisedBytes) ||
     !Number.isSafeInteger(summaryBase.unknownSizeCount) ||
-    !Number.isSafeInteger(summaryBase.resourceCount)
+    !Number.isSafeInteger(summaryBase.resourceCount) ||
+    !Number.isSafeInteger(summaryBase.totalPlannedParts) ||
+    !Number.isSafeInteger(summaryBase.expectedArchiveCount)
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
+  if (
+    requestedPackaging === "combined" &&
+    plannedCourses.some(({ parts }) => parts.length > 1)
+  ) {
+    const summary = planSummary(
+      plannedCourses,
+      failures,
+      courses.length,
+      requestedPackaging,
+      "per-course",
+      "multipart-course",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plannedCourses),
+      failures: Object.freeze(failures),
+      summary: Object.freeze(summary),
+    });
+  }
   if (requestedPackaging === "combined" && summaryBase.unknownSizeCount > 0) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -246,14 +337,14 @@ export async function createRunPlan(options: {
       "unknown-size-files",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
-    COURSE_CORE_ENTRY_COUNT * plans.length +
+    COURSE_CORE_ENTRY_COUNT * plannedCourses.length +
     summaryBase.resourceCount;
   if (
     requestedPackaging === "combined" &&
@@ -262,7 +353,7 @@ export async function createRunPlan(options: {
       combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
   ) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -270,7 +361,7 @@ export async function createRunPlan(options: {
       "combined-resource-limit-exceeded",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
@@ -280,7 +371,7 @@ export async function createRunPlan(options: {
     summaryBase.advertisedBytes > MAX_ARCHIVE_BYTES
   ) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -288,13 +379,13 @@ export async function createRunPlan(options: {
       "combined-size-exceeded",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
   return Object.freeze({
-    courses: Object.freeze(plans),
+    courses: Object.freeze(plannedCourses),
     failures: Object.freeze(failures),
     summary: Object.freeze(summaryBase),
   });
@@ -311,72 +402,119 @@ export async function runCourses(options: {
   dependencies: MultiCourseDependencies;
 }): Promise<MultiCourseResult> {
   const { plan, signal, progress, dependencies } = options;
-  const completed: CourseArchiveOutput[] = [];
+  const completed: CompletedCourse[] = [];
+  const completedParts: CompletedArchivePart[] = [];
+  const failedParts: FailedArchivePart[] = [];
+  const completedCourseIds: number[] = [];
   const failedCourseIds: number[] = [];
-  const handedOff = new Set<number>();
   const counts = emptyCounts();
-  let combined: CombinedArchiveOutput | null = null;
+  let combined: CompletedCombined | null = null;
+  let outputCount = 0;
+  const pendingCombined: CourseArchiveOutput[] = [];
 
-  const handOffCompleted = (): void => {
-    for (const archive of completed) {
-      if (handedOff.has(archive.course.id)) continue;
+  const completedCourse = (
+    coursePlan: CoursePlan,
+    result: RunResult,
+    fileName: string,
+  ): CompletedCourse => ({
+    course: coursePlan.course,
+    fileName,
+    manifest: result.manifest,
+    moduleCount: coursePlan.modules.length,
+    itemCount: coursePlan.modules.reduce(
+      (total, module) => total + module.items.length,
+      0,
+    ),
+  });
+
+  const handOffPendingCombined = (): void => {
+    for (const archive of pendingCombined) {
       dependencies.download(archive.fileName, archive.zipBytes);
-      handedOff.add(archive.course.id);
+      outputCount += 1;
     }
   };
 
   try {
     for (let index = 0; index < plan.courses.length; index += 1) {
       throwIfAborted(signal);
-      const coursePlan = plan.courses[index]!;
-      const courseProgress = progressForCourse(
-        progress,
-        coursePlan.course,
-        index,
-        plan.courses.length,
-        completed.length,
-      );
-      courseProgress({
-        stage: "download",
-        completed: 0,
-        total: coursePlan.resources.length,
-        failed: 0,
-      });
-      try {
-        const result = await dependencies.buildCourseArchive({
-          course: coursePlan.course,
-          plan: coursePlan,
-          combinedRoot: null,
-          signal,
-          progress: courseProgress,
-          dependencies,
-        });
-        const archive: CourseArchiveOutput = {
-          course: coursePlan.course,
-          fileName: dependencies.fileName(coursePlan.course),
-          manifest: result.manifest,
-          moduleCount: coursePlan.modules.length,
-          itemCount: coursePlan.modules.reduce(
-            (total, module) => total + module.items.length,
-            0,
-          ),
-          zipBytes: result.zipBytes,
-        };
-        completed.push(archive);
-        addCounts(counts, result.manifest.totals);
-        if (plan.summary.effectivePackaging === "per-course") {
-          dependencies.download(archive.fileName, archive.zipBytes);
-          handedOff.add(archive.course.id);
-        }
+      const plannedCourse = plan.courses[index]!;
+      const coursePlan = plannedCourse.plan;
+      let courseComplete = true;
+      let lastCompleted: CompletedCourse | null = null;
+      for (const partPlan of plannedCourse.parts) {
+        throwIfAborted(signal);
+        const courseProgress = progressForCourse(
+          progress,
+          coursePlan.course,
+          index,
+          plan.courses.length,
+          completedCourseIds.length,
+          partPlan.index,
+          partPlan.total,
+          plan.summary.totalPlannedParts,
+          completedParts.length,
+          failedParts.length,
+        );
         courseProgress({
-          stage: "package",
-          completed: coursePlan.resources.length,
-          total: coursePlan.resources.length,
-          failed:
-            result.manifest.totals.failed + result.manifest.totals.unavailable,
+          stage: "download",
+          completed: 0,
+          total: partPlan.resourceKeys.length,
+          failed: 0,
         });
-      } catch (error) {
-        if (isAbort(error)) throw error;
+        let partBytes: Uint8Array | null = null;
+        try {
+          const result = await dependencies.buildCourseArchive({
+            course: coursePlan.course,
+            plan: coursePlan,
+            partPlan,
+            combinedRoot: null,
+            signal,
+            progress: courseProgress,
+            dependencies,
+          });
+          partBytes = result.zipBytes;
+          const outputName = partFileName(
+            dependencies.fileName(coursePlan.course),
+            partPlan,
+          );
+          addCounts(counts, result.manifest.totals);
+          const descriptor = Object.freeze({
+            courseId: coursePlan.course.id,
+            partIndex: partPlan.index,
+            totalParts: partPlan.total,
+            fileName: outputName,
+          });
+          if (plan.summary.effectivePackaging === "per-course") {
+            dependencies.download(outputName, result.zipBytes);
+            outputCount += 1;
+          } else {
+            pendingCombined.push({
+              ...completedCourse(coursePlan, result, outputName),
+              zipBytes: result.zipBytes,
+            });
+          }
+          completedParts.push(descriptor);
+          lastCompleted = completedCourse(coursePlan, result, outputName);
+        } catch (error) {
+          if (isAbort(error)) throw error;
+          courseComplete = false;
+          failedParts.push(
+            Object.freeze({
+              courseId: coursePlan.course.id,
+              partIndex: partPlan.index,
+              totalParts: partPlan.total,
+            }),
+          );
+        } finally {
+          if (plan.summary.effectivePackaging === "per-course") {
+            partBytes?.fill(0);
+          }
+        }
+      }
+      if (courseComplete && lastCompleted) {
+        completedCourseIds.push(coursePlan.course.id);
+        completed.push(lastCompleted);
+      } else {
         failedCourseIds.push(coursePlan.course.id);
       }
     }
@@ -386,28 +524,35 @@ export async function runCourses(options: {
       failedCourseIds.length === 0
     ) {
       const result = dependencies.buildCombinedZip({
-        archives: completed,
+        archives: pendingCombined,
         archiveCss: dependencies.archiveCss,
         now: dependencies.now,
         fileName: dependencies.combinedFileName,
       });
+      const combinedBytes = result.zipBytes;
+      const combinedFileName = dependencies.combinedFileName(
+        plan.courses.map(({ plan: { course } }) => course),
+      );
       combined = {
-        fileName: dependencies.combinedFileName(
-          plan.courses.map(({ course }) => course),
-        ),
+        fileName: combinedFileName,
         manifest: result.manifest,
-        zipBytes: result.zipBytes,
       };
-      dependencies.download(combined.fileName, combined.zipBytes);
+      try {
+        dependencies.download(combinedFileName, combinedBytes);
+        outputCount = 1;
+      } finally {
+        combinedBytes.fill(0);
+      }
     } else if (plan.summary.effectivePackaging === "combined") {
-      handOffCompleted();
+      handOffPendingCombined();
     }
   } catch (error) {
-    handOffCompleted();
+    if (plan.summary.effectivePackaging === "combined") {
+      handOffPendingCombined();
+    }
     throw error;
   } finally {
-    for (const archive of completed) clearBytes(archive.zipBytes);
-    if (combined) clearBytes(combined.zipBytes);
+    for (const archive of pendingCombined) clearBytes(archive.zipBytes);
   }
 
   const effectivePackaging =
@@ -418,7 +563,11 @@ export async function runCourses(options: {
     effectivePackaging,
     combined,
     completed,
+    completedParts: Object.freeze(completedParts),
+    failedParts: Object.freeze(failedParts),
+    completedCourseIds: Object.freeze(completedCourseIds),
     failedCourseIds,
+    outputCount,
     counts,
   };
 }

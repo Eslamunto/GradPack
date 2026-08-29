@@ -48,7 +48,9 @@ const planFor = (
   unknownSize = false,
 ): CoursePlan => ({
   course: { ...course },
+  moduleDiscovery: "available",
   modules: [],
+  folderPathFallbackKeys: [],
   advertisedBytes: unknownSize ? 0 : advertisedBytes,
   resources: [
     {
@@ -70,6 +72,14 @@ const manifest = (course: CourseSummary): ArchiveManifest =>
     createdAt: "2026-08-17T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },
+    moduleDiscovery: "available",
+    part: { index: 1, total: 1 },
+    courseTotals: {
+      advertisedBytes: 10,
+      resourceCount: 0,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 0,
+    },
     totals: {
       success: 1,
       failed: 0,
@@ -79,6 +89,7 @@ const manifest = (course: CourseSummary): ArchiveManifest =>
       advertisedBytes: 10,
       archivedBytes: 10,
     },
+    resourceCatalog: [],
     resources: [],
   }) as ArchiveManifest;
 
@@ -143,7 +154,14 @@ describe("createRunPlan", () => {
   it("discovers every selected course before retrieval and freezes copied plans", async () => {
     const calls: string[] = [];
     const sourcePlans = new Map(
-      courses.map((course) => [course.id, planFor(course)]),
+      courses.map((course) => [
+        course.id,
+        {
+          ...planFor(course),
+          moduleDiscovery:
+            course.id === 202 ? ("disabled" as const) : ("available" as const),
+        },
+      ]),
     );
     const deps = baseDependencies(
       vi.fn(async (course) => {
@@ -161,6 +179,7 @@ describe("createRunPlan", () => {
     expect(calls).toEqual(["discover:101", "discover:202"]);
     expect(Object.isFrozen(plan.courses)).toBe(true);
     expect(Object.isFrozen(plan.courses[0])).toBe(true);
+    expect(Object.isFrozen(plan.courses[0]?.parts)).toBe(true);
     expect(plan.summary).toMatchObject({
       requestedPackaging: "combined",
       effectivePackaging: "combined",
@@ -169,7 +188,17 @@ describe("createRunPlan", () => {
       resourceCount: 2,
       fallbackReason: null,
     });
-    expect(plan.courses[0]).not.toBe(sourcePlans.get(101));
+    expect(plan.summary.selected).toEqual([
+      expect.objectContaining({
+        courseId: 101,
+        moduleDiscovery: "available",
+      }),
+      expect.objectContaining({
+        courseId: 202,
+        moduleDiscovery: "disabled",
+      }),
+    ]);
+    expect(plan.courses[0]?.plan).not.toBe(sourcePlans.get(101));
   });
 
   it("falls back to per-course output before retrieval for unknown file sizes", async () => {
@@ -301,7 +330,7 @@ describe("createRunPlan", () => {
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
-  it("prefers the unknown-size fallback when combined ZIP entries also exceed capacity", async () => {
+  it("prefers multipart fallback when an unknown file is one of several parts", async () => {
     const counts = new Map([
       [101, 32_759],
       [202, 32_759],
@@ -332,13 +361,13 @@ describe("createRunPlan", () => {
 
     expect(plan.summary).toMatchObject({
       effectivePackaging: "per-course",
-      fallbackReason: "unknown-size-files",
+      fallbackReason: "multipart-course",
       unknownSizeCount: 1,
     });
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
-  it("skips an oversized course and keeps later safe plans", async () => {
+  it("keeps a known individually oversized file in a dedicated ready part", async () => {
     const deps = baseDependencies(
       vi.fn(async (course) =>
         course.id === 101
@@ -353,15 +382,55 @@ describe("createRunPlan", () => {
       dependencies: deps,
     });
 
-    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.courses.map(({ plan: value }) => value.course.id)).toEqual([
+      101, 202,
+    ]);
+    expect(plan.courses[0]?.parts).toMatchObject([
+      { index: 1, total: 1, resourceKeys: ["file:101"] },
+    ]);
     expect(plan.summary).toMatchObject({
       requestedCourseCount: 2,
-      selected: [{ courseId: 202 }],
-      skipped: [{ courseId: 101, category: "size-limit" }],
-      advertisedBytes: 10,
-      resourceCount: 1,
+      selected: [{ courseId: 101 }, { courseId: 202 }],
+      skipped: [],
+      advertisedBytes: MAX_ARCHIVE_BYTES + 11,
+      resourceCount: 2,
     });
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("partitions an oversized aggregate and forces combined output to parts", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, MAX_ARCHIVE_BYTES),
+        resources: [
+          ...planFor(course, MAX_ARCHIVE_BYTES).resources,
+          {
+            ...planFor(course, 1).resources[0]!,
+            key: `file:${course.id}:second`,
+            sourceId: `${course.id}2`,
+            archivePath: "files/second.bin",
+            sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}2/download`,
+          },
+        ],
+        advertisedBytes: MAX_ARCHIVE_BYTES + 1,
+      })),
+    );
+
+    const runPlan = await createRunPlan({
+      courses: courses.slice(0, 1),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(runPlan.courses[0]?.parts.map((part) => part.resourceKeys)).toEqual([
+      ["file:101"],
+      ["file:101:second"],
+    ]);
+    expect(runPlan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "multipart-course",
+    });
   });
 
   it("classifies course-local failures and reports ordered progress", async () => {
@@ -422,7 +491,9 @@ describe("createRunPlan", () => {
       dependencies: deps,
     });
 
-    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.courses.map(({ plan: value }) => value.course.id)).toEqual([
+      202,
+    ]);
     expect(plan.summary.skipped).toEqual([
       { courseId: 101, category: "safety-validation" },
     ]);
@@ -448,6 +519,175 @@ describe("createRunPlan", () => {
 });
 
 describe("runCourses", () => {
+  it("builds multipart courses sequentially and clears each handed-off ZIP", async () => {
+    const order: string[] = [];
+    let previousBytes: Uint8Array | null = null;
+    const deps = baseDependencies(
+      vi.fn(async (course) =>
+        course.id === 101
+          ? {
+              ...planFor(course, MAX_ARCHIVE_BYTES),
+              advertisedBytes: MAX_ARCHIVE_BYTES + 1,
+              resources: [
+                ...planFor(course, MAX_ARCHIVE_BYTES).resources,
+                {
+                  ...planFor(course, 1).resources[0]!,
+                  key: "file:101:second",
+                  sourceId: "1012",
+                  archivePath: "files/second.bin",
+                  sourceUrl:
+                    "https://frankfurtschool.instructure.com/files/1012/download",
+                },
+              ],
+            }
+          : planFor(course),
+      ),
+    );
+    deps.buildCourseArchive = vi.fn(async ({ course, partPlan }) => {
+      if (previousBytes) expect(Array.from(previousBytes)).toEqual([0]);
+      order.push(`build:${course.id}:${partPlan.index}`);
+      const zipBytes = new Uint8Array([partPlan.index]);
+      previousBytes = zipBytes;
+      return {
+        manifest: {
+          ...manifest(course),
+          part: { index: partPlan.index, total: partPlan.total },
+        },
+        zipBytes,
+      };
+    });
+    deps.download = vi.fn((fileName) => {
+      const match = /gradpack-(\d+)(?:-part-(\d+)-of-\d+)?\.zip/u.exec(
+        fileName,
+      )!;
+      order.push(`download:${match[1]}:${Number(match[2] ?? 1)}`);
+    });
+    const runPlan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    const result = await runCourses({
+      plan: runPlan,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(order).toEqual([
+      "build:101:1",
+      "download:101:1",
+      "build:101:2",
+      "download:101:2",
+      "build:202:1",
+      "download:202:1",
+    ]);
+    expect(result.outputCount).toBe(3);
+    expect(result.completedCourseIds).toEqual([101, 202]);
+    expect(result.failedParts).toEqual([]);
+  });
+
+  it("continues after a local part failure and marks the course incomplete", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) =>
+        course.id === 101
+          ? {
+              ...planFor(course, MAX_ARCHIVE_BYTES),
+              advertisedBytes: MAX_ARCHIVE_BYTES + 1,
+              resources: [
+                ...planFor(course, MAX_ARCHIVE_BYTES).resources,
+                {
+                  ...planFor(course, 1).resources[0]!,
+                  key: "file:101:second",
+                  sourceId: "1012",
+                  archivePath: "files/second.bin",
+                  sourceUrl:
+                    "https://frankfurtschool.instructure.com/files/1012/download",
+                },
+              ],
+            }
+          : planFor(course),
+      ),
+    );
+    deps.buildCourseArchive = vi.fn(async ({ course, partPlan }) => {
+      if (course.id === 101 && partPlan.index === 2) {
+        throw new RunSafetyError("part-local");
+      }
+      return {
+        manifest: {
+          ...manifest(course),
+          part: { index: partPlan.index, total: partPlan.total },
+        },
+        zipBytes: new Uint8Array([partPlan.index]),
+      };
+    });
+    const runPlan = await createRunPlan({
+      courses: courses.slice(0, 2),
+      requestedPackaging: "per-course",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    const result = await runCourses({
+      plan: runPlan,
+      signal: new AbortController().signal,
+      progress: vi.fn(),
+      dependencies: deps,
+    });
+
+    expect(
+      result.completedParts.map(({ courseId, partIndex }) => [
+        courseId,
+        partIndex,
+      ]),
+    ).toEqual([
+      [101, 1],
+      [202, 1],
+    ]);
+    expect(result.failedParts).toEqual([
+      { courseId: 101, partIndex: 2, totalParts: 2 },
+    ]);
+    expect(result.completedCourseIds).toEqual([202]);
+    expect(result.failedCourseIds).toEqual([101]);
+    expect(result.outputCount).toBe(2);
+  });
+
+  it.each([
+    ["session loss", new CanvasSessionError("private session detail")],
+    ["cancellation", new DOMException("cancelled", "AbortError")],
+  ])(
+    "stops globally on %s after clearing an already handed-off part",
+    async (_label, failure) => {
+      const deps = baseDependencies(vi.fn(async (course) => planFor(course)));
+      let handedOffBytes: Uint8Array | null = null;
+      deps.buildCourseArchive = vi.fn(async ({ course }) => {
+        if (course.id === 202) throw failure;
+        handedOffBytes = new Uint8Array([7]);
+        return { manifest: manifest(course), zipBytes: handedOffBytes };
+      });
+      const runPlan = await createRunPlan({
+        courses: courses.slice(0, 2),
+        requestedPackaging: "per-course",
+        signal: new AbortController().signal,
+        dependencies: deps,
+      });
+
+      await expect(
+        runCourses({
+          plan: runPlan,
+          signal: new AbortController().signal,
+          progress: vi.fn(),
+          dependencies: deps,
+        }),
+      ).rejects.toBe(failure);
+
+      expect(deps.download).toHaveBeenCalledTimes(1);
+      expect(Array.from(handedOffBytes!)).toEqual([0]);
+    },
+  );
+
   it("runs courses sequentially, aggregates progress, and preserves a successful course after a local failure", async () => {
     const order: number[] = [];
     const deps = baseDependencies(vi.fn(async (course) => planFor(course)));

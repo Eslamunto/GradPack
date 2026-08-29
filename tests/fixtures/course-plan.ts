@@ -7,6 +7,7 @@ import { discoverCoursePlan } from "../../src/canvas/discovery";
 import type { ArchiveInput } from "../../src/archive/build-zip";
 import {
   CanvasCourseIndexUnavailableError,
+  CanvasCourseModulesDisabledError,
   CanvasHttp,
   CanvasResourceUnavailableError,
 } from "../../src/canvas/http";
@@ -36,6 +37,7 @@ export const syntheticCourse: CourseSummary = {
 
 export type SyntheticOptions = {
   moduleItemsInline?: boolean;
+  modulesDisabled?: boolean;
   duplicateFileId?: boolean;
   pageToken?: string;
   unsupportedItemType?: string;
@@ -91,6 +93,11 @@ export function syntheticCanvasHttp(
   const fetchAll = vi.fn(async (url: URL): Promise<unknown[]> => {
     await Promise.resolve();
     if (url.pathname.endsWith("/modules")) {
+      if (options.modulesDisabled) {
+        throw new CanvasCourseModulesDisabledError(
+          "Canvas course Modules are disabled",
+        );
+      }
       return options.modules ?? [module];
     }
     if (url.pathname.endsWith("/modules/201/items")) return [item];
@@ -196,7 +203,9 @@ export function syntheticCanvasHttp(
 export function planWithOneFile(size: number | null): CoursePlan {
   return {
     course: syntheticCourse,
+    moduleDiscovery: "available",
     modules: [],
+    folderPathFallbackKeys: [],
     advertisedBytes: size ?? 0,
     resources: [
       {
@@ -229,6 +238,8 @@ export function unknownFileResource(
 
 export const syntheticArchivePlan: CoursePlan = {
   course: syntheticCourse,
+  moduleDiscovery: "available",
+  folderPathFallbackKeys: [],
   advertisedBytes: 19,
   resources: [
     {
@@ -347,6 +358,14 @@ export const syntheticArchiveInput: ArchiveInput = {
     createdAt: "2026-08-16T12:00:00.000Z",
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
+    moduleDiscovery: "available",
+    part: { index: 1, total: 1 },
+    courseTotals: {
+      advertisedBytes: 19,
+      resourceCount: syntheticArchivePlan.resources.length,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 0,
+    },
     totals: {
       success: 2,
       failed: 0,
@@ -356,6 +375,13 @@ export const syntheticArchiveInput: ArchiveInput = {
       advertisedBytes: 19,
       archivedBytes: 19 + strToU8(syntheticSavedPageHtml).byteLength,
     },
+    resourceCatalog: syntheticArchivePlan.resources.map((resource) => ({
+      key: resource.key,
+      kind: resource.kind,
+      title: resource.title,
+      partIndex: 1,
+      folderPathFallback: false,
+    })),
     resources: syntheticArchiveOutcomes.map((outcome) => ({
       key: outcome.key,
       kind: outcome.kind,

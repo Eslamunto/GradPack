@@ -1,7 +1,6 @@
 import { canonicalArchivePath, safeArchivePath } from "../archive/paths";
 import {
   CANVAS_PAGE_JSON_MAX_BYTES,
-  MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
   CANVAS_ORIGIN,
 } from "../shared/constants";
@@ -9,6 +8,7 @@ import type {
   CourseModule,
   CoursePlan,
   CourseSummary,
+  ModuleDiscovery,
   ModuleItem,
   PlannedResource,
 } from "../shared/model";
@@ -16,6 +16,7 @@ import { canvasEndpoint } from "./endpoints";
 import {
   CanvasBodySizeError,
   CanvasCourseIndexUnavailableError,
+  CanvasCourseModulesDisabledError,
   CanvasResourceUnavailableError,
   type CanvasHttp,
 } from "./http";
@@ -353,15 +354,35 @@ const normalizeItem = (
   };
 };
 
+type LoadedModules = {
+  moduleDiscovery: ModuleDiscovery;
+  parsedModules: ParsedModule[];
+};
+
 const loadModules = async (
   http: CanvasHttp,
   run: DiscoveryRun,
   courseId: number,
-): Promise<ParsedModule[]> => {
-  const rawModules = await run.one(() =>
-    http.fetchAll<unknown>(canvasEndpoint({ type: "courseModules", courseId })),
-  );
-  const descriptors = rawModules.map((value) => {
+): Promise<LoadedModules> => {
+  const initial = await run.one(async () => {
+    try {
+      return {
+        moduleDiscovery: "available" as const,
+        rawModules: await http.fetchAll<unknown>(
+          canvasEndpoint({ type: "courseModules", courseId }),
+        ),
+      };
+    } catch (error) {
+      if (error instanceof CanvasCourseModulesDisabledError) {
+        return { moduleDiscovery: "disabled" as const, rawModules: [] };
+      }
+      throw error;
+    }
+  });
+  if (initial.moduleDiscovery === "disabled") {
+    return { moduleDiscovery: "disabled", parsedModules: [] };
+  }
+  const descriptors = initial.rawModules.map((value) => {
     if (!isRecord(value)) throw new TypeError("Invalid module record");
     const id = positiveId(own(value, "id"), "module ID");
     const inline = own(value, "items");
@@ -404,7 +425,7 @@ const loadModules = async (
     if (ids.has(module.id)) throw new TypeError("Duplicate module ID");
     ids.add(module.id);
   }
-  return loaded;
+  return { moduleDiscovery: "available", parsedModules: loaded };
 };
 
 const sameFile = (left: NormalizedFile, right: NormalizedFile): boolean =>
@@ -531,6 +552,20 @@ const validateCourse = (course: CourseSummary): CourseSummary => {
 };
 
 const freezePlan = (plan: CoursePlan): CoursePlan => {
+  const fallbackKeys = new Set(plan.folderPathFallbackKeys);
+  if (fallbackKeys.size !== plan.folderPathFallbackKeys.length) {
+    throw new TypeError("Invalid folder fallback keys");
+  }
+  for (const key of fallbackKeys) {
+    const resource = plan.resources.find((candidate) => candidate.key === key);
+    if (
+      resource?.kind !== "file" ||
+      resource.archivePath === null ||
+      !resource.archivePath.startsWith("files/unfiled/")
+    ) {
+      throw new TypeError("Invalid folder fallback keys");
+    }
+  }
   Object.freeze(plan.course);
   for (const module of plan.modules) {
     for (const item of module.items) Object.freeze(item);
@@ -540,10 +575,11 @@ const freezePlan = (plan: CoursePlan): CoursePlan => {
   for (const resource of plan.resources) Object.freeze(resource);
   Object.freeze(plan.modules);
   Object.freeze(plan.resources);
+  Object.freeze(plan.folderPathFallbackKeys);
   return Object.freeze(plan);
 };
 
-export function assertPilotSize(plan: CoursePlan): void {
+export function assertCoursePlanSizes(plan: CoursePlan): void {
   if (!isRecord(plan) || !Array.isArray(own(plan, "resources"))) {
     throw new PilotSizeError("The plan contains an invalid resource");
   }
@@ -583,9 +619,6 @@ export function assertPilotSize(plan: CoursePlan): void {
   ) {
     throw new PilotSizeError("Advertised size total does not match the plan");
   }
-  if (total > MAX_ARCHIVE_BYTES) {
-    throw new PilotSizeError("Course exceeds the 250 MB pilot limit");
-  }
 }
 
 export async function discoverCoursePlan(
@@ -595,7 +628,11 @@ export async function discoverCoursePlan(
 ): Promise<CoursePlan> {
   const course = validateCourse(selectedCourse);
   const run = new DiscoveryRun(options.abort);
-  const parsedModules = await loadModules(http, run, course.id);
+  const { moduleDiscovery, parsedModules } = await loadModules(
+    http,
+    run,
+    course.id,
+  );
 
   const indexes = await run.all<unknown[] | null>([
     () =>
@@ -757,15 +794,26 @@ export async function discoverCoursePlan(
   );
 
   const drafts: ResourceDraft[] = [...extraDrafts.values()];
+  const folderFallbackDraftKeys = new Set<string>();
   for (const file of files.values()) {
-    let folderSegments: string[] = [];
-    if (rawFolders !== null && file.folderId !== null) {
+    const key = `file:${file.id}`;
+    let folderSegments: string[];
+    if (rawFolders === null) {
+      folderSegments = ["unfiled"];
+      folderFallbackDraftKeys.add(key);
+    } else if (file.folderId === null) {
+      folderSegments = [];
+    } else {
       const resolved = folders.get(file.folderId);
-      if (!resolved) throw new TypeError("Missing folder metadata");
-      folderSegments = resolved;
+      if (resolved === undefined) {
+        folderSegments = ["unfiled"];
+        folderFallbackDraftKeys.add(key);
+      } else {
+        folderSegments = resolved;
+      }
     }
     drafts.push({
-      key: `file:${file.id}`,
+      key,
       kind: "file",
       title: file.title,
       sourceId: String(file.id),
@@ -791,6 +839,9 @@ export async function discoverCoursePlan(
   }
 
   const resources = allocatePaths(drafts);
+  const folderPathFallbackKeys = resources
+    .filter((resource) => folderFallbackDraftKeys.has(resource.key))
+    .map((resource) => resource.key);
   let advertisedBytes = 0;
   for (const resource of resources) {
     if (resource.kind !== "file" || resource.advertisedBytes === null) continue;
@@ -807,10 +858,12 @@ export async function discoverCoursePlan(
   }
   const plan: CoursePlan = {
     course,
+    moduleDiscovery,
     modules: parsedModules.map(({ module }) => module),
     resources,
+    folderPathFallbackKeys,
     advertisedBytes,
   };
-  assertPilotSize(plan);
+  assertCoursePlanSizes(plan);
   return freezePlan(plan);
 }
