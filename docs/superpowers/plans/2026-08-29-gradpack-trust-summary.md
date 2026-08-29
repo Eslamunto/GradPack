@@ -36,12 +36,14 @@
 ### Task 1: Render the student trust card in the Side Panel
 
 **Files:**
+
 - Modify: `tests/sidepanel/main.test.ts:75-170`
 - Modify: `src/sidepanel/main.ts:61-79,132-230`
 - Modify: `src/static/sidepanel.css:42-77`
 - Verify unchanged: `src/manifest.json`
 
 **Interfaces:**
+
 - Consumes: existing `paragraph(text: string, className?: string): HTMLParagraphElement` and the `choose` / `configure` branches of `render()`.
 - Produces: private `trustCard(): HTMLElement` that returns one semantic `section.trust-card` containing an `h2`, trust paragraph, and `p.responsible-use`.
 
@@ -50,39 +52,39 @@
 In `tests/sidepanel/main.test.ts`, immediately after the existing `Choose courses` heading assertion, add:
 
 ```ts
-    const chooseTrustCard = document.querySelector(".trust-card");
-    expect(chooseTrustCard).toBeInstanceOf(HTMLElement);
-    expect(chooseTrustCard?.querySelector("h2")?.textContent).toBe(
-      "Your courses stay with you",
-    );
-    expect(chooseTrustCard?.textContent).toContain(
-      "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser.",
-    );
-    expect(chooseTrustCard?.textContent).toContain(
-      "Everything is processed locally—there is no telemetry, backend, or cloud upload.",
-    );
-    expect(chooseTrustCard?.textContent).toContain(
-      "Your archives are saved only to your computer.",
-    );
-    expect(chooseTrustCard?.querySelector(".responsible-use")?.textContent).toBe(
-      "For personal study: Please keep downloaded course materials for your own use and do not redistribute them.",
-    );
-    expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
+const chooseTrustCard = document.querySelector(".trust-card");
+expect(chooseTrustCard).toBeInstanceOf(HTMLElement);
+expect(chooseTrustCard?.querySelector("h2")?.textContent).toBe(
+  "Your courses stay with you",
+);
+expect(chooseTrustCard?.textContent).toContain(
+  "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser.",
+);
+expect(chooseTrustCard?.textContent).toContain(
+  "Everything is processed locally—there is no telemetry, backend, or cloud upload.",
+);
+expect(chooseTrustCard?.textContent).toContain(
+  "Your archives are saved only to your computer.",
+);
+expect(chooseTrustCard?.querySelector(".responsible-use")?.textContent).toBe(
+  "For personal study: Please keep downloaded course materials for your own use and do not redistribute them.",
+);
+expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
 ```
 
 Immediately after the existing `Configure archives` heading assertion, add:
 
 ```ts
-    expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
-    expect(document.querySelector(".trust-card h2")?.textContent).toBe(
-      "Your courses stay with you",
-    );
-    expect(document.body.textContent).not.toContain(
-      "Everything is processed locally. GradPack has no storage, analytics, or backend.",
-    );
-    expect(document.body.textContent).not.toContain(
-      "You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.",
-    );
+expect(document.querySelectorAll(".trust-card")).toHaveLength(1);
+expect(document.querySelector(".trust-card h2")?.textContent).toBe(
+  "Your courses stay with you",
+);
+expect(document.body.textContent).not.toContain(
+  "Everything is processed locally. GradPack has no storage, analytics, or backend.",
+);
+expect(document.body.textContent).not.toContain(
+  "You are responsible for applicable copyright, licensing, confidentiality, and course-material restrictions.",
+);
 ```
 
 - [ ] **Step 2: Run the focused test and verify the red state**
@@ -217,10 +219,12 @@ git commit -m "feat: add student trust summary"
 ### Task 2: Align the pilot installation guidance
 
 **Files:**
+
 - Modify: `tests/build/release-files.test.ts:30-82`
 - Modify: `docs/pilot/INSTALL.md:6-34`
 
 **Interfaces:**
+
 - Consumes: the exact approved copy from `docs/superpowers/specs/2026-08-29-gradpack-trust-summary-design.md`.
 - Produces: public `Privacy and responsible use` installation section with the same trust and personal-use meaning as the Side Panel.
 
@@ -229,19 +233,19 @@ git commit -m "feat: add student trust summary"
 In the `keeps the package command and public guidance within pilot policy` test, immediately after reading `install`, add:
 
 ```ts
-    const normalizedInstall = install.replace(/\s+/gu, " ");
+const normalizedInstall = install.replace(/\s+/gu, " ");
 ```
 
 After the existing installation-token loop, add:
 
 ```ts
-    expect(install).toContain("## Privacy and responsible use");
-    expect(normalizedInstall).toContain(
-      "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser. Everything is processed locally—there is no telemetry, backend, or cloud upload. Your archives are saved only to your computer.",
-    );
-    expect(normalizedInstall).toContain(
-      "**For personal study:** Please keep downloaded course materials for your own use and do not redistribute them.",
-    );
+expect(install).toContain("## Privacy and responsible use");
+expect(normalizedInstall).toContain(
+  "GradPack works only with Frankfurt School Canvas and uses the session already open in your browser. Everything is processed locally—there is no telemetry, backend, or cloud upload. Your archives are saved only to your computer.",
+);
+expect(normalizedInstall).toContain(
+  "**For personal study:** Please keep downloaded course materials for your own use and do not redistribute them.",
+);
 ```
 
 - [ ] **Step 2: Run the release-surface test and verify the red state**
@@ -305,12 +309,14 @@ git commit -m "docs: add privacy and responsible use guidance"
 ### Task 3: Verify the complete presentation-only change
 
 **Files:**
+
 - Verify: `src/sidepanel/main.ts`
 - Verify: `src/static/sidepanel.css`
 - Verify: `docs/pilot/INSTALL.md`
 - Verify unchanged: `src/manifest.json`
 
 **Interfaces:**
+
 - Consumes: completed Side Panel and installation-guide changes from Tasks 1 and 2.
 - Produces: fresh automated evidence and a manual narrow-width acceptance result; no source interface.
 
