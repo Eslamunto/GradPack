@@ -261,7 +261,7 @@ describe("buildManifest", () => {
 
     expect(manifest).toEqual({
       schemaVersion: 1,
-      gradPackVersion: "0.1.0-alpha.6",
+      gradPackVersion: "0.1.0-alpha.7",
       createdAt: CREATED_AT,
       canvasHost: "frankfurtschool.instructure.com",
       course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },

@@ -40,6 +40,6 @@ privacy-safe reproduction material.
 
 ## Supported version
 
-The current `0.1.0-alpha.6` classmate pilot is pre-release software. Security
+The current `0.1.0-alpha.7` classmate pilot is pre-release software. Security
 fixes are made on the latest repository version; no long-term support window is
 promised during the alpha pilot.

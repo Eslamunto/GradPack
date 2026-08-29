@@ -14,7 +14,7 @@ import {
   MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES,
 } from "../shared/constants";
 
-const GRADPACK_VERSION = "0.1.0-alpha.6";
+const GRADPACK_VERSION = "0.1.0-alpha.7";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
 const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
 // Classic ZIP stores at most 65,535 entries. Three are reserved for GradPack's
