@@ -359,6 +359,13 @@ export const syntheticArchiveInput: ArchiveInput = {
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: 101, name: "Synthetic Course", courseCode: "SYN-101" },
     moduleDiscovery: "available",
+    part: { index: 1, total: 1 },
+    courseTotals: {
+      advertisedBytes: 19,
+      resourceCount: syntheticArchivePlan.resources.length,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 0,
+    },
     totals: {
       success: 2,
       failed: 0,
@@ -368,6 +375,13 @@ export const syntheticArchiveInput: ArchiveInput = {
       advertisedBytes: 19,
       archivedBytes: 19 + strToU8(syntheticSavedPageHtml).byteLength,
     },
+    resourceCatalog: syntheticArchivePlan.resources.map((resource) => ({
+      key: resource.key,
+      kind: resource.kind,
+      title: resource.title,
+      partIndex: 1,
+      folderPathFallback: false,
+    })),
     resources: syntheticArchiveOutcomes.map((outcome) => ({
       key: outcome.key,
       kind: outcome.kind,

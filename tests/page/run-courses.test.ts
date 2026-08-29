@@ -73,6 +73,13 @@ const manifest = (course: CourseSummary): ArchiveManifest =>
     canvasHost: "frankfurtschool.instructure.com",
     course: { id: course.id, name: course.name, courseCode: course.courseCode },
     moduleDiscovery: "available",
+    part: { index: 1, total: 1 },
+    courseTotals: {
+      advertisedBytes: 10,
+      resourceCount: 0,
+      unknownSizeCount: 0,
+      folderPathFallbackCount: 0,
+    },
     totals: {
       success: 1,
       failed: 0,
@@ -82,6 +89,7 @@ const manifest = (course: CourseSummary): ArchiveManifest =>
       advertisedBytes: 10,
       archivedBytes: 10,
     },
+    resourceCatalog: [],
     resources: [],
   }) as ArchiveManifest;
 

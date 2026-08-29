@@ -24,4 +24,13 @@ describe("archive.css", () => {
 
     expect(css).toBe(ARCHIVE_CSS);
   });
+
+  it("styles part identity and cross-part availability passively", () => {
+    const css = readFileSync(resolve("src/static/archive.css"), "utf8");
+
+    expect(css).toContain(".archive-part");
+    expect(css).toContain(".resource-part");
+    expect(css).toContain(".unfiled-notice");
+    expect(css).not.toMatch(/url\s*\(/iu);
+  });
 });

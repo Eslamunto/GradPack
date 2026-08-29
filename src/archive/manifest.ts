@@ -1,18 +1,22 @@
 import { assertArchivePathSet, isCanonicalArchivePath } from "./paths";
 import type {
+  CourseArchivePartPlan,
   CoursePlan,
   ModuleDiscovery,
   OutcomeStatus,
   PlannedResource,
   ResourceKind,
   ResourceOutcome,
+  ResourcePartAssignment,
 } from "../shared/model";
-import { MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES } from "../shared/constants";
+import {
+  MAX_ARCHIVE_BYTES,
+  MAX_ARCHIVE_RESOURCES as SHARED_MAX_ARCHIVE_RESOURCES,
+} from "../shared/constants";
 
 const GRADPACK_VERSION = "0.1.0-alpha.6";
 const CANVAS_HOST = "frankfurtschool.instructure.com";
 const CANVAS_ORIGIN = `https://${CANVAS_HOST}`;
-const MAX_ADVERTISED_BYTES = 250 * 1024 * 1024;
 // Classic ZIP stores at most 65,535 entries. Three are reserved for GradPack's
 // core files, so this pilot stops rather than silently omitting resources.
 export const MAX_ARCHIVE_RESOURCES = SHARED_MAX_ARCHIVE_RESOURCES;
@@ -48,6 +52,23 @@ export type ArchiveManifestResource = Omit<PlannedResource, "sourceUrl"> & {
   failureCategory: string | null;
 };
 
+export type ArchivePart = { index: number; total: number };
+
+export type ArchiveCourseTotals = {
+  advertisedBytes: number;
+  resourceCount: number;
+  unknownSizeCount: number;
+  folderPathFallbackCount: number;
+};
+
+export type ArchiveResourceCatalogEntry = {
+  key: string;
+  kind: ResourceKind;
+  title: string;
+  partIndex: number;
+  folderPathFallback: boolean;
+};
+
 export type ArchiveManifest = {
   schemaVersion: 1;
   gradPackVersion: typeof GRADPACK_VERSION;
@@ -55,10 +76,13 @@ export type ArchiveManifest = {
   canvasHost: typeof CANVAS_HOST;
   course: { id: number; name: string; courseCode: string };
   moduleDiscovery: ModuleDiscovery;
+  part: ArchivePart;
+  courseTotals: ArchiveCourseTotals;
   totals: Record<OutcomeStatus, number> & {
     advertisedBytes: number;
     archivedBytes: number;
   };
+  resourceCatalog: ArchiveResourceCatalogEntry[];
   resources: ArchiveManifestResource[];
 };
 
@@ -68,6 +92,7 @@ export class ArchiveSafetyError extends TypeError {
 
 export type ArchiveSnapshot = Readonly<{
   plan: CoursePlan;
+  partPlan: CourseArchivePartPlan;
   outcomes: ResourceOutcome[];
   createdAt: string;
 }>;
@@ -509,7 +534,7 @@ const validatePlan = (value: unknown): CoursePlan => {
     }
   }
   const declared = safeInteger(valueOf(record, "advertisedBytes"));
-  if (declared !== advertisedBytes || declared > MAX_ADVERTISED_BYTES) {
+  if (declared !== advertisedBytes) {
     throw new TypeError("Invalid advertised byte total");
   }
   const modules = validateModules(valueOf(record, "modules"));
@@ -532,6 +557,79 @@ const validatePlan = (value: unknown): CoursePlan => {
     folderPathFallbackKeys,
     advertisedBytes: declared,
   };
+};
+
+const defaultPartPlan = (plan: CoursePlan): CourseArchivePartPlan => ({
+  index: 1,
+  total: 1,
+  resourceKeys: plan.resources.map(({ key }) => key),
+  resourceParts: plan.resources.map(({ key }) => ({
+    resourceKey: key,
+    partIndex: 1,
+  })),
+});
+
+const validatePartPlan = (
+  value: unknown,
+  plan: CoursePlan,
+): CourseArchivePartPlan => {
+  const record = exactRecord(value, [
+    "index",
+    "total",
+    "resourceKeys",
+    "resourceParts",
+  ]);
+  const index = safeInteger(valueOf(record, "index"), 1);
+  const total = safeInteger(valueOf(record, "total"), 1);
+  if (index > total) throw new TypeError("Invalid archive part");
+  const resourceKeys = exactArray(valueOf(record, "resourceKeys")).map((key) =>
+    text(key),
+  );
+  const resourceParts = exactArray(valueOf(record, "resourceParts")).map(
+    (assignment): ResourcePartAssignment => {
+      const assignmentRecord = exactRecord(assignment, [
+        "resourceKey",
+        "partIndex",
+      ]);
+      const partIndex = safeInteger(valueOf(assignmentRecord, "partIndex"), 1);
+      if (partIndex > total) throw new TypeError("Invalid archive part");
+      return {
+        resourceKey: text(valueOf(assignmentRecord, "resourceKey")),
+        partIndex,
+      };
+    },
+  );
+  if (
+    resourceParts.length !== plan.resources.length ||
+    resourceParts.some(
+      (assignment, assignmentIndex) =>
+        assignment.resourceKey !== plan.resources[assignmentIndex]?.key,
+    )
+  ) {
+    throw new TypeError("Invalid archive part assignments");
+  }
+  const expectedKeys = resourceParts
+    .filter((assignment) => assignment.partIndex === index)
+    .map((assignment) => assignment.resourceKey);
+  if (
+    resourceKeys.length !== expectedKeys.length ||
+    resourceKeys.some((key, keyIndex) => key !== expectedKeys[keyIndex])
+  ) {
+    throw new TypeError("Invalid archive part resources");
+  }
+  if (
+    plan.resources.length > 0 &&
+    Array.from({ length: total }, (_, partIndex) => partIndex + 1).some(
+      (partIndex) =>
+        !resourceParts.some((assignment) => assignment.partIndex === partIndex),
+    )
+  ) {
+    throw new TypeError("Empty archive part assignment");
+  }
+  resourceParts.forEach(Object.freeze);
+  Object.freeze(resourceKeys);
+  Object.freeze(resourceParts);
+  return Object.freeze({ index, total, resourceKeys, resourceParts });
 };
 
 const sameResource = (
@@ -567,8 +665,12 @@ const freezeOutcomes = (outcomes: ResourceOutcome[]): ResourceOutcome[] => {
 
 const freezeManifest = (manifest: ArchiveManifest): ArchiveManifest => {
   for (const resource of manifest.resources) Object.freeze(resource);
+  for (const resource of manifest.resourceCatalog) Object.freeze(resource);
   Object.freeze(manifest.resources);
+  Object.freeze(manifest.resourceCatalog);
   Object.freeze(manifest.totals);
+  Object.freeze(manifest.courseTotals);
+  Object.freeze(manifest.part);
   Object.freeze(manifest.course);
   return Object.freeze(manifest);
 };
@@ -577,8 +679,13 @@ export function snapshotArchiveData(
   plan: unknown,
   outcomes: unknown,
   createdAt: unknown,
+  partPlan?: unknown,
 ): ArchiveSnapshot {
   const validatedPlan = validatePlan(plan);
+  const validatedPartPlan = validatePartPlan(
+    partPlan ?? defaultPartPlan(validatedPlan),
+    validatedPlan,
+  );
   const rawOutcomes = exactArray(outcomes);
   if (rawOutcomes.length > MAX_ARCHIVE_RESOURCES) {
     throw new ArchiveSafetyError("Archive resource limit exceeded");
@@ -586,7 +693,7 @@ export function snapshotArchiveData(
   const validatedOutcomes = rawOutcomes.map((outcome) =>
     validateOutcome(outcome, validatedPlan.course.id),
   );
-  if (validatedOutcomes.length !== validatedPlan.resources.length) {
+  if (validatedOutcomes.length !== validatedPartPlan.resourceKeys.length) {
     throw new TypeError("Incomplete resource outcomes");
   }
   const byKey = new Map<string, ResourceOutcome>();
@@ -596,15 +703,20 @@ export function snapshotArchiveData(
     byKey.set(outcome.key, outcome);
   }
 
-  const orderedOutcomes = validatedPlan.resources.map((planned) => {
-    const outcome = byKey.get(planned.key);
-    if (!outcome || !sameResource(planned, outcome)) {
+  const resourcesByKey = new Map(
+    validatedPlan.resources.map((resource) => [resource.key, resource]),
+  );
+  const orderedOutcomes = validatedPartPlan.resourceKeys.map((key) => {
+    const planned = resourcesByKey.get(key);
+    const outcome = byKey.get(key);
+    if (!planned || !outcome || !sameResource(planned, outcome)) {
       throw new TypeError("Mismatched resource outcome");
     }
     return outcome;
   });
   const snapshot = {
     plan: freezePlan(validatedPlan),
+    partPlan: validatedPartPlan,
     outcomes: freezeOutcomes(orderedOutcomes),
     createdAt: canonicalTimestamp(createdAt),
   };
@@ -615,6 +727,7 @@ export function buildManifestFromSnapshot(
   snapshot: ArchiveSnapshot,
 ): ArchiveManifest {
   const validatedPlan = snapshot.plan;
+  const validatedPartPlan = snapshot.partPlan;
   const validatedOutcomes = snapshot.outcomes;
 
   const totals: ArchiveManifest["totals"] = {
@@ -648,6 +761,21 @@ export function buildManifestFromSnapshot(
       failureCategory: outcome.failureCategory,
     };
   });
+  const partByKey = new Map(
+    validatedPartPlan.resourceParts.map(({ resourceKey, partIndex }) => [
+      resourceKey,
+      partIndex,
+    ]),
+  );
+  const fallbackKeys = new Set(validatedPlan.folderPathFallbackKeys);
+  const resourceCatalog: ArchiveResourceCatalogEntry[] =
+    validatedPlan.resources.map((resource) => ({
+      key: resource.key,
+      kind: resource.kind,
+      title: resource.title,
+      partIndex: partByKey.get(resource.key)!,
+      folderPathFallback: fallbackKeys.has(resource.key),
+    }));
 
   return freezeManifest({
     schemaVersion: 1,
@@ -660,7 +788,21 @@ export function buildManifestFromSnapshot(
       courseCode: validatedPlan.course.courseCode,
     },
     moduleDiscovery: validatedPlan.moduleDiscovery,
+    part: {
+      index: validatedPartPlan.index,
+      total: validatedPartPlan.total,
+    },
+    courseTotals: {
+      advertisedBytes: validatedPlan.advertisedBytes,
+      resourceCount: validatedPlan.resources.length,
+      unknownSizeCount: validatedPlan.resources.filter(
+        (resource) =>
+          resource.kind === "file" && resource.advertisedBytes === null,
+      ).length,
+      folderPathFallbackCount: validatedPlan.folderPathFallbackKeys.length,
+    },
     totals,
+    resourceCatalog,
     resources,
   });
 }
@@ -669,9 +811,10 @@ export function buildManifest(
   plan: unknown,
   outcomes: unknown,
   createdAt: unknown,
+  partPlan?: unknown,
 ): ArchiveManifest {
   return buildManifestFromSnapshot(
-    snapshotArchiveData(plan, outcomes, createdAt),
+    snapshotArchiveData(plan, outcomes, createdAt, partPlan),
   );
 }
 
@@ -683,7 +826,10 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     "canvasHost",
     "course",
     "moduleDiscovery",
+    "part",
+    "courseTotals",
     "totals",
+    "resourceCatalog",
     "resources",
   ]);
   if (
@@ -703,6 +849,81 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     name: text(valueOf(courseRecord, "name"), true),
     courseCode: text(valueOf(courseRecord, "courseCode"), true),
   };
+  const partRecord = exactRecord(valueOf(record, "part"), ["index", "total"]);
+  const part: ArchivePart = {
+    index: safeInteger(valueOf(partRecord, "index"), 1),
+    total: safeInteger(valueOf(partRecord, "total"), 1),
+  };
+  if (part.index > part.total) throw new TypeError("Invalid archive part");
+  const courseTotalsRecord = exactRecord(valueOf(record, "courseTotals"), [
+    "advertisedBytes",
+    "resourceCount",
+    "unknownSizeCount",
+    "folderPathFallbackCount",
+  ]);
+  const courseTotals: ArchiveCourseTotals = {
+    advertisedBytes: safeInteger(
+      valueOf(courseTotalsRecord, "advertisedBytes"),
+    ),
+    resourceCount: safeInteger(valueOf(courseTotalsRecord, "resourceCount")),
+    unknownSizeCount: safeInteger(
+      valueOf(courseTotalsRecord, "unknownSizeCount"),
+    ),
+    folderPathFallbackCount: safeInteger(
+      valueOf(courseTotalsRecord, "folderPathFallbackCount"),
+    ),
+  };
+  if (courseTotals.resourceCount > MAX_ARCHIVE_RESOURCES) {
+    throw new ArchiveSafetyError("Archive resource limit exceeded");
+  }
+  if (
+    courseTotals.unknownSizeCount > courseTotals.resourceCount ||
+    courseTotals.folderPathFallbackCount > courseTotals.resourceCount
+  ) {
+    throw new TypeError("Invalid course totals");
+  }
+  const resourceCatalog = exactArray(valueOf(record, "resourceCatalog")).map(
+    (value): ArchiveResourceCatalogEntry => {
+      const catalogRecord = exactRecord(value, [
+        "key",
+        "kind",
+        "title",
+        "partIndex",
+        "folderPathFallback",
+      ]);
+      const kind = valueOf(catalogRecord, "kind");
+      const partIndex = safeInteger(valueOf(catalogRecord, "partIndex"), 1);
+      const folderPathFallback = valueOf(catalogRecord, "folderPathFallback");
+      if (
+        !RESOURCE_KINDS.has(kind as ResourceKind) ||
+        partIndex > part.total ||
+        typeof folderPathFallback !== "boolean"
+      ) {
+        throw new TypeError("Invalid resource catalog");
+      }
+      return {
+        key: text(valueOf(catalogRecord, "key")),
+        kind: kind as ResourceKind,
+        title: text(valueOf(catalogRecord, "title"), true),
+        partIndex,
+        folderPathFallback,
+      };
+    },
+  );
+  const catalogKeys = new Set(resourceCatalog.map(({ key }) => key));
+  if (
+    catalogKeys.size !== resourceCatalog.length ||
+    resourceCatalog.length !== courseTotals.resourceCount ||
+    resourceCatalog.filter(({ folderPathFallback }) => folderPathFallback)
+      .length !== courseTotals.folderPathFallbackCount ||
+    (resourceCatalog.length > 0 &&
+      Array.from({ length: part.total }, (_, index) => index + 1).some(
+        (index) =>
+          !resourceCatalog.some(({ partIndex }) => partIndex === index),
+      ))
+  ) {
+    throw new TypeError("Invalid resource catalog");
+  }
   const rawResources = exactArray(valueOf(record, "resources"));
   if (rawResources.length > MAX_ARCHIVE_RESOURCES) {
     throw new ArchiveSafetyError("Archive resource limit exceeded");
@@ -752,6 +973,31 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     );
   });
   assertArchivePathSet(resources);
+  const catalogByKey = new Map(
+    resourceCatalog.map((resource) => [resource.key, resource]),
+  );
+  const expectedLocalKeys = resourceCatalog
+    .filter(({ partIndex }) => partIndex === part.index)
+    .map(({ key }) => key);
+  if (
+    resources.length !== expectedLocalKeys.length ||
+    resources.some((resource, index) => {
+      const catalog = catalogByKey.get(resource.key);
+      return (
+        resource.key !== expectedLocalKeys[index] ||
+        catalog === undefined ||
+        catalog.kind !== resource.kind ||
+        catalog.title !== resource.title ||
+        catalog.partIndex !== part.index ||
+        (catalog.folderPathFallback &&
+          (resource.kind !== "file" ||
+            resource.archivePath === null ||
+            !resource.archivePath.startsWith("files/unfiled/")))
+      );
+    })
+  ) {
+    throw new TypeError("Invalid local part resources");
+  }
   const totalsRecord = exactRecord(valueOf(record, "totals"), [
     "success",
     "failed",
@@ -797,7 +1043,8 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     }
   }
   if (
-    totals.advertisedBytes > MAX_ADVERTISED_BYTES ||
+    totals.archivedBytes > MAX_ARCHIVE_BYTES ||
+    totals.advertisedBytes > courseTotals.advertisedBytes ||
     Object.keys(calculated).some(
       (key) =>
         calculated[key as keyof typeof calculated] !==
@@ -813,7 +1060,10 @@ export function normalizeArchiveManifest(value: unknown): ArchiveManifest {
     canvasHost: CANVAS_HOST,
     course,
     moduleDiscovery: moduleDiscovery(valueOf(record, "moduleDiscovery")),
+    part,
+    courseTotals,
     totals,
+    resourceCatalog,
     resources: resources.map((resource) => ({
       key: resource.key,
       kind: resource.kind,
