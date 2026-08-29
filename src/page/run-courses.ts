@@ -12,8 +12,10 @@ import {
   MAX_ARCHIVE_RESOURCES,
   MAX_ARCHIVE_BYTES,
 } from "../shared/constants";
+import { partitionCoursePlan } from "./course-parts";
 import type {
   AggregateProgress,
+  CourseArchivePartPlan,
   CourseDiscoveryProgress,
   CoursePlan,
   CoursePlanFailureCategory,
@@ -36,8 +38,13 @@ export type CoursePlanFailure = Readonly<{
   category: CoursePlanFailureCategory;
 }>;
 
+export type PlannedCourse = Readonly<{
+  plan: CoursePlan;
+  parts: readonly CourseArchivePartPlan[];
+}>;
+
 export type ImmutableRunPlan = Readonly<{
-  courses: readonly CoursePlan[];
+  courses: readonly PlannedCourse[];
   failures: readonly CoursePlanFailure[];
   summary: Readonly<RunPlanSummary>;
 }>;
@@ -127,7 +134,7 @@ const progressForCourse =
     });
 
 const planSummary = (
-  courses: readonly CoursePlan[],
+  courses: readonly PlannedCourse[],
   failures: readonly CoursePlanFailure[],
   requestedCourseCount: number,
   requestedPackaging: PackagingMode,
@@ -135,7 +142,7 @@ const planSummary = (
   fallbackReason: PlanFallbackReason | null,
 ): RunPlanSummary => {
   const selected = courses.map(
-    ({ course, moduleDiscovery, advertisedBytes, resources }) => ({
+    ({ plan: { course, moduleDiscovery, advertisedBytes, resources } }) => ({
       courseId: course.id,
       moduleDiscovery,
       advertisedBytes,
@@ -196,7 +203,7 @@ export async function createRunPlan(options: {
     options;
   if (courses.length === 0)
     throw new MultiCourseSafetyError("No courses selected");
-  const plans: CoursePlan[] = [];
+  const plannedCourses: PlannedCourse[] = [];
   const failures: CoursePlanFailure[] = [];
   for (let index = 0; index < courses.length; index += 1) {
     const course = courses[index]!;
@@ -208,7 +215,13 @@ export async function createRunPlan(options: {
           `Course ${course.id} discovery returned a different course`,
         );
       }
-      plans.push(freezeCoursePlan(discovered));
+      const plan = freezeCoursePlan(discovered);
+      plannedCourses.push(
+        Object.freeze({
+          plan,
+          parts: partitionCoursePlan(plan),
+        }),
+      );
     } catch (error) {
       if (isAbort(error)) throw error;
       failures.push(
@@ -225,7 +238,7 @@ export async function createRunPlan(options: {
     });
   }
   const summaryBase = planSummary(
-    plans,
+    plannedCourses,
     failures,
     courses.length,
     requestedPackaging,
@@ -239,9 +252,27 @@ export async function createRunPlan(options: {
   ) {
     throw new MultiCourseSafetyError("Selected course totals overflow");
   }
+  if (
+    requestedPackaging === "combined" &&
+    plannedCourses.some(({ parts }) => parts.length > 1)
+  ) {
+    const summary = planSummary(
+      plannedCourses,
+      failures,
+      courses.length,
+      requestedPackaging,
+      "per-course",
+      "multipart-course",
+    );
+    return Object.freeze({
+      courses: Object.freeze(plannedCourses),
+      failures: Object.freeze(failures),
+      summary: Object.freeze(summary),
+    });
+  }
   if (requestedPackaging === "combined" && summaryBase.unknownSizeCount > 0) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -249,14 +280,14 @@ export async function createRunPlan(options: {
       "unknown-size-files",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
   const combinedEntryCount =
     COMBINED_CORE_ENTRY_COUNT +
-    COURSE_CORE_ENTRY_COUNT * plans.length +
+    COURSE_CORE_ENTRY_COUNT * plannedCourses.length +
     summaryBase.resourceCount;
   if (
     requestedPackaging === "combined" &&
@@ -265,7 +296,7 @@ export async function createRunPlan(options: {
       combinedEntryCount > CLASSIC_ZIP_ENTRY_LIMIT)
   ) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -273,7 +304,7 @@ export async function createRunPlan(options: {
       "combined-resource-limit-exceeded",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
@@ -283,7 +314,7 @@ export async function createRunPlan(options: {
     summaryBase.advertisedBytes > MAX_ARCHIVE_BYTES
   ) {
     const summary = planSummary(
-      plans,
+      plannedCourses,
       failures,
       courses.length,
       requestedPackaging,
@@ -291,13 +322,13 @@ export async function createRunPlan(options: {
       "combined-size-exceeded",
     );
     return Object.freeze({
-      courses: Object.freeze(plans),
+      courses: Object.freeze(plannedCourses),
       failures: Object.freeze(failures),
       summary: Object.freeze(summary),
     });
   }
   return Object.freeze({
-    courses: Object.freeze(plans),
+    courses: Object.freeze(plannedCourses),
     failures: Object.freeze(failures),
     summary: Object.freeze(summaryBase),
   });
@@ -331,7 +362,8 @@ export async function runCourses(options: {
   try {
     for (let index = 0; index < plan.courses.length; index += 1) {
       throwIfAborted(signal);
-      const coursePlan = plan.courses[index]!;
+      const plannedCourse = plan.courses[index]!;
+      const coursePlan = plannedCourse.plan;
       const courseProgress = progressForCourse(
         progress,
         coursePlan.course,
@@ -396,7 +428,7 @@ export async function runCourses(options: {
       });
       combined = {
         fileName: dependencies.combinedFileName(
-          plan.courses.map(({ course }) => course),
+          plan.courses.map(({ plan: { course } }) => course),
         ),
         manifest: result.manifest,
         zipBytes: result.zipBytes,

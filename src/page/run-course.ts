@@ -9,7 +9,7 @@ import {
 } from "../archive/manifest";
 import { isCanonicalArchivePath } from "../archive/paths";
 import { renderSavedPageHtml, sanitizePageFragment } from "../archive/sanitize";
-import { assertPilotSize } from "../canvas/discovery";
+import { assertCoursePlanSizes } from "../canvas/discovery";
 import { canvasEndpoint } from "../canvas/endpoints";
 import {
   CanvasBodySizeError,
@@ -95,7 +95,7 @@ export const freezeCoursePlan = (plan: CoursePlan): CoursePlan => {
     folderPathFallbackKeys: [...plan.folderPathFallbackKeys],
     advertisedBytes: plan.advertisedBytes,
   };
-  assertPilotSize(clone);
+  assertCoursePlanSizes(clone);
   if (clone.resources.length > MAX_ARCHIVE_RESOURCES) {
     throw new RunSafetyError("Archive resource limit exceeded");
   }

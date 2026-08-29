@@ -171,6 +171,7 @@ describe("createRunPlan", () => {
     expect(calls).toEqual(["discover:101", "discover:202"]);
     expect(Object.isFrozen(plan.courses)).toBe(true);
     expect(Object.isFrozen(plan.courses[0])).toBe(true);
+    expect(Object.isFrozen(plan.courses[0]?.parts)).toBe(true);
     expect(plan.summary).toMatchObject({
       requestedPackaging: "combined",
       effectivePackaging: "combined",
@@ -189,7 +190,7 @@ describe("createRunPlan", () => {
         moduleDiscovery: "disabled",
       }),
     ]);
-    expect(plan.courses[0]).not.toBe(sourcePlans.get(101));
+    expect(plan.courses[0]?.plan).not.toBe(sourcePlans.get(101));
   });
 
   it("falls back to per-course output before retrieval for unknown file sizes", async () => {
@@ -321,7 +322,7 @@ describe("createRunPlan", () => {
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
-  it("prefers the unknown-size fallback when combined ZIP entries also exceed capacity", async () => {
+  it("prefers multipart fallback when an unknown file is one of several parts", async () => {
     const counts = new Map([
       [101, 32_759],
       [202, 32_759],
@@ -352,13 +353,13 @@ describe("createRunPlan", () => {
 
     expect(plan.summary).toMatchObject({
       effectivePackaging: "per-course",
-      fallbackReason: "unknown-size-files",
+      fallbackReason: "multipart-course",
       unknownSizeCount: 1,
     });
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
   });
 
-  it("skips an oversized course and keeps later safe plans", async () => {
+  it("keeps a known individually oversized file in a dedicated ready part", async () => {
     const deps = baseDependencies(
       vi.fn(async (course) =>
         course.id === 101
@@ -373,15 +374,55 @@ describe("createRunPlan", () => {
       dependencies: deps,
     });
 
-    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.courses.map(({ plan: value }) => value.course.id)).toEqual([
+      101, 202,
+    ]);
+    expect(plan.courses[0]?.parts).toMatchObject([
+      { index: 1, total: 1, resourceKeys: ["file:101"] },
+    ]);
     expect(plan.summary).toMatchObject({
       requestedCourseCount: 2,
-      selected: [{ courseId: 202 }],
-      skipped: [{ courseId: 101, category: "size-limit" }],
-      advertisedBytes: 10,
-      resourceCount: 1,
+      selected: [{ courseId: 101 }, { courseId: 202 }],
+      skipped: [],
+      advertisedBytes: MAX_ARCHIVE_BYTES + 11,
+      resourceCount: 2,
     });
     expect(deps.buildCourseArchive).not.toHaveBeenCalled();
+  });
+
+  it("partitions an oversized aggregate and forces combined output to parts", async () => {
+    const deps = baseDependencies(
+      vi.fn(async (course) => ({
+        ...planFor(course, MAX_ARCHIVE_BYTES),
+        resources: [
+          ...planFor(course, MAX_ARCHIVE_BYTES).resources,
+          {
+            ...planFor(course, 1).resources[0]!,
+            key: `file:${course.id}:second`,
+            sourceId: `${course.id}2`,
+            archivePath: "files/second.bin",
+            sourceUrl: `https://frankfurtschool.instructure.com/files/${course.id}2/download`,
+          },
+        ],
+        advertisedBytes: MAX_ARCHIVE_BYTES + 1,
+      })),
+    );
+
+    const runPlan = await createRunPlan({
+      courses: courses.slice(0, 1),
+      requestedPackaging: "combined",
+      signal: new AbortController().signal,
+      dependencies: deps,
+    });
+
+    expect(runPlan.courses[0]?.parts.map((part) => part.resourceKeys)).toEqual([
+      ["file:101"],
+      ["file:101:second"],
+    ]);
+    expect(runPlan.summary).toMatchObject({
+      effectivePackaging: "per-course",
+      fallbackReason: "multipart-course",
+    });
   });
 
   it("classifies course-local failures and reports ordered progress", async () => {
@@ -442,7 +483,9 @@ describe("createRunPlan", () => {
       dependencies: deps,
     });
 
-    expect(plan.courses.map(({ course }) => course.id)).toEqual([202]);
+    expect(plan.courses.map(({ plan: value }) => value.course.id)).toEqual([
+      202,
+    ]);
     expect(plan.summary.skipped).toEqual([
       { courseId: 101, category: "safety-validation" },
     ]);

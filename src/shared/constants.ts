@@ -1,5 +1,7 @@
 export const CANVAS_ORIGIN = "https://frankfurtschool.instructure.com";
 export const CANVAS_PAGE_JSON_MAX_BYTES = 5 * 1024 * 1024;
+export const MAX_ARCHIVED_PAGE_BYTES =
+  CANVAS_PAGE_JSON_MAX_BYTES * 8 + 64 * 1024;
 export const PROTOCOL_VERSION = 1 as const;
 export const MAX_ARCHIVE_BYTES = 262_144_000;
 export const CLASSIC_ZIP_ENTRY_LIMIT = 65_535;

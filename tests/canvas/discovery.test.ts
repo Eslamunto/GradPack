@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  assertPilotSize,
+  assertCoursePlanSizes,
   discoverCoursePlan,
   PilotSizeError,
 } from "../../src/canvas/discovery";
@@ -1262,17 +1262,17 @@ describe("discoverCoursePlan", () => {
   });
 });
 
-describe("assertPilotSize", () => {
+describe("assertCoursePlanSizes", () => {
   it.each([
     [0, false],
     [262_144_000, false],
-    [262_144_001, true],
+    [262_144_001, false],
     [-1, true],
     [null, false],
     [1.5, true],
     [Number.NaN, true],
   ])("enforces advertised size %s", (size, rejected) => {
-    const assertion = () => assertPilotSize(planWithOneFile(size));
+    const assertion = () => assertCoursePlanSizes(planWithOneFile(size));
     if (rejected) expect(assertion).toThrow(PilotSizeError);
     else expect(assertion).not.toThrow();
   });
@@ -1287,14 +1287,14 @@ describe("assertPilotSize", () => {
     });
     plan.advertisedBytes = Number.MAX_SAFE_INTEGER;
 
-    expect(() => assertPilotSize(plan)).toThrow("overflow");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("overflow");
   });
 
   it("rejects a declared total that does not match the immutable file plan", () => {
     const plan = planWithOneFile(19);
     plan.advertisedBytes = 18;
 
-    expect(() => assertPilotSize(plan)).toThrow("total");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("total");
   });
 
   it("does not trust inherited file-size fields at the size boundary", () => {
@@ -1305,6 +1305,6 @@ describe("assertPilotSize", () => {
     }) as (typeof plan.resources)[number];
     plan.resources = [inherited];
 
-    expect(() => assertPilotSize(plan)).toThrow("invalid resource");
+    expect(() => assertCoursePlanSizes(plan)).toThrow("invalid resource");
   });
 });

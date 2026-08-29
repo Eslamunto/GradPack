@@ -18,7 +18,8 @@ export type PackagingMode = "combined" | "per-course";
 export type PlanFallbackReason =
   | "combined-size-exceeded"
   | "combined-resource-limit-exceeded"
-  | "unknown-size-files";
+  | "unknown-size-files"
+  | "multipart-course";
 
 export type ModuleDiscovery = "available" | "disabled";
 
@@ -103,6 +104,18 @@ export type CoursePlan = {
   resources: PlannedResource[];
   folderPathFallbackKeys: string[];
   advertisedBytes: number;
+};
+
+export type ResourcePartAssignment = {
+  resourceKey: string;
+  partIndex: number;
+};
+
+export type CourseArchivePartPlan = {
+  index: number;
+  total: number;
+  resourceKeys: string[];
+  resourceParts: ResourcePartAssignment[];
 };
 
 export type ResourceOutcome = PlannedResource & {

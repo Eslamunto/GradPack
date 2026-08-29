@@ -1,7 +1,6 @@
 import { canonicalArchivePath, safeArchivePath } from "../archive/paths";
 import {
   CANVAS_PAGE_JSON_MAX_BYTES,
-  MAX_ARCHIVE_BYTES,
   MAX_CONCURRENCY,
   CANVAS_ORIGIN,
 } from "../shared/constants";
@@ -580,7 +579,7 @@ const freezePlan = (plan: CoursePlan): CoursePlan => {
   return Object.freeze(plan);
 };
 
-export function assertPilotSize(plan: CoursePlan): void {
+export function assertCoursePlanSizes(plan: CoursePlan): void {
   if (!isRecord(plan) || !Array.isArray(own(plan, "resources"))) {
     throw new PilotSizeError("The plan contains an invalid resource");
   }
@@ -619,9 +618,6 @@ export function assertPilotSize(plan: CoursePlan): void {
     declaredTotal !== total
   ) {
     throw new PilotSizeError("Advertised size total does not match the plan");
-  }
-  if (total > MAX_ARCHIVE_BYTES) {
-    throw new PilotSizeError("Course exceeds the 250 MB pilot limit");
   }
 }
 
@@ -868,6 +864,6 @@ export async function discoverCoursePlan(
     folderPathFallbackKeys,
     advertisedBytes,
   };
-  assertPilotSize(plan);
+  assertCoursePlanSizes(plan);
   return freezePlan(plan);
 }
