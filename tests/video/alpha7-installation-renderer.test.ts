@@ -4,6 +4,7 @@ import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
 import {
   escapeXml,
   renderSceneSvg,
+  renderSyntheticChromeCaptureSvg,
   wrapWords,
 } from "../../scripts/video/render-alpha7-installation.mjs";
 
@@ -49,5 +50,17 @@ describe("Alpha 7 installation frame renderer", () => {
       expect(svg).toContain(`data-accent="${marker}"`);
       expect(svg).not.toContain("undefined");
     }
+  });
+
+  it("recreates Chrome installation states without personal browser data", () => {
+    const scene = scenes.find(({ id }) => id === "extensions-url")!;
+    const svg = renderSyntheticChromeCaptureSvg(scene);
+
+    expect(svg).toContain('width="1920" height="1080"');
+    expect(svg).toContain("chrome://extensions");
+    expect(svg).toContain("Extensions");
+    expect(svg).toContain("Developer mode");
+    expect(svg).not.toContain("/Users/");
+    expect(svg).not.toContain("@gmail");
   });
 });

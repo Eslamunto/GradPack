@@ -24,6 +24,44 @@ export const wrapWords = (value, limit) => {
   return lines;
 };
 
+const chromeStateBody = (scene) => {
+  if (scene.id === "extensions-url") {
+    return `<rect x="600" y="430" width="1050" height="360" rx="24" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><text x="670" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="42" font-weight="700" fill="#202124">Manage your extensions</text><text x="670" y="590" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#5f6368">Turn features on or off and review installed versions.</text><rect x="670" y="660" width="330" height="70" rx="35" fill="#e8f0fe"/><text x="835" y="705" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700" fill="#185abc">Chrome Web Store</text>`;
+  }
+  if (scene.id === "developer-mode") {
+    return `<rect x="600" y="410" width="1050" height="260" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><text x="680" y="505" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="42" font-weight="700" fill="#202124">Turn on Developer mode</text><text x="680" y="575" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#5f6368">The Load unpacked button will appear.</text><circle cx="1583" cy="257" r="72" fill="none" stroke="#f2b134" stroke-width="10"/>`;
+  }
+  if (scene.id === "remove-old") {
+    return `<rect x="600" y="350" width="1050" height="390" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><rect x="670" y="425" width="92" height="92" rx="22" fill="#2356d8"/><path d="M700 471h32M716 455v32" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/><text x="805" y="470" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="40" font-weight="700" fill="#202124">GradPack</text><text x="805" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" fill="#5f6368">0.1.0-alpha.6</text><rect x="1325" y="620" width="220" height="72" rx="36" fill="#ffffff" stroke="#1a73e8" stroke-width="3"/><text x="1435" y="666" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="700" fill="#1a73e8">Remove</text><circle cx="1435" cy="656" r="72" fill="none" stroke="#f2b134" stroke-width="10"/>`;
+  }
+  if (scene.id === "load-unpacked") {
+    return `<rect x="700" y="340" width="900" height="470" rx="30" fill="#ffffff" stroke="#dfe3eb" stroke-width="4"/><text x="780" y="440" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="42" font-weight="700" fill="#202124">Choose the extension folder</text><rect x="780" y="500" width="740" height="90" rx="20" fill="#f1f3f4"/><text x="830" y="558" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="32" fill="#3c4043">Documents/GradPack-Alpha-7</text><rect x="1245" y="680" width="275" height="76" rx="38" fill="#1a73e8"/><text x="1382" y="729" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="700" fill="#ffffff">Select folder</text><circle cx="1382" cy="718" r="78" fill="none" stroke="#f2b134" stroke-width="10"/>`;
+  }
+  return `<rect x="600" y="350" width="1050" height="390" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><rect x="670" y="425" width="92" height="92" rx="22" fill="#2356d8"/><path d="M700 471h32M716 455v32" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/><text x="805" y="470" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="40" font-weight="700" fill="#202124">GradPack</text><text x="805" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" fill="#5f6368">0.1.0-alpha.7</text><rect x="1350" y="435" width="110" height="52" rx="26" fill="#1a73e8"/><circle cx="1428" cy="461" r="21" fill="#ffffff"/><text x="805" y="640" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#188038">Enabled</text><circle cx="1410" cy="460" r="76" fill="none" stroke="#f2b134" stroke-width="10"/>`;
+};
+
+export const renderSyntheticChromeCaptureSvg = (scene) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+    <rect width="1920" height="1080" fill="#f1f3f4"/>
+    <rect width="1920" height="165" fill="#ffffff"/>
+    <circle cx="45" cy="42" r="12" fill="#ff5f57"/>
+    <circle cx="82" cy="42" r="12" fill="#ffbd2e"/>
+    <circle cx="119" cy="42" r="12" fill="#28c840"/>
+    <rect x="190" y="18" width="360" height="58" rx="18" fill="#e8eaed"/>
+    <text x="245" y="56" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" fill="#3c4043">Extensions</text>
+    <rect x="160" y="96" width="1600" height="52" rx="26" fill="#f1f3f4"/>
+    <text x="235" y="131" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="26" fill="#3c4043">chrome://extensions</text>
+    <rect x="0" y="165" width="430" height="915" fill="#ffffff"/>
+    <text x="90" y="275" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="40" font-weight="700" fill="#202124">Extensions</text>
+    <text x="90" y="380" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#1a73e8">My extensions</text>
+    <text x="90" y="455" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#5f6368">Keyboard shortcuts</text>
+    <text x="570" y="270" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="48" font-weight="700" fill="#202124">Extensions</text>
+    <text x="1270" y="270" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#3c4043">Developer mode</text>
+    <rect x="1540" y="233" width="86" height="48" rx="24" fill="${scene.id === "extensions-url" ? "#bdc1c6" : "#1a73e8"}"/>
+    <circle cx="${scene.id === "extensions-url" ? 1566 : 1600}" cy="257" r="20" fill="#ffffff"/>
+    ${chromeStateBody(scene)}
+  </svg>`;
+
 const textLines = (
   lines,
   { x, y, size = 42, gap = 58, color = "#17213b", anchor = "start" },
