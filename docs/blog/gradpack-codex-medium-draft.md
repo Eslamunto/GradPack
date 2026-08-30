@@ -1,6 +1,6 @@
 # I Was Tired of Downloading My MBA Coursework Manually—So I Built GradPack With Codex
 
-*How one repetitive student problem became an open-source Chrome extension, installation videos for non-technical users, and a bigger lesson about building with AI.*
+_How one repetitive student problem became an open-source Chrome extension, installation videos for non-technical users, and a bigger lesson about building with AI._
 
 As I moved closer to the end of my MBA at Frankfurt School, I started thinking about what would happen to all the knowledge I had accumulated in Canvas.
 
@@ -8,7 +8,7 @@ There were lecture slides, readings, files, course pages, and links spread acros
 
 The obvious solution was to download everything I wanted to keep.
 
-The problem was the word *everything*.
+The problem was the word _everything_.
 
 Doing it manually meant opening every course, moving through its modules, finding the useful pages and files, downloading them one by one, and then recreating some kind of sensible folder structure on my laptop. It was possible, but it was exactly the sort of repetitive task that is easy to postpone until it is too late.
 

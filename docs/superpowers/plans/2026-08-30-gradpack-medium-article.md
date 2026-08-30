@@ -26,6 +26,7 @@
 ### Task 1: Create the complete article draft
 
 **Files:**
+
 - Create: `docs/blog/gradpack-codex-medium-draft.md`
 - Reference: `docs/superpowers/specs/2026-08-30-gradpack-medium-article-design.md`
 - Reference: `README.md`
@@ -34,6 +35,7 @@
 - Reference: `GradPack-classmate-release-0.1.0-alpha.7/WATCH_FIRST.md`
 
 **Interfaces:**
+
 - Consumes: the approved title, subtitle, narrative arc, voice, trust boundaries, and call to action from the article design.
 - Produces: one publication-ready Markdown article containing the headline, subtitle, complete body, section headings, and closing exercise.
 
@@ -68,6 +70,7 @@
 ### Task 2: Verify factual accuracy and editorial quality
 
 **Files:**
+
 - Modify: `docs/blog/gradpack-codex-medium-draft.md`
 - Reference: `README.md`
 - Reference: `LICENSE`
@@ -75,6 +78,7 @@
 - Reference: `GradPack-classmate-release-0.1.0-alpha.7/SHARE_WITH_CLASSMATES.md`
 
 **Interfaces:**
+
 - Consumes: the complete article from Task 1 and the current project evidence.
 - Produces: a tightened article with every current-state and future-state claim clearly distinguished.
 
