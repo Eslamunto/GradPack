@@ -79,6 +79,7 @@ privacy-safe installation videos.
   be redistributed.
 - Distinguish automated development and packaging evidence from live acceptance
   by a broader student population.
+- Confirm that the GitHub repository is public before publishing the article.
 - Describe Chrome Web Store publication and broader Canvas compatibility as
   future plans, not completed capabilities.
 
@@ -93,6 +94,6 @@ repetitive personal or professional task and frame it for Codex:
 4. What is the smallest version that would already help?
 5. How will I test it in the real environment?
 
-The final note may invite readers to follow or explore the open-source GradPack
-project as a secondary call to action once the correct public repository link
-has been confirmed.
+The final note may invite readers to explore the open-source GradPack project
+as a secondary call to action. Link to `https://github.com/Eslamunto/GradPack`,
+but publish the article only after that repository has been made public.
