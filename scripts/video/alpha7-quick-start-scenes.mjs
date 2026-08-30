@@ -1,4 +1,8 @@
-import { VIDEO_VERSION, formatSrtTime } from "./alpha7-installation-scenes.mjs";
+import {
+  APPROVED_CAPTURE_SHA256,
+  VIDEO_VERSION,
+  formatSrtTime,
+} from "./alpha7-installation-scenes.mjs";
 
 export const QUICK_START_VIDEO_FILENAME = "GradPack-Alpha-7-Quick-Start.mp4";
 export const QUICK_START_CAPTION_FILENAME = "GradPack-Alpha-7-Quick-Start.srt";
@@ -48,7 +52,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-developer-mode",
     section: "Chrome setup",
-    durationSeconds: 7,
+    durationSeconds: 6,
     visual: "chrome-capture",
     capture: "chrome-developer-mode.png",
     title: "Open Chrome extensions",
@@ -60,9 +64,9 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-load",
     section: "Chrome setup",
-    durationSeconds: 8,
+    durationSeconds: 7,
     visual: "chrome-capture",
-    capture: "chrome-load-unpacked.png",
+    capture: "chrome-quick-load-enabled.png",
     title: "Load GradPack Alpha 7",
     screenLines: [
       "Load unpacked",
@@ -92,7 +96,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-choose",
     section: "Choose",
-    durationSeconds: 8,
+    durationSeconds: 7,
     visual: "gradpack",
     title: "Choose courses",
     screenLines: [
@@ -108,7 +112,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-review",
     section: "Review",
-    durationSeconds: 7,
+    durationSeconds: 6,
     visual: "download",
     title: "Review and confirm",
     screenLines: [
@@ -124,17 +128,21 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-trust",
     section: "Responsible use",
-    durationSeconds: 3,
+    durationSeconds: 7,
     visual: "privacy",
     title: "Your archives stay local",
     screenLines: [
-      "No telemetry",
-      "No cloud upload",
+      "Frankfurt School Canvas only",
+      "Uses your signed-in session",
+      "No telemetry/backend/upload",
       "Archives stay local",
-      "Personal study only",
+      "Personal study only — never redistribute",
+      "Detailed 5:40 guide for more help",
     ],
-    caption: "Archives stay local.\nPersonal study only.",
-    narration: "Keep archives for personal study only.",
+    caption:
+      "Frankfurt Canvas only. No telemetry/backend/upload.\nLocal study only. Never redistribute. Guide: 5:40.",
+    narration:
+      "No uploads. Keep archives local. Never redistribute. See the detailed guide.",
   },
 ]);
 
@@ -163,4 +171,10 @@ export const quickStartContent = Object.freeze({
   maximumDurationSeconds: 56,
   maximumVideoBytes: 25 * 1024 * 1024,
   expectedCaptionEndMilliseconds: 55_000,
+  captureSha256: Object.freeze({
+    "chrome-developer-mode.png":
+      APPROVED_CAPTURE_SHA256["chrome-developer-mode.png"],
+    "chrome-quick-load-enabled.png":
+      APPROVED_CAPTURE_SHA256["chrome-quick-load-enabled.png"],
+  }),
 });

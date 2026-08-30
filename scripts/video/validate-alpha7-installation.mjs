@@ -4,6 +4,7 @@ import { readFile, stat } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  APPROVED_CAPTURE_SHA256,
   CAPTION_FILENAME,
   PROHIBITED_TEXT_PATTERNS,
   VIDEO_FILENAME,
@@ -17,8 +18,8 @@ const SOURCE_COMMIT = "3ab29b97f8d2929c341a8d173d8b424b2fdf58e1";
 /** @typedef {{ codec_type?: string, codec_name?: string, width?: number, height?: number, pix_fmt?: string, avg_frame_rate?: string, sample_rate?: string }} ProbeStream */
 /** @typedef {{ streams?: ProbeStream[], format?: { duration?: string, size?: string } }} Probe */
 /** @typedef {{ minimumDurationSeconds?: number, maximumDurationSeconds?: number, maximumVideoBytes?: number }} MediaLimits */
-/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<{ id: string, caption: string }>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number }} ValidationContent */
-/** @typedef {{ sourceCommit: string, version: string, sceneCount: number, expectedDurationSeconds: number, video: { filename: string, bytes: number, sha256: string }, captions: { filename: string, sha256: string } }} BuildMetadata */
+/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<{ id: string, caption: string }>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number, captureSha256: Readonly<Record<string, string>> }} ValidationContent */
+/** @typedef {{ sourceCommit: string, version: string, sceneCount: number, expectedDurationSeconds: number, video: { filename: string, bytes: number, sha256: string }, captions: { filename: string, sha256: string }, captures: Record<string, string> }} BuildMetadata */
 /** @typedef {{ videoPath: string, captionPath: string, metadataPath: string, releaseDirectory: string, content?: ValidationContent }} ReleaseOptions */
 
 export const detailedValidationContent = Object.freeze({
@@ -32,6 +33,15 @@ export const detailedValidationContent = Object.freeze({
   maximumDurationSeconds: 342,
   maximumVideoBytes: 100 * 1024 * 1024,
   expectedCaptionEndMilliseconds: 340_000,
+  captureSha256: Object.freeze({
+    "chrome-extensions.png": APPROVED_CAPTURE_SHA256["chrome-extensions.png"],
+    "chrome-developer-mode.png":
+      APPROVED_CAPTURE_SHA256["chrome-developer-mode.png"],
+    "chrome-remove-old.png": APPROVED_CAPTURE_SHA256["chrome-remove-old.png"],
+    "chrome-load-unpacked.png":
+      APPROVED_CAPTURE_SHA256["chrome-load-unpacked.png"],
+    "chrome-installed.png": APPROVED_CAPTURE_SHA256["chrome-installed.png"],
+  }),
 });
 
 /**
@@ -83,6 +93,24 @@ export const validateProbe = (
 export const validateAudioPeak = (peakDecibels) => {
   if (!Number.isFinite(peakDecibels) || peakDecibels < -50) {
     throw new Error("narration audio is silent");
+  }
+};
+
+/**
+ * @param {Readonly<Record<string, string>>} actual
+ * @param {Readonly<Record<string, string>>} expected
+ */
+export const validateCaptureMetadata = (actual, expected) => {
+  /** @param {Readonly<Record<string, string>>} value */
+  const sortedEntries = (value) =>
+    Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+  if (
+    JSON.stringify(sortedEntries(actual)) !==
+    JSON.stringify(sortedEntries(expected))
+  ) {
+    throw new Error(
+      "capture metadata does not match approved synthetic captures",
+    );
   }
 };
 
@@ -271,6 +299,7 @@ export const validateRelease = async ({
   if ((await stat(videoPath)).size !== metadata.video.bytes) {
     throw new Error("video size does not match build metadata");
   }
+  validateCaptureMetadata(metadata.captures ?? {}, content.captureSha256);
 
   validatePrivacy(JSON.stringify(content.scenes));
   validatePrivacy(srt);

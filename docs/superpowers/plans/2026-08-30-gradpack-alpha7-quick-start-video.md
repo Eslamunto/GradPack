@@ -26,6 +26,17 @@
 - The extension ZIP and checksum must remain byte-for-byte unchanged.
 - `CI=true pnpm verify` must remain green.
 
+## Post-review hardening amendment
+
+- Rebalance scenes 4–9 to 6, 7, 6, 7, 6, and 7 seconds respectively while
+  retaining the exact 55-second total.
+- Generate a sixth synthetic composite capture that visibly shows both
+  **Load unpacked** and GradPack Alpha 7 enabled.
+- Bind all synthetic captures to approved SHA-256 hashes in the content and
+  build-metadata contracts; reject any unapproved capture bytes.
+- Use the seven-second final scene to show every required trust promise and
+  the detailed-guide fallback without clipping.
+
 ---
 
 ## File Structure
@@ -192,7 +203,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-developer-mode",
     section: "Chrome setup",
-    durationSeconds: 7,
+    durationSeconds: 6,
     visual: "chrome-capture",
     capture: "chrome-developer-mode.png",
     title: "Open Chrome extensions",
@@ -204,9 +215,9 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-load",
     section: "Chrome setup",
-    durationSeconds: 8,
+    durationSeconds: 7,
     visual: "chrome-capture",
-    capture: "chrome-load-unpacked.png",
+    capture: "chrome-quick-load-enabled.png",
     title: "Load GradPack Alpha 7",
     screenLines: [
       "Load unpacked",
@@ -236,7 +247,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-choose",
     section: "Choose",
-    durationSeconds: 8,
+    durationSeconds: 7,
     visual: "gradpack",
     title: "Choose courses",
     screenLines: [
@@ -252,7 +263,7 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-review",
     section: "Review",
-    durationSeconds: 7,
+    durationSeconds: 6,
     visual: "download",
     title: "Review and confirm",
     screenLines: [
@@ -268,17 +279,21 @@ export const quickStartScenes = Object.freeze([
   {
     id: "quick-trust",
     section: "Responsible use",
-    durationSeconds: 3,
+    durationSeconds: 7,
     visual: "privacy",
     title: "Your archives stay local",
     screenLines: [
-      "No telemetry",
-      "No cloud upload",
+      "Frankfurt School Canvas only",
+      "Uses your signed-in session",
+      "No telemetry/backend/upload",
       "Archives stay local",
-      "Personal study only",
+      "Personal study only — never redistribute",
+      "Detailed 5:40 guide for more help",
     ],
-    caption: "Archives stay local.\nPersonal study only.",
-    narration: "Archives stay local. Personal study only.",
+    caption:
+      "Frankfurt Canvas only. No telemetry/backend/upload.\nLocal study only. Never redistribute. Guide: 5:40.",
+    narration:
+      "No uploads. Keep archives local. Never redistribute. See the detailed guide.",
   },
 ]);
 
@@ -788,7 +803,7 @@ git commit -m "feat: support Alpha 7 quick-start video"
 
 **Interfaces:**
 
-- Consumes: quick-start builder/validator from Task 2, existing five synthetic Chrome captures, bundled `sharp`, Samantha, FFmpeg/FFprobe, and the Alpha 7 release ZIP/checksum.
+- Consumes: quick-start builder/validator from Task 2, six synthetic Chrome captures, bundled `sharp`, Samantha, FFmpeg/FFprobe, and the Alpha 7 release ZIP/checksum.
 - Produces: final 55-second MP4, SRT, metadata, nine frame/audio/segment files, and review contact sheet.
 
 - [ ] **Step 1: Snapshot every pre-existing release artifact**
@@ -811,7 +826,7 @@ node scripts/video/generate-alpha7-chrome-captures.mjs \
   --output-dir /private/tmp/gradpack-alpha7-quick-start/captures
 ```
 
-Expected: five 1920×1080 PNG captures and JSON reporting `captures: 5`.
+Expected: six 1920×1080 PNG captures and JSON reporting `captures: 6`.
 
 - [ ] **Step 3: Build with real Samantha narration outside the sandbox**
 

@@ -1,9 +1,11 @@
 // @vitest-environment node
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
 import { quickStartContent } from "../../scripts/video/alpha7-quick-start-scenes.mjs";
 import {
   assertNarrationDuration,
+  assertApprovedCapture,
   captureNameFor,
   concatFileContent,
   detailedContent,
@@ -82,5 +84,27 @@ describe("Alpha 7 installation video build contract", () => {
     expect(quickStartContent.captionFilename).not.toBe(
       detailedContent.captionFilename,
     );
+  });
+
+  it("rejects capture bytes outside the approved synthetic contract", () => {
+    const approved = Buffer.from("approved synthetic pixels");
+    const captureSha256 = {
+      "chrome-approved.png": createHash("sha256")
+        .update(approved)
+        .digest("hex"),
+    };
+    expect(() =>
+      assertApprovedCapture("chrome-approved.png", approved, captureSha256),
+    ).not.toThrow();
+    expect(() =>
+      assertApprovedCapture(
+        "chrome-approved.png",
+        Buffer.from("personal screenshot"),
+        captureSha256,
+      ),
+    ).toThrow("approved synthetic capture");
+    expect(() =>
+      assertApprovedCapture("missing.png", approved, captureSha256),
+    ).toThrow("approved synthetic capture");
   });
 });

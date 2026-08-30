@@ -60,32 +60,32 @@ Extract the ZIP to the neutral example location
 `Documents/GradPack-Alpha-7`. State that Chrome needs the extracted folder,
 not the ZIP.
 
-### Scene 4 — Chrome extensions (`16–23s`)
+### Scene 4 — Chrome extensions (`16–22s`)
 
 Open `chrome://extensions` and enable Developer mode. Use the approved
 privacy-safe synthetic Chrome surface and one unambiguous visual callout.
 
-### Scene 5 — Load Alpha 7 (`23–31s`)
+### Scene 5 — Load Alpha 7 (`22–29s`)
 
 Select **Load unpacked**, choose `Documents/GradPack-Alpha-7`, and confirm that
 GradPack `0.1.0-alpha.7` is enabled.
 
-### Scene 6 — Reconnect Canvas (`31–37s`)
+### Scene 6 — Reconnect Canvas (`29–35s`)
 
 Sign in to Frankfurt School Canvas, refresh once, keep the tab open, and open
 GradPack from Chrome.
 
-### Scene 7 — Choose courses (`37–45s`)
+### Scene 7 — Choose courses (`35–42s`)
 
 Choose individual synthetic courses or **Select all courses**, retain
 **One ZIP per course**, and start discovery.
 
-### Scene 8 — Review and retrieve (`45–52s`)
+### Scene 8 — Review and retrieve (`42–48s`)
 
 Review ready and skipped courses, confirm retrieval, and keep Canvas open until
 the expected ZIP count is complete.
 
-### Scene 9 — Trust and responsible use (`52–55s`)
+### Scene 9 — Trust and responsible use (`48–55s`)
 
 End with a compact reminder: archives remain on the student's computer and
 downloaded materials are for personal study only. Point viewers to the detailed
@@ -105,6 +105,11 @@ Reuse the existing video components:
 4. FFmpeg for fixed-duration H.264/AAC scene segments and concatenation; and
 5. the validator patterns for codecs, size, timing, captions, audio level,
    source commit, filenames, and privacy.
+
+The generator produces six deterministic Chrome captures, including one
+quick-start composite that shows both **Load unpacked** and the enabled Alpha 7
+card. Their SHA-256 hashes are part of the content contract, checked before
+embedding, recorded in build metadata, and rechecked during validation.
 
 The quick-start build must have independent output names and metadata so it
 cannot overwrite the detailed guide. Generated frames, audio, segments, browser
@@ -133,11 +138,12 @@ The final trust statement must preserve these promises:
 
 ## Error handling
 
-The build stops if a required synthetic capture is missing, narration is empty
-or exceeds its scene duration, FFmpeg or FFprobe fails, the source commit or
-version differs, output names collide with the long-form guide, the encoded
-runtime falls outside 54–56 seconds, the video exceeds 25 MiB, captions are
-malformed, the audio track is silent, or a privacy pattern matches.
+The build stops if a required synthetic capture is missing or differs from its
+approved SHA-256 hash, narration is empty or exceeds its scene duration, FFmpeg
+or FFprobe fails, the source commit or version differs, output names collide
+with the long-form guide, the encoded runtime falls outside 54–56 seconds, the
+video exceeds 25 MiB, captions are malformed, the audio track is silent, or a
+privacy pattern matches.
 
 No failed or partially validated MP4 or SRT is copied into the classmate
 release folder.

@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  APPROVED_CAPTURE_SHA256,
   CAPTION_FILENAME,
   VIDEO_FILENAME,
   VIDEO_VERSION,
@@ -18,7 +19,7 @@ import { renderSceneSvg } from "./render-alpha7-installation.mjs";
 /** @typedef {{ resize: (width: number, height: number, options: { fit: string }) => SharpPipeline, png: () => SharpPipeline, toFile: (path: string) => Promise<unknown> }} SharpPipeline */
 /** @typedef {(input: Buffer) => SharpPipeline} Sharp */
 /** @typedef {{ captureDirectory: string, workDirectory: string, sourceCommit: string }} BuildArguments */
-/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<Scene>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number }} VideoContent */
+/** @typedef {{ version: string, videoFilename: string, captionFilename: string, scenes: ReadonlyArray<Scene>, buildSrt: () => string, expectedDurationSeconds: number, minimumDurationSeconds: number, maximumDurationSeconds: number, maximumVideoBytes: number, expectedCaptionEndMilliseconds: number, captureSha256: Readonly<Record<string, string>> }} VideoContent */
 
 export const detailedContent = Object.freeze({
   version: VIDEO_VERSION,
@@ -31,6 +32,15 @@ export const detailedContent = Object.freeze({
   maximumDurationSeconds: 342,
   maximumVideoBytes: 100 * 1024 * 1024,
   expectedCaptionEndMilliseconds: 340_000,
+  captureSha256: Object.freeze({
+    "chrome-extensions.png": APPROVED_CAPTURE_SHA256["chrome-extensions.png"],
+    "chrome-developer-mode.png":
+      APPROVED_CAPTURE_SHA256["chrome-developer-mode.png"],
+    "chrome-remove-old.png": APPROVED_CAPTURE_SHA256["chrome-remove-old.png"],
+    "chrome-load-unpacked.png":
+      APPROVED_CAPTURE_SHA256["chrome-load-unpacked.png"],
+    "chrome-installed.png": APPROVED_CAPTURE_SHA256["chrome-installed.png"],
+  }),
 });
 
 /**
@@ -171,6 +181,23 @@ const sha256 = async (path) =>
     .update(await readFile(path))
     .digest("hex");
 
+/**
+ * @param {string} captureName
+ * @param {Buffer} captureBytes
+ * @param {Readonly<Record<string, string>>} approvedHashes
+ */
+export const assertApprovedCapture = (
+  captureName,
+  captureBytes,
+  approvedHashes,
+) => {
+  const actual = createHash("sha256").update(captureBytes).digest("hex");
+  if (!approvedHashes[captureName] || actual !== approvedHashes[captureName]) {
+    throw new Error(`${captureName} is not an approved synthetic capture`);
+  }
+  return actual;
+};
+
 /** @param {BuildArguments & { sharp: Sharp, content?: VideoContent }} options */
 export const buildVideo = async ({
   captureDirectory,
@@ -189,15 +216,23 @@ export const buildVideo = async ({
   );
 
   const segmentPaths = [];
+  const captureSha256 = {};
   for (const [index, scene] of content.scenes.entries()) {
     const prefix = `${String(index + 1).padStart(2, "0")}-${scene.id}`;
     const framePath = join(framesDirectory, `${prefix}.png`);
     const audioPath = join(audioDirectory, `${prefix}.aiff`);
     const segmentPath = join(segmentsDirectory, `${prefix}.mp4`);
     const captureName = captureNameFor(scene);
-    const captureDataUrl = captureName
-      ? `data:image/png;base64,${(await readFile(join(captureDirectory, captureName))).toString("base64")}`
-      : undefined;
+    let captureDataUrl;
+    if (captureName) {
+      const captureBytes = await readFile(join(captureDirectory, captureName));
+      captureSha256[captureName] = assertApprovedCapture(
+        captureName,
+        captureBytes,
+        content.captureSha256,
+      );
+      captureDataUrl = `data:image/png;base64,${captureBytes.toString("base64")}`;
+    }
 
     await sharp(Buffer.from(renderSceneSvg(scene, { captureDataUrl })))
       .resize(1920, 1080, { fit: "fill" })
@@ -246,6 +281,7 @@ export const buildVideo = async ({
       filename: content.captionFilename,
       sha256: await sha256(captionPath),
     },
+    captures: captureSha256,
   };
   const metadataPath = join(workDirectory, "build-metadata.json");
   await writeFile(

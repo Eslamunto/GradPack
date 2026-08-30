@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildSrt } from "../../scripts/video/alpha7-installation-scenes.mjs";
 import {
   validateAudioPeak,
+  validateCaptureMetadata,
   validateProbe,
   validateSrt,
 } from "../../scripts/video/validate-alpha7-installation.mjs";
@@ -82,6 +83,32 @@ describe("Alpha 7 installation video validator", () => {
         },
       ),
     ).toThrow("54-56 seconds");
+    expect(() =>
+      validateProbe(
+        { ...probe, format: { duration: "53.999", size: "1" } },
+        {
+          minimumDurationSeconds: 54,
+          maximumDurationSeconds: 56,
+          maximumVideoBytes: 25 * 1024 * 1024,
+        },
+      ),
+    ).toThrow("54-56 seconds");
+    expect(() =>
+      validateProbe(
+        {
+          ...probe,
+          format: {
+            duration: "55",
+            size: String(25 * 1024 * 1024 + 1),
+          },
+        },
+        {
+          minimumDurationSeconds: 54,
+          maximumDurationSeconds: 56,
+          maximumVideoBytes: 25 * 1024 * 1024,
+        },
+      ),
+    ).toThrow("size limit");
   });
 
   it("accepts nine quick-start cues ending at 55 seconds", async () => {
@@ -93,5 +120,16 @@ describe("Alpha 7 installation video validator", () => {
         expectedEndMilliseconds: 55_000,
       }),
     ).not.toThrow();
+  });
+
+  it("requires build metadata to match approved synthetic capture hashes", () => {
+    const approved = { "chrome-approved.png": "abc123" };
+    expect(() => validateCaptureMetadata(approved, approved)).not.toThrow();
+    expect(() =>
+      validateCaptureMetadata(
+        { "chrome-approved.png": "personal-pixels" },
+        approved,
+      ),
+    ).toThrow("capture metadata");
   });
 });

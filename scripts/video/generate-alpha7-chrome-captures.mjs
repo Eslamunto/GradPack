@@ -3,13 +3,17 @@ import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { scenes } from "./alpha7-installation-scenes.mjs";
+import { quickStartScenes } from "./alpha7-quick-start-scenes.mjs";
 import { renderSyntheticChromeCaptureSvg } from "./render-alpha7-installation.mjs";
 
 /** @typedef {{ resize: (width: number, height: number, options: { fit: string }) => SharpPipeline, png: () => SharpPipeline, toFile: (path: string) => Promise<unknown> }} SharpPipeline */
 /** @typedef {(input: Buffer) => SharpPipeline} Sharp */
 
 export const chromeCaptureScenes = Object.freeze(
-  scenes.filter(({ visual }) => visual === "chrome-capture"),
+  [
+    ...scenes.filter(({ visual }) => visual === "chrome-capture"),
+    quickStartScenes.find(({ id }) => id === "quick-load"),
+  ].filter((scene) => scene !== undefined),
 );
 
 /** @param {string[]} argv */

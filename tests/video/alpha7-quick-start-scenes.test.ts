@@ -17,6 +17,9 @@ describe("Alpha 7 quick-start video source", () => {
       "GradPack-Alpha-7-Quick-Start.srt",
     );
     expect(quickStartScenes).toHaveLength(9);
+    expect(
+      quickStartScenes.map(({ durationSeconds }) => durationSeconds),
+    ).toEqual([4, 6, 6, 6, 7, 6, 7, 6, 7]);
     expect(quickStartTotalDurationSeconds()).toBe(55);
     expect(new Set(quickStartScenes.map(({ id }) => id)).size).toBe(9);
     expect(
@@ -36,6 +39,12 @@ describe("Alpha 7 quick-start video source", () => {
     expect(source).toContain("Select all courses");
     expect(source).toContain("One ZIP per course");
     expect(source).toContain("Personal study only");
+    expect(source).toContain("Frankfurt School Canvas only");
+    expect(source).toContain("Uses your signed-in session");
+    expect(source).toContain("No telemetry/backend/upload");
+    expect(source).toContain("Archives stay local");
+    expect(source).toContain("never redistribute");
+    expect(source).toContain("Detailed 5:40 guide");
   });
 
   it("keeps natural narration inside every scene", () => {
@@ -56,7 +65,9 @@ describe("Alpha 7 quick-start video source", () => {
     ).toBe("Install GradPack and download Canvas courses offline.");
     expect(
       quickStartScenes.find(({ id }) => id === "quick-trust")?.narration,
-    ).toBe("Keep archives for personal study only.");
+    ).toBe(
+      "No uploads. Keep archives local. Never redistribute. See the detailed guide.",
+    );
   });
 
   it("builds nine monotonic SRT cues ending at 55 seconds", () => {
@@ -71,5 +82,9 @@ describe("Alpha 7 quick-start video source", () => {
     expect(quickStartContent.maximumDurationSeconds).toBe(56);
     expect(quickStartContent.maximumVideoBytes).toBe(25 * 1024 * 1024);
     expect(quickStartContent.expectedCaptionEndMilliseconds).toBe(55_000);
+    expect(Object.keys(quickStartContent.captureSha256).sort()).toEqual([
+      "chrome-developer-mode.png",
+      "chrome-quick-load-enabled.png",
+    ]);
   });
 });

@@ -4,6 +4,7 @@ import { scenes } from "../../scripts/video/alpha7-installation-scenes.mjs";
 import { quickStartScenes } from "../../scripts/video/alpha7-quick-start-scenes.mjs";
 import {
   escapeXml,
+  privacyBadgeLines,
   renderSceneSvg,
   renderSyntheticChromeCaptureSvg,
   wrapWords,
@@ -71,5 +72,30 @@ describe("Alpha 7 installation frame renderer", () => {
     expect(svg).toContain("Example Finance Course");
     expect(svg).toContain("Select all courses");
     expect(svg).not.toContain("undefined");
+  });
+
+  it("shows Load unpacked and the enabled Alpha 7 state together", () => {
+    const scene = quickStartScenes.find(({ id }) => id === "quick-load")!;
+    const svg = renderSyntheticChromeCaptureSvg(scene);
+    expect(scene.capture).toBe("chrome-quick-load-enabled.png");
+    expect(svg).toContain("Load unpacked");
+    expect(svg).toContain("Documents/GradPack-Alpha-7");
+    expect(svg).toContain("0.1.0-alpha.7");
+    expect(svg).toContain("Enabled");
+  });
+
+  it("wraps long trust promises inside privacy badges", () => {
+    expect(privacyBadgeLines("Frankfurt School Canvas only")).toEqual([
+      "Frankfurt School Canvas",
+      "only",
+    ]);
+    expect(
+      privacyBadgeLines("Personal study only — never redistribute"),
+    ).toEqual(["Personal study only —", "never redistribute"]);
+    expect(
+      privacyBadgeLines("Detailed 5:40 guide for more help").every(
+        (line) => line.length <= 24,
+      ),
+    ).toBe(true);
   });
 });

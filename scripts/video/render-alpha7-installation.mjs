@@ -35,6 +35,9 @@ export const wrapWords = (value, limit) => {
   return lines;
 };
 
+/** @param {string} value */
+export const privacyBadgeLines = (value) => wrapWords(value, 24);
+
 /** @param {Scene} scene */
 const chromeStateBody = (scene) => {
   if (scene.id === "extensions-url") {
@@ -48,6 +51,9 @@ const chromeStateBody = (scene) => {
   }
   if (scene.id === "load-unpacked") {
     return `<rect x="700" y="340" width="900" height="470" rx="30" fill="#ffffff" stroke="#dfe3eb" stroke-width="4"/><text x="780" y="440" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="42" font-weight="700" fill="#202124">Choose the extension folder</text><rect x="780" y="500" width="740" height="90" rx="20" fill="#f1f3f4"/><text x="830" y="558" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="32" fill="#3c4043">Documents/GradPack-Alpha-7</text><rect x="1245" y="680" width="275" height="76" rx="38" fill="#1a73e8"/><text x="1382" y="729" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="700" fill="#ffffff">Select folder</text><circle cx="1382" cy="718" r="78" fill="none" stroke="#f2b134" stroke-width="10"/>`;
+  }
+  if (scene.id === "quick-load") {
+    return `<rect x="600" y="330" width="1050" height="500" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><rect x="680" y="390" width="310" height="70" rx="35" fill="#1a73e8"/><text x="835" y="435" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="29" font-weight="700" fill="#ffffff">Load unpacked</text><circle cx="835" cy="425" r="75" fill="none" stroke="#f2b134" stroke-width="10"/><rect x="680" y="505" width="890" height="90" rx="20" fill="#f1f3f4"/><text x="730" y="562" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="31" fill="#3c4043">Documents/GradPack-Alpha-7</text><rect x="680" y="635" width="890" height="135" rx="22" fill="#f8f9fa" stroke="#dfe3eb" stroke-width="2"/><rect x="725" y="665" width="68" height="68" rx="17" fill="#2356d8"/><path d="M746 699h26M759 686v26" stroke="#ffffff" stroke-width="8" stroke-linecap="round"/><text x="830" y="690" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="34" font-weight="700" fill="#202124">GradPack 0.1.0-alpha.7</text><text x="830" y="738" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="29" fill="#188038">Enabled</text><rect x="1430" y="673" width="100" height="48" rx="24" fill="#1a73e8"/><circle cx="1503" cy="697" r="19" fill="#ffffff"/>`;
   }
   return `<rect x="600" y="350" width="1050" height="390" rx="26" fill="#ffffff" stroke="#dfe3eb" stroke-width="3"/><rect x="670" y="425" width="92" height="92" rx="22" fill="#2356d8"/><path d="M700 471h32M716 455v32" stroke="#ffffff" stroke-width="10" stroke-linecap="round"/><text x="805" y="470" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="40" font-weight="700" fill="#202124">GradPack</text><text x="805" y="520" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" fill="#5f6368">0.1.0-alpha.7</text><rect x="1350" y="435" width="110" height="52" rx="26" fill="#1a73e8"/><circle cx="1428" cy="461" r="21" fill="#ffffff"/><text x="805" y="640" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" fill="#188038">Enabled</text><circle cx="1410" cy="460" r="76" fill="none" stroke="#f2b134" stroke-width="10"/>`;
 };
@@ -126,10 +132,19 @@ const visualBody = (scene, captureDataUrl) => {
 
   if (scene.visual === "privacy") {
     const badges = lines
-      .map(
-        (line, index) =>
-          `<rect x="${260 + (index % 3) * 490}" y="${330 + Math.floor(index / 3) * 180}" width="430" height="120" rx="28" fill="#edf8f4" stroke="#53b48d" stroke-width="3"/><circle cx="${310 + (index % 3) * 490}" cy="${390 + Math.floor(index / 3) * 180}" r="22" fill="#53b48d"/><path d="M300 ${390 + Math.floor(index / 3) * 180}l8 9 15-20" fill="none" stroke="#ffffff" stroke-width="6"/><text x="${350 + (index % 3) * 490}" y="${402 + Math.floor(index / 3) * 180}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="30" font-weight="650" fill="#173d31">${escapeXml(line)}</text>`,
-      )
+      .map((line, index) => {
+        const x = 260 + (index % 3) * 490;
+        const y = 330 + Math.floor(index / 3) * 180;
+        const labelLines = privacyBadgeLines(line);
+        const labelStartY = labelLines.length === 1 ? y + 72 : y + 53;
+        const label = labelLines
+          .map(
+            (labelLine, labelIndex) =>
+              `<text x="${x + 90}" y="${labelStartY + labelIndex * 34}" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="650" fill="#173d31">${escapeXml(labelLine)}</text>`,
+          )
+          .join("");
+        return `<rect x="${x}" y="${y}" width="430" height="120" rx="28" fill="#edf8f4" stroke="#53b48d" stroke-width="3"/><circle cx="${x + 50}" cy="${y + 60}" r="22" fill="#53b48d"/><path d="M${x + 40} ${y + 60}l8 9 15-20" fill="none" stroke="#ffffff" stroke-width="6"/>${label}`;
+      })
       .join("");
     return `<g data-visual="privacy" data-accent="privacy-badge"><rect x="180" y="250" width="1560" height="560" rx="28" fill="#ffffff" stroke="#d9ddec" stroke-width="3"/>${badges}</g>`;
   }
