@@ -1,0 +1,465 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>
+      I Was Tired of Downloading My MBA Coursework Manually—So I Built GradPack
+      With Codex
+    </title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Georgia, "Times New Roman", serif;
+        color: #242424;
+        background: #ffffff;
+      }
+
+      body {
+        margin: 0;
+      }
+
+      article {
+        box-sizing: border-box;
+        max-width: 740px;
+        margin: 0 auto;
+        padding: 64px 28px 96px;
+        font-size: 21px;
+        line-height: 1.58;
+      }
+
+      h1,
+      h2 {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1f1f1f;
+      }
+
+      h1 {
+        margin: 0 0 14px;
+        font-size: 44px;
+        line-height: 1.12;
+        letter-spacing: -0.025em;
+      }
+
+      h2 {
+        margin: 52px 0 16px;
+        font-size: 29px;
+        line-height: 1.22;
+        letter-spacing: -0.01em;
+      }
+
+      .subtitle {
+        margin: 0 0 44px;
+        color: #626262;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        font-size: 22px;
+        line-height: 1.4;
+      }
+
+      p {
+        margin: 0 0 28px;
+      }
+
+      blockquote {
+        margin: 38px 0;
+        padding-left: 24px;
+        border-left: 3px solid #242424;
+        font-size: 27px;
+        font-style: italic;
+        line-height: 1.4;
+      }
+
+      ul,
+      ol {
+        margin: 0 0 30px;
+        padding-left: 32px;
+      }
+
+      li {
+        margin: 0 0 12px;
+        padding-left: 5px;
+      }
+
+      a {
+        color: inherit;
+        text-decoration-thickness: 1px;
+        text-underline-offset: 3px;
+      }
+
+      @media (max-width: 680px) {
+        article {
+          padding: 36px 20px 64px;
+          font-size: 19px;
+        }
+
+        h1 {
+          font-size: 36px;
+        }
+
+        h2 {
+          font-size: 26px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <article>
+      <h1>
+        I Was Tired of Downloading My MBA Coursework Manually—So I Built
+        GradPack With Codex
+      </h1>
+
+      <p class="subtitle">
+        <em
+          >How one repetitive student problem became an open-source Chrome
+          extension, installation videos for non-technical users, and a bigger
+          lesson about building with AI.</em
+        >
+      </p>
+
+      <p>
+        As I moved closer to the end of my MBA at Frankfurt School, I started
+        thinking about what would happen to all the knowledge I had accumulated
+        in Canvas.
+      </p>
+
+      <p>
+        There were lecture slides, readings, files, course pages, and links
+        spread across different modules and courses. I could access them now,
+        but that did not mean I would always have access to them.
+      </p>
+
+      <p>The obvious solution was to download everything I wanted to keep.</p>
+
+      <p>The problem was the word <em>everything</em>.</p>
+
+      <p>
+        Doing it manually meant opening every course, moving through its
+        modules, finding the useful pages and files, downloading them one by
+        one, and then recreating some kind of sensible folder structure on my
+        laptop. It was possible, but it was exactly the sort of repetitive task
+        that is easy to postpone until it is too late.
+      </p>
+
+      <p>
+        I did not begin with an ambition to build a software product. I began
+        with a much simpler thought:
+      </p>
+
+      <blockquote>There must be a better way to do this in one go.</blockquote>
+
+      <p>
+        That thought became
+        <a href="https://github.com/Eslamunto/GradPack">GradPack</a>, a Chrome
+        extension designed to turn the Canvas course materials a student can
+        already access into useful local archives.
+      </p>
+
+      <p>
+        More importantly, the process changed how I think about building with
+        AI.
+      </p>
+
+      <h2>Starting with the problem, not the technology</h2>
+
+      <p>
+        I did not approach Codex with a detailed technical specification. I
+        approached it with the frustration I understood firsthand.
+      </p>
+
+      <p>
+        I wanted to select my courses, preserve the available material locally,
+        and retain enough structure to make the archive useful later. I did not
+        want to click through every item manually. I also did not want the
+        solution to upload my coursework somewhere else or require me to provide
+        my password, cookies, or other credentials.
+      </p>
+
+      <p>Those boundaries mattered as much as the feature itself.</p>
+
+      <p>
+        The first useful step was therefore not asking Codex to “build a Chrome
+        extension.” It was explaining the situation:
+      </p>
+
+      <ul>
+        <li>
+          Canvas already knew which courses and materials I was allowed to
+          access.
+        </li>
+        <li>I was already signed in through Chrome.</li>
+        <li>The resulting files should stay on my computer.</li>
+        <li>
+          The archive should be understandable without needing Canvas later.
+        </li>
+        <li>
+          The tool should not bypass permissions or attempt to retrieve anything
+          unavailable to me.
+        </li>
+      </ul>
+
+      <p>
+        Once the problem was framed that way, Codex could help turn a vague
+        frustration into smaller questions we could actually solve.
+      </p>
+
+      <p>
+        How should the extension discover courses? What should happen when a
+        resource cannot be downloaded? Should several courses become one large
+        archive or separate files? How should the student review what will
+        happen before the download starts? What would make the result useful
+        offline rather than merely a pile of files?
+      </p>
+
+      <p>This was the real beginning of GradPack.</p>
+
+      <h2>It was not one magical prompt</h2>
+
+      <p>
+        Stories about building with AI sometimes compress the entire process
+        into a sentence: “I typed a prompt, and the app appeared.”
+      </p>
+
+      <p>
+        That was not my experience—and I think the real process is more
+        interesting.
+      </p>
+
+      <p>
+        GradPack developed through many rounds of discussion, implementation,
+        testing, and correction. I supplied the problem, priorities, and
+        decisions. Codex helped me inspect how Canvas behaved, propose options,
+        write the code, run tests, identify gaps, and document what we had
+        learned.
+      </p>
+
+      <p>
+        We began narrowly. The early pilot focused on saving one accessible
+        course at a time. That gave us a smaller real-world workflow to
+        understand before expanding it.
+      </p>
+
+      <p>Then the questions became more demanding.</p>
+
+      <p>
+        Canvas is not simply a folder full of downloadable files. A course may
+        organize material through modules, pages, files, and external links.
+        Some sections may be disabled. Some resources may be unavailable. A
+        signed-in session can expire, a browser tab can move, and a large course
+        may not fit comfortably into one archive.
+      </p>
+
+      <p>
+        Each discovery forced us to make a product decision rather than merely
+        add more code.
+      </p>
+
+      <p>
+        GradPack eventually grew to let a student select one or more displayed
+        courses, including completed ones, and choose a combined archive or one
+        archive per course. Before retrieving the material, it checks the
+        selected courses and presents a review. Courses that are ready can
+        continue; those that cannot be handled safely are clearly marked instead
+        of silently disappearing.
+      </p>
+
+      <p>
+        The downloaded archive includes an offline interface for navigating the
+        preserved material and an archive status that records what succeeded,
+        what remained an external link, and what could not be retrieved. If some
+        courses do not finish, the student can retry those courses without
+        repeating the successful work.
+      </p>
+
+      <p>
+        These details may sound less exciting than generating an app in one
+        prompt. But they are the difference between a demo and something another
+        person might trust with a real task.
+      </p>
+
+      <h2>Why local-first and open source mattered</h2>
+
+      <p>
+        Coursework can contain personal, licensed, or institution-specific
+        material. That made the architecture a question of trust.
+      </p>
+
+      <p>
+        GradPack uses the Canvas session already open in the student’s browser
+        and works only with material that session can access. The current pilot
+        has no analytics, telemetry, backend, or cloud upload. The archive is
+        generated locally and downloaded to the student’s computer.
+      </p>
+
+      <p>
+        This does not give students new access or bypass Canvas controls. It
+        helps them preserve material they can already view, for their own
+        personal study. The responsibility not to redistribute course content
+        remains important.
+      </p>
+
+      <p>
+        I also chose to make GradPack an open-source project under the Apache
+        2.0 license. That means the software does not have to be a black box.
+        Others can inspect how it works, question its decisions, report
+        problems, and eventually contribute improvements.
+      </p>
+
+      <p>
+        For a tool built around preserving personal access to educational
+        material, transparency should be part of the product—not an
+        afterthought.
+      </p>
+
+      <h2>Working software was not enough</h2>
+
+      <p>
+        Once the extension worked, I encountered another problem: installing an
+        unpublished Chrome extension is not obvious to a non-technical user.
+      </p>
+
+      <p>
+        The current GradPack pilot is installed manually. A classmate has to
+        extract the correct ZIP file, open Chrome’s extensions page, enable
+        Developer mode, choose <strong>Load unpacked</strong>, select the
+        extracted folder rather than the ZIP, sign in to Canvas, and keep the
+        Canvas tab open while GradPack works.
+      </p>
+
+      <p>
+        None of those steps is especially difficult once you have seen them. But
+        asking a classmate to follow unfamiliar browser instructions from a
+        technical document creates unnecessary friction.
+      </p>
+
+      <p>So Codex helped me work on the onboarding as well as the software.</p>
+
+      <p>
+        We created a short quick-start video and a slower, detailed installation
+        guide with captions. The walkthroughs use recreated, privacy-safe
+        screens rather than recordings of my real Canvas account. They contain
+        no real course names, student identity, or Canvas URLs. Written
+        installation and troubleshooting guidance accompany the videos for
+        anyone who prefers to read.
+      </p>
+
+      <p>
+        This part of the project taught me an important lesson: a solution is
+        not finished when it works for the person who built it. It becomes
+        useful when the intended user can understand it, install it, and recover
+        when something goes wrong.
+      </p>
+
+      <p>
+        For technical builders, documentation and onboarding are often treated
+        as the final layer. For non-technical users, they are part of the
+        product itself.
+      </p>
+
+      <h2>Where GradPack stands today</h2>
+
+      <p>
+        GradPack is currently an alpha classmate pilot for Frankfurt School
+        students using Canvas. It is distributed as an unpacked Chrome extension
+        and is not yet available through the Chrome Web Store.
+      </p>
+
+      <p>
+        That distinction matters. Automated tests and a carefully prepared
+        installation bundle provide useful evidence, but they are not the same
+        as broad real-world acceptance. The next learning will come from
+        classmates trying the extension in their own signed-in Canvas
+        environments and reporting privacy-safe feedback.
+      </p>
+
+      <p>
+        The future plan is to make installation much easier by publishing
+        GradPack through the Chrome Web Store. I also want to keep improving the
+        offline archive experience and learn where the current workflow confuses
+        or fails real students.
+      </p>
+
+      <p>
+        Frankfurt School is the starting point because it is the environment and
+        student need I know. Canvas, however, is used by many educational
+        institutions. If the pilot proves useful and the differences between
+        institutions can be handled safely, GradPack could eventually support
+        other students using the same platform.
+      </p>
+
+      <p>
+        That is a direction, not a promise. Expanding responsibly will require
+        testing against real institutional configurations, respecting access
+        boundaries, and avoiding the assumption that every Canvas environment
+        behaves identically.
+      </p>
+
+      <h2>The bigger lesson: frame one problem well</h2>
+
+      <p>GradPack began with a task I was avoiding.</p>
+
+      <p>
+        I did not need to know every component of a Chrome extension before
+        starting. I needed to understand my own problem well enough to describe
+        the desired outcome and recognize the decisions that mattered.
+      </p>
+
+      <p>
+        Codex reduced the distance between that understanding and working
+        software. It could investigate, propose, implement, test, and explain at
+        a speed I could not have achieved alone. But the collaboration still
+        depended on context, judgment, and real-world verification from me.
+      </p>
+
+      <p>
+        If you are curious about building with Codex but do not consider
+        yourself technical, I would not begin by searching for an app idea. I
+        would begin by noticing repetition.
+      </p>
+
+      <p>Ask yourself:</p>
+
+      <ol>
+        <li>
+          <strong>What repeatedly frustrates me?</strong> Look for a task you
+          delay because it is tedious, fragmented, or easy to get wrong.
+        </li>
+        <li>
+          <strong>What outcome do I actually want?</strong> Describe the
+          finished result rather than guessing which technology should create
+          it.
+        </li>
+        <li>
+          <strong>What must the solution protect or avoid?</strong> Think about
+          privacy, permissions, cost, reliability, and the people affected.
+        </li>
+        <li>
+          <strong>What is the smallest version that would already help?</strong>
+          A narrow real solution teaches more than an ambitious imaginary
+          platform.
+        </li>
+        <li>
+          <strong>How will I test it in reality?</strong> A local demonstration
+          is a beginning. The real environment and intended users provide the
+          evidence that matters.
+        </li>
+      </ol>
+
+      <p>
+        Then bring that framed problem to Codex and work through it as a
+        conversation.
+      </p>
+
+      <p>
+        You may not end up building a Chrome extension. You may create a small
+        script, a better workflow, a personal tool, or simply a clearer
+        understanding of what is possible.
+      </p>
+
+      <p>
+        But you will be starting in the right place: not with AI looking for a
+        purpose, but with a real problem worth solving.
+      </p>
+    </article>
+  </body>
+</html>
